@@ -1,0 +1,2 @@
+def build(bld):
+    bld.add_incpaths(bld.srcnode.find_dir('modules/DroneCAN/libcanard').abspath())
