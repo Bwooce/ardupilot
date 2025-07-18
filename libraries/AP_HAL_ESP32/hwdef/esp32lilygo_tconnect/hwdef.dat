@@ -1,0 +1,15 @@
+# ArduPilot Hardware Definition for the LilyGO T-Connect
+#
+
+define HAL_NUM_CAN_IFACES 1
+
+# CAN pins
+CAN_TX_1=4
+CAN_RX_1=5
+
+# APA102 LED pins
+APA102_DATA=8
+APA102_CLOCK=3
+
+# Boot button
+KEY_BOOT=0

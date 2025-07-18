@@ -1,0 +1,25 @@
+#
+# waf script for board esp32lilygo_tconnect
+#
+
+import os
+from waflib.Errors import WafError
+
+def configure(cfg):
+    if not cfg.env.AP_PROGRAM_AS_STLIB:
+        raise WafError('ESP32 boards must be built with --program-as-static-library')
+
+def build(bld):
+    # build static library
+    bld.stlib(
+        target='ardupilot',
+        features='cxx',
+        source=bld.env.AP_STATIC_SRCS,
+        use='A_SHARED',
+    )
+
+    # build final elf
+    bld.esp32_program(
+        target='ardupilot.elf',
+        use='ardupilot',
+    )
