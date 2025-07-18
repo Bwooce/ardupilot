@@ -85,6 +85,16 @@ def configure(cfg):
 
     #env.append_value('GIT_SUBMODULES', 'esp_idf')
 
+    # pass defines to cmake
+    for d in env.DEFINES:
+        if '=' in d:
+            key, val = d.split('=', 1)
+            env.append_value('INCLUDES', '-D%s=%s' % (key, val))
+        else:
+            env.append_value('INCLUDES', '-D%s=1' % d)
+    
+    env.append_value('INCLUDES', '-I%s' % os.path.join(env.SRCROOT, 'libraries/AP_HAL_ESP32'))
+
 # delete the output sdkconfig file when the input defaults changes. we take the
 # stamp as the output so we can compute the path to the sdkconfig, yet it
 # doesn't have to exist when we're done.
