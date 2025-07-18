@@ -1,5 +1,3 @@
-
-
 import os
 import sys
 
@@ -41,4 +39,3 @@ if __name__ == '__main__':
 
     eh = ESP32HWDef(args.outdir, args.hwdef)
     sys.exit(eh.run())
-
