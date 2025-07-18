@@ -117,6 +117,8 @@ target_link_libraries(${elf_file}
                 idf::esp_timer
                 )
 
+target_compile_options(${elf_file} PRIVATE "-include" "${CMAKE_BINARY_DIR}/hwdef.h")
+
 # Attach additional targets to the executable file for flashing,
 # linker script generation, partition_table generation, etc.
 idf_build_executable(${elf_file})

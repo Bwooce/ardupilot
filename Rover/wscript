@@ -2,6 +2,7 @@
 # encoding: utf-8
 
 def build(bld):
+    bld.define('AP_AIRSPEED_ENABLED', 0)
     vehicle = bld.path.name
     bld.ap_stlib(
         name=vehicle + '_libs',
