@@ -1100,6 +1100,10 @@ class sitl_periph_can_to_serial(sitl_periph):
 class esp32(Board):
     abstract = True
     toolchain = 'xtensa-esp32-elf'
+    def __init__(self):
+        super().__init__()
+        self.with_can = True
+
     def configure_env(self, cfg, env):
         env.BOARD_CLASS = "ESP32"
 
