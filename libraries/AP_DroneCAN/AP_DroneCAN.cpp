@@ -31,9 +31,7 @@
 #include <AP_Baro/AP_Baro_DroneCAN.h>
 #include <AP_Vehicle/AP_Vehicle.h>
 #include <AP_BattMonitor/AP_BattMonitor_DroneCAN.h>
-#if AP_AIRSPEED_ENABLED
 #include <AP_Airspeed/AP_Airspeed_DroneCAN.h>
-#endif
 #include <AP_OpticalFlow/AP_OpticalFlow_HereFlow.h>
 #include <AP_RangeFinder/AP_RangeFinder_DroneCAN.h>
 #include <AP_RCProtocol/AP_RCProtocol_DroneCAN.h>
@@ -42,9 +40,7 @@
 #include <AP_GPS/AP_GPS.h>
 #include <AP_BattMonitor/AP_BattMonitor_DroneCAN.h>
 #include <AP_Compass/AP_Compass_DroneCAN.h>
-#if AP_AIRSPEED_ENABLED
 #include <AP_Airspeed/AP_Airspeed_DroneCAN.h>
-#endif
 #include <AP_Proximity/AP_Proximity_DroneCAN.h>
 #include <SRV_Channel/SRV_Channel.h>
 #include <AP_ADSB/AP_ADSB.h>
@@ -385,9 +381,7 @@ void AP_DroneCAN::init(uint8_t driver_index, bool enable_filters)
 #endif
     subscribed = subscribed && AP_BattMonitor_DroneCAN::subscribe_msgs(this);
 #if AP_AIRSPEED_DRONECAN_ENABLED
-    #if AP_AIRSPEED_ENABLED
     subscribed = subscribed && AP_Airspeed_DroneCAN::subscribe_msgs(this);
-#endif
 #endif
 #if AP_OPTICALFLOW_HEREFLOW_ENABLED
     subscribed = subscribed && AP_OpticalFlow_HereFlow::subscribe_msgs(this);

@@ -19,29 +19,6 @@ import re
 import pickle
 import subprocess
 
-sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../libraries/AP_HAL_ESP32/hwdef/scripts'))
-import esp32_hwdef
-
-def generate_hwdef_h(env):
-    '''run esp32_hwdef.py'''
-    hwdef_dir = os.path.join(env.SRCROOT, 'libraries/AP_HAL_ESP32/hwdef')
-    env.HWDEF = os.path.join(hwdef_dir, env.BOARD, 'hwdef.dat')
-
-    hwdef_out = env.BUILDROOT
-    if not os.path.exists(hwdef_out):
-        os.mkdir(hwdef_out)
-
-    hwdef_list = [env.HWDEF]
-    if env.HWDEF_EXTRA:
-        hwdef_list.append(env.HWDEF_EXTRA)
-
-    eh = esp32_hwdef.ESP32HWDef(
-        outdir=hwdef_out,
-        hwdef=hwdef_list,
-        quiet=False,
-    )
-    return eh.run()
-
 def configure(cfg):
     mcu_esp32s3 = True if (cfg.variant[0:7] == "esp32s3") else False
     target = "esp32s3" if mcu_esp32s3 else "esp32"
@@ -73,8 +50,6 @@ def configure(cfg):
     except:
         env.IDF = cfg.srcnode.abspath()+"/modules/esp_idf"
     print("USING EXPRESSIF IDF:"+str(env.IDF))
-
-    generate_hwdef_h(env)
 
     #env.append_value('GIT_SUBMODULES', 'esp_idf')
 

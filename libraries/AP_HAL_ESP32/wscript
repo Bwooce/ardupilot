@@ -2,7 +2,6 @@
 import os
 
 def build(bld):
-    bld.define('HAL_ENABLE_DRONECAN_DRIVERS', 1)
     bld.ap_library(
         name = 'HAL_ESP32',
         srcs = [
