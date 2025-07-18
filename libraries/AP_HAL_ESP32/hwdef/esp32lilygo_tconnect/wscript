@@ -15,7 +15,7 @@ def build(bld):
         target='ardupilot',
         features='cxx',
         source=bld.env.AP_STATIC_SRCS,
-        use='A_SHARED',
+        use='A_SHARED AP_DroneCAN',
     )
 
     # build final elf

@@ -101,6 +101,7 @@ add_custom_target(showinc ALL
 #ENDIF()
 
 # Link the static libraries to the executable
+target_include_directories(${elf_file} PRIVATE ${CMAKE_SOURCE_DIR}/../../../../modules/DroneCAN/libcanard)
 target_link_libraries(${elf_file}
                 idf::freertos
                 idf::fatfs
@@ -120,6 +121,8 @@ target_link_libraries(${elf_file}
 # Attach additional targets to the executable file for flashing,
 # linker script generation, partition_table generation, etc.
 idf_build_executable(${elf_file})
+
+
 
 # wrap malloc to ensure memory is zeroed
 target_link_options(${elf_file} PRIVATE "-Wl,--wrap,malloc")

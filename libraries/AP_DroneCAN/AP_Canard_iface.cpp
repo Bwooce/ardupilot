@@ -258,8 +258,11 @@ void CanardInterface::processTx(bool raw_commands_only = false) {
                 if (!iface_down) {
                     break;
                 } else {
+#if CANARD_MULTI_IFACE
                     txf->iface_mask &= ~(1U<<iface);
+#endif
                 }
+            #if CANARD_MULTI_IFACE
             } else if ((txf->iface_mask & (1U<<iface)) && (AP_HAL::micros64() < txf->deadline_usec)) {
                 // try sending to interfaces, clearing the mask if we succeed
                 if (ifaces[iface]->send(txmsg, txf->deadline_usec, 0) > 0) {
@@ -273,6 +276,17 @@ void CanardInterface::processTx(bool raw_commands_only = false) {
                     }
                 }
             }
+#else
+            } else if (AP_HAL::micros64() < txf->deadline_usec) {
+                // try sending to interfaces
+                if (ifaces[iface]->send(txmsg, txf->deadline_usec, 0) <= 0) {
+                    // if we fail to send then we try sending on next interface
+                    if (!iface_down) {
+                        break;
+                    }
+                }
+            }
+#endif
             // look at next transfer
             txq = txq->next;
             if (txq == nullptr) {

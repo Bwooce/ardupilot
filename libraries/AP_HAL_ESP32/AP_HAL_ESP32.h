@@ -5,3 +5,5 @@
 
 
 #include "HAL_ESP32_Class.h"
+
+#define HAL_CANIface ESP32::CANIface

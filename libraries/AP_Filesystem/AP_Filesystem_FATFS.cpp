@@ -2,6 +2,7 @@
   ArduPilot filesystem interface for systems using the FATFS filesystem
  */
 #include "AP_Filesystem_config.h"
+#include "AP_Filesystem_FATFS.h"
 
 #if AP_FILESYSTEM_FATFS_ENABLED
 
@@ -12,9 +13,10 @@
 #include <AP_Common/time.h>
 
 #include <ff.h>
+#if HAL_OS_CHIBIOS
 #include <AP_HAL_ChibiOS/sdcard.h>
-#include <GCS_MAVLink/GCS.h>
 #include <AP_HAL_ChibiOS/hwdef/common/stm32_util.h>
+#endif
 
 #if 0
 #define debug(fmt, args ...)  do {printf("%s:%d: " fmt "\n", __FUNCTION__, __LINE__, ## args); } while(0)
@@ -195,6 +197,7 @@ static int fatfs_to_errno(FRESULT Result)
  */
 static bool remount_file_system(void)
 {
+#if HAL_OS_CHIBIOS
     EXPECT_DELAY_MS(3000);
     if (!remount_needed) {
         sdcard_stop();
@@ -225,6 +228,9 @@ static bool remount_file_system(void)
         }
     }
     return true;
+#else
+    return false;
+#endif
 }
 
 int AP_Filesystem_FATFS::open(const char *pathname, int flags, bool allow_absolute_path)
@@ -341,9 +347,13 @@ int32_t AP_Filesystem_FATFS::read(int fd, void *buf, uint32_t count)
     do {
         UINT size = 0;
         UINT n = bytes;
+        #if HAL_OS_CHIBIOS
         if (!mem_is_dma_safe(buf, count, true)) {
             n = MIN(bytes, MAX_IO_SIZE);
         }
+#else
+        n = MIN(bytes, MAX_IO_SIZE);
+#endif
         res = f_read(fh, (void *)buf, n, &size);
         if (res != FR_OK) {
             errno = fatfs_to_errno((FRESULT)res);
@@ -386,9 +396,13 @@ int32_t AP_Filesystem_FATFS::write(int fd, const void *buf, uint32_t count)
     UINT total = 0;
     do {
         UINT n = bytes;
+        #if HAL_OS_CHIBIOS
         if (!mem_is_dma_safe(buf, count, true)) {
             n = MIN(bytes, MAX_IO_SIZE);
         }
+#else
+        n = MIN(bytes, MAX_IO_SIZE);
+#endif
         UINT size = 0;
         res = f_write(fh, buf, n, &size);
         if (res == FR_DISK_ERR && RETRY_ALLOWED()) {
@@ -602,7 +616,7 @@ int AP_Filesystem_FATFS::rename(const char *oldpath, const char *newpath)
   wrapper structure to associate a dirent with a DIR
  */
 struct DIR_Wrapper {
-    DIR d; // must be first structure element
+    FF_DIR d; // must be first structure element
     struct dirent de;
 };
 
@@ -634,11 +648,10 @@ void *AP_Filesystem_FATFS::opendir(const char *pathdir)
     return &ret->d;
 }
 
-struct dirent *AP_Filesystem_FATFS::readdir(void *dirp_void)
+struct dirent *AP_Filesystem_FATFS::readdir(void *dirp)
 {
     FS_CHECK_ALLOWED(nullptr);
     WITH_SEMAPHORE(sem);
-    DIR *dirp = (DIR *)dirp_void;
 
     struct DIR_Wrapper *d = (struct DIR_Wrapper *)dirp;
     if (!d) {
@@ -650,7 +663,7 @@ struct dirent *AP_Filesystem_FATFS::readdir(void *dirp_void)
     int res;
 
     d->de.d_name[0] = 0;
-    res = f_readdir(dirp, &fno);
+    res = f_readdir(&d->d, &fno);
     if (res != FR_OK || fno.fname[0] == 0) {
         errno = fatfs_to_errno((FRESULT)res);
         return nullptr;
@@ -666,9 +679,8 @@ struct dirent *AP_Filesystem_FATFS::readdir(void *dirp_void)
     return &d->de;
 }
 
-int AP_Filesystem_FATFS::closedir(void *dirp_void)
+int AP_Filesystem_FATFS::closedir(void *dirp)
 {
-    DIR *dirp = (DIR *)dirp_void;
     FS_CHECK_ALLOWED(-1);
     WITH_SEMAPHORE(sem);
 
@@ -677,7 +689,7 @@ int AP_Filesystem_FATFS::closedir(void *dirp_void)
         errno = EINVAL;
         return -1;
     }
-    int res = f_closedir (dirp);
+    int res = f_closedir (&d->d);
     delete d;
     if (res != FR_OK) {
         errno = fatfs_to_errno((FRESULT)res);
@@ -792,9 +804,13 @@ bool AP_Filesystem_FATFS::set_mtime(const char *filename, const uint32_t mtime_s
 */
 bool AP_Filesystem_FATFS::retry_mount(void)
 {
+#if HAL_OS_CHIBIOS
     FS_CHECK_ALLOWED(false);
     WITH_SEMAPHORE(sem);
     return sdcard_retry();
+#else
+    return false;
+#endif
 }
 
 /*
@@ -802,8 +818,10 @@ bool AP_Filesystem_FATFS::retry_mount(void)
 */
 void AP_Filesystem_FATFS::unmount(void)
 {
+#if HAL_OS_CHIBIOS
     WITH_SEMAPHORE(sem);
     return sdcard_stop();
+#endif
 }
 
 /*
@@ -828,7 +846,7 @@ bool AP_Filesystem_FATFS::format(void)
 */
 void AP_Filesystem_FATFS::format_handler(void)
 {
-#if FF_USE_MKFS
+#if FF_USE_MKFS && HAL_OS_CHIBIOS
     if (format_status != FormatStatus::PENDING) {
         return;
     }
@@ -861,6 +879,7 @@ AP_Filesystem_Backend::FormatStatus AP_Filesystem_FATFS::get_format_status(void)
     return format_status;
 }
 
+#if 0
 /*
   convert POSIX errno to text with user message.
 */
@@ -911,5 +930,6 @@ char *strerror(int errnum)
 
     return NULL;
 }
+#endif
 
 #endif  // AP_FILESYSTEM_FATFS_ENABLED

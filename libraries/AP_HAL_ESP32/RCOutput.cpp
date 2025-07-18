@@ -143,6 +143,9 @@ void RCOutput::init()
 
             // set up comparators/generators
             for (int comparator_num=0; comparator_num<SOC_MCPWM_COMPARATORS_PER_OPERATOR; comparator_num++) {
+                if (chan >= MAX_CHANNELS) {
+                    return;
+                }
                 RCOutput::pwm_chan &ch = *curr_ch++;
 
                 // set up the output to be a part of the current group

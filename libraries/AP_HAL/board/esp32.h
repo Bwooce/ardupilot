@@ -1,6 +1,5 @@
 #pragma once
 
-
 #if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_DIY
 #include "esp32diy.h" // Charles
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_BUZZ
@@ -21,15 +20,22 @@
 #include "esp32s3m5stampfly.h" // https://shop.m5stack.com/products/m5stamp-fly-with-m5stamps3
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_IMU_MODULE_V11
 #include "esp32imu_module_v11.h" //makerfabs esp32 imu module v1.1
+#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_LILYGO_TCONNECT
+#include "esp32lilygo_tconnect.h" //Lilygo T-Connect
 #else
 #error "Invalid CONFIG_HAL_BOARD_SUBTYPE for esp32"
 #endif
-
 #define HAL_BOARD_NAME "ESP32"
 #define HAL_CPU_CLASS HAL_CPU_CLASS_150
+#ifndef HAL_WITH_DRONECAN
 #define HAL_WITH_DRONECAN 0
+#endif
+#ifndef HAL_WITH_UAVCAN
 #define HAL_WITH_UAVCAN 0
+#endif
+#ifndef HAL_MAX_CAN_PROTOCOL_DRIVERS
 #define HAL_MAX_CAN_PROTOCOL_DRIVERS 0
+#endif
 #define HAL_HAVE_SAFETY_SWITCH 0
 #define HAL_HAVE_BOARD_VOLTAGE 0
 #define HAL_HAVE_SERVO_VOLTAGE 0
@@ -58,12 +64,16 @@
 #define HAL_WITH_EKF_DOUBLE HAL_HAVE_HARDWARE_DOUBLE
 #endif
 
+#ifndef HAL_NUM_CAN_IFACES
 #define HAL_NUM_CAN_IFACES 0
+#endif
 #define HAL_MEM_CLASS HAL_MEM_CLASS_192
 
 // disable uncommon stuff that we'd otherwise get 
 #define AP_EXTERNAL_AHRS_ENABLED 0
+#ifndef HAL_GENERATOR_ENABLED
 #define HAL_GENERATOR_ENABLED 0
+#endif
 
 #define __LITTLE_ENDIAN  1234
 #define __BYTE_ORDER     __LITTLE_ENDIAN
@@ -116,12 +126,18 @@
 #define AP_OPTICALFLOW_ENABLED 0
 #define AP_RPM_ENABLED 0
 #define AP_AIRSPEED_AUTOCAL_ENABLE 0
+#ifndef HAL_MOUNT_ENABLED
 #define HAL_MOUNT_ENABLED 0
+#endif
 #define AP_CAMERA_ENABLED 0
 #define HAL_SOARING_ENABLED 0
 #define AP_TERRAIN_AVAILABLE 0
 #define HAL_ADSB_ENABLED 0
-#define HAL_BUTTON_ENABLED 0 
+#ifndef HAL_BUTTON_ENABLED
+#define HAL_BUTTON_ENABLED 0
+#endif
+#ifndef AP_GRIPPER_ENABLED
+#endif 
 #define AP_GRIPPER_ENABLED 0
 #define AP_LANDINGGEAR_ENABLED 0
 
