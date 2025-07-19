@@ -15,3 +15,9 @@ APA102_CLOCK=3
 
 # Boot button
 KEY_BOOT=0
+
+# --- UARTs ---
+# Serial 0 (USB) is used for programming and debugging
+SERIAL1_BAUD 115200
+SERIAL1_TX_PIN 12
+SERIAL1_RX_PIN 13
