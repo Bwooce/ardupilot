@@ -1,6 +1,8 @@
 # ArduPilot Hardware Definition for the LilyGO T-Connect
 #
 
+MCU ESP32S3
+
 define HAL_NUM_CAN_IFACES 1
 define HAL_ENABLE_DRONECAN_DRIVERS 1
 define HAL_WITH_WIFI 0

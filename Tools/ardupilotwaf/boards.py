@@ -640,17 +640,25 @@ def add_dynamic_boards_from_hwdef_dir(base_type, hwdef_dir):
 
 def add_dynamic_boards_esp32():
     '''add boards based on existence of hwdef.dat in subdirectories for ESP32'''
+    mcu_map = {
+        'ESP32S3': esp32s3,
+    }
+    default_mcu_class = esp32
+    
     dirname, dirlist, filenames = next(os.walk('libraries/AP_HAL_ESP32/hwdef'))
     for d in dirlist:
         if d in _board_classes.keys():
             continue
-        hwdef = os.path.join(dirname, d, 'hwdef.dat')
-        if os.path.exists(hwdef):
-            mcu_esp32s3 = True if (d[0:7] == "esp32s3") else False
-            if mcu_esp32s3:
-                newclass = type(d, (esp32s3,), {'name': d})
-            else:
-                newclass = type(d, (esp32,), {'name': d})
+        hwdef_path = os.path.join(dirname, d, 'hwdef.dat')
+        if os.path.exists(hwdef_path):
+            mcu_class = default_mcu_class
+            with open(hwdef_path, 'r') as f:
+                for line in f:
+                    if line.startswith("MCU"):
+                        mcu_name = line.split()[1].upper()
+                        mcu_class = mcu_map.get(mcu_name, default_mcu_class)
+                        break
+            newclass = type(d, (mcu_class,), {'name': d})
 
 def get_boards_names():
     add_dynamic_boards_chibios()

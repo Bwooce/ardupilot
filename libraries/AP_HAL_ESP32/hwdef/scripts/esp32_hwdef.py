@@ -9,12 +9,20 @@ class ESP32HWDef(hwdef.HWDef):
         super(ESP32HWDef, self).__init__(outdir=outdir, hwdef=hwdef, **kwargs)
         self.generate_defines = True
         self.board = os.path.basename(os.path.dirname(hwdef[0]))
+        self.mcu = 'esp32'
 
     def run(self):
         self.process_hwdefs()
         if self.generate_defines:
             self.generate_hwdef_h()
         return 0
+
+    def process_line(self, line, depth=0):
+        super(ESP32HWDef, self).process_line(line, depth)
+        if line.startswith("MCU"):
+            self.mcu = line.split()[1]
+            self.env_vars['MCU'] = self.mcu
+
 
     def generate_hwdef_h(self):
         '''generate a hwdef.h file'''

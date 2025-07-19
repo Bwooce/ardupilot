@@ -50,8 +50,8 @@ def generate_hwdef_h(env):
     return 0
 
 def configure(cfg):
-    mcu_esp32s3 = True if (cfg.variant[0:7] == "esp32s3") else False
-    target = "esp32s3" if mcu_esp32s3 else "esp32"
+    target = cfg.env.MCU.lower() if 'MCU' in cfg.env else 'esp32'
+    print(f"GEMINI DEBUG: Building for MCU Type: {target}")
     bldnode = cfg.bldnode.make_node(cfg.variant)
     def srcpath(path):
         return cfg.srcnode.make_node(path).abspath()
