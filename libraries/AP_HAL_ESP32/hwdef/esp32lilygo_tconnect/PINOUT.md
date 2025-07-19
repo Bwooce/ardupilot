@@ -10,3 +10,24 @@ To connect an eLRS telemetry board, use the following pins:
 |---|---|
 | TX | 12 |
 | RX | 13 |
+
+## RGB LED Status System
+
+The four onboard RGB LEDs are used to display the vehicle's status at a glance. Each LED is dedicated to a specific subsystem.
+
+| LED # | Subsystem | State | Color & Pattern |
+| :--- | :--- | :--- | :--- |
+| **1** | **System / Arming** | Pre-arm Checks Failed | **Solid Red** |
+| | | Ready to Arm | **Pulsing Yellow** |
+| | | Armed | **Solid Green** |
+| | | Failsafe Active | **Pulsing Blue** |
+| **2** | **GPS** | No GPS Detected | **Off** |
+| | | No Fix | **Blinking Blue** |
+| | | 3D Fix or better | **Solid Blue** |
+| **3** | **Telemetry** | No Link | **Off** |
+| | | Link w/o GCS Heartbeat | **Blinking Cyan** |
+| | | GCS Link Active | **Solid Cyan** |
+| **4** | **Battery** | Good (> 50%) | **Solid Green** |
+| | | Low (25-50%) | **Solid Yellow** |
+| | | Critical (< 25%) | **Solid Red** |
+| | | Failsafe Triggered | **Blinking Red (Fast)** |

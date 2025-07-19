@@ -1,15 +1,17 @@
 #pragma once
 
-#include "AP_Notify_LED.h"
+#include "RGBLed.h"
 #include <AP_HAL/AP_HAL.h>
 
-class AP_Notify_APA102_LED : public AP_Notify_LED
+class AP_Notify_APA102_LED : public RGBLed
 {
 public:
     AP_Notify_APA102_LED();
 
-    void init() override;
-    void update() override;
+    bool init() override;
+
+protected:
+    bool hw_set_rgb(uint8_t r, uint8_t g, uint8_t b) override;
 
 private:
     void send_led_data(uint8_t r, uint8_t g, uint8_t b);
