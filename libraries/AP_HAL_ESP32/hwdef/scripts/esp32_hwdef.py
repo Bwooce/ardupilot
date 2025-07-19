@@ -22,7 +22,9 @@ class ESP32HWDef(hwdef.HWDef):
         if line.startswith("MCU"):
             self.mcu = line.split()[1]
             self.env_vars['MCU'] = self.mcu
-
+        if line.startswith("MCU"):
+            self.mcu = line.split()[1]
+            self.env_vars['MCU'] = self.mcu
 
     def generate_hwdef_h(self):
         '''generate a hwdef.h file'''

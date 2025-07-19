@@ -22,36 +22,7 @@ import subprocess
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../libraries/AP_HAL_ESP32/hwdef/scripts'))
 import esp32_hwdef
 
-def generate_hwdef_h(env):
-    '''run esp32_hwdef.py'''
-    hwdef_dir = os.path.join(env.SRCROOT, 'libraries/AP_HAL_ESP32/hwdef')
-    env.HWDEF = os.path.join(hwdef_dir, env.BOARD, 'hwdef.dat')
-
-    hwdef_out = os.path.join(env.BUILDROOT, 'esp-idf_build')
-    if not os.path.exists(hwdef_out):
-        os.mkdir(hwdef_out)
-
-    hwdef_list = [env.HWDEF]
-    if env.HWDEF_EXTRA:
-        hwdef_list.append(env.HWDEF_EXTRA)
-
-    eh = esp32_hwdef.ESP32HWDef(
-        outdir=hwdef_out,
-        hwdef=hwdef_list,
-        quiet=False,
-    )
-    ret = eh.run()
-    if ret != 0:
-        Logs.error("Failed to process hwdef.dat")
-        return ret
-    
-    for k, v in eh.get_env_vars().items():
-        env[k] = v
-    return 0
-
 def configure(cfg):
-    target = cfg.env.MCU.lower() if 'MCU' in cfg.env else 'esp32'
-    print(f"GEMINI DEBUG: Building for MCU Type: {target}")
     bldnode = cfg.bldnode.make_node(cfg.variant)
     def srcpath(path):
         return cfg.srcnode.make_node(path).abspath()
@@ -63,14 +34,15 @@ def configure(cfg):
 
     #define env and location for the cmake esp32 file
     env = cfg.env
-    env.AP_HAL_ESP32 = srcpath('libraries/AP_HAL_ESP32/targets/'+target+'/esp-idf')
+    mcu = env.MCU
+    env.AP_HAL_ESP32 = srcpath('libraries/AP_HAL_ESP32/targets/'+mcu+'/esp-idf')
     env.AP_PROGRAM_FEATURES += ['esp32_ap_program']
     env.append_value('DEFINES', 'USE_USER_HELPERS=1')
 
     env.ESP_IDF_PREFIX_REL = 'esp-idf'
 
     prefix_node = bldnode.make_node(env.ESP_IDF_PREFIX_REL)
-    env.ESP32_TARGET = target
+    env.ESP32_TARGET = mcu
     env.BUILDROOT = bldpath('')
     env.SRCROOT = srcpath('')
     env.APJ_TOOL = srcpath('Tools/scripts/apj_tool.py')
@@ -82,9 +54,12 @@ def configure(cfg):
         env.IDF = cfg.srcnode.abspath()+"/modules/esp_idf"
     print("USING EXPRESSIF IDF:"+str(env.IDF))
 
-    generate_hwdef_h(env)
-
-    #env.append_value('GIT_SUBMODULES', 'esp_idf')
+    # setup cmake
+    cfg.env['IDF_TARGET'] = mcu
+    cfg.env['ESP_IDF_SDKCONFIG_DEFAULTS'] = os.path.join(cfg.srcnode.abspath(), 'libraries/AP_HAL_ESP32/targets/esp32/esp-idf/sdkconfig.defaults')
+    cfg.env['PROJECT_DIR'] = cfg.bldnode.abspath()
+    cfg.env['SDKCONFIG'] = os.path.join(cfg.bldnode.abspath(), 'esp-idf_build/sdkconfig')
+    cfg.env['PYTHON'] = cfg.env.get_flat('PYTHON')
 
 # delete the output sdkconfig file when the input defaults changes. we take the
 # stamp as the output so we can compute the path to the sdkconfig, yet it
