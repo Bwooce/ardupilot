@@ -1,3 +1,7 @@
+# NOTE FOR DEVELOPERS:
+# When making changes to this file, please ensure the corresponding
+# board documentation is updated to reflect the new default parameters.
+#
 # Default parameters for the LilyGO T-Connect
 
 # Set SERIAL1 for RCIN (ELRS)
