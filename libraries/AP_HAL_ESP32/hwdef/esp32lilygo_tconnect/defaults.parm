@@ -1,2 +1,16 @@
 # Default parameters for the LilyGO T-Connect
-CAN_LOGLEVEL 4
+
+# Set SERIAL1 for RCIN (ELRS)
+SERIAL1_PROTOCOL 23
+
+# Enable DroneCAN on CAN port 1
+CAN_P1_DRIVER 1
+CAN_D1_PROTOCOL 1
+
+# Configure Battery Monitoring via DroneCAN
+BATT_MONITOR 8
+
+# Configure DroneCAN ESCs
+MOT_PWM_TYPE 0 # Set to None, as we are using DroneCAN ESCs
+CAN_D1_UC_ESC_BM 1 # Enable ESC RPM feedback on CAN1
+CAN_D1_UC_ESC_CM 1 # Enable ESC Motor command output on CAN1
