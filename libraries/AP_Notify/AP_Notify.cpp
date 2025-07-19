@@ -43,6 +43,7 @@
 #include "ScriptingLED.h"
 #include "DShotLED.h"
 #include "ProfiLED_IOMCU.h"
+#include "APA102_LED.h"
 
 extern const AP_HAL::HAL& hal;
 
@@ -384,6 +385,9 @@ void AP_Notify::add_backends(void)
                                                DISCRETE_RGB_POLARITY));
                 break;
 #endif
+            case Notify_LED_APA102:
+                ADD_BACKEND(NEW_NOTHROW AP_Notify_APA102_LED());
+                break;
         }
     }
 
