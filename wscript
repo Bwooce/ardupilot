@@ -553,6 +553,11 @@ def configure(cfg):
     cfg.msg('Setting board to', cfg.options.board)
     cfg.get_board().configure(cfg)
 
+    if cfg.get_board().name.startswith('esp32'):
+        cfg.env.INCLUDES += [
+            cfg.srcnode.find_dir('libraries/AP_HAL_ESP32').abspath(),
+        ]
+
     cfg.load('waf_unit_test')
     cfg.load('mavgen')
     cfg.load('dronecangen')

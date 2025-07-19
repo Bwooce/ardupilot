@@ -65,6 +65,7 @@ def configure(cfg):
     env = cfg.env
     env.AP_HAL_ESP32 = srcpath('libraries/AP_HAL_ESP32/targets/'+target+'/esp-idf')
     env.AP_PROGRAM_FEATURES += ['esp32_ap_program']
+    env.append_value('DEFINES', 'USE_USER_HELPERS=1')
 
     env.ESP_IDF_PREFIX_REL = 'esp-idf'
 

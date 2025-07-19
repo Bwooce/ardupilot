@@ -175,3 +175,4 @@ autotest_result_*_junit.xml
 .python-version
 modules/libcanard/
 build.log
+arm_toolchain/
