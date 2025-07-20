@@ -4,8 +4,8 @@
 #
 # Default parameters for the LilyGO T-Connect
 
-# Set SERIAL1 for RCIN (ELRS)
-SERIAL1_PROTOCOL 23
+# Set SERIAL1 for CRSF (ELRS)
+SERIAL1_PROTOCOL 29
 
 # Enable DroneCAN on CAN port 1
 CAN_P1_DRIVER 1
