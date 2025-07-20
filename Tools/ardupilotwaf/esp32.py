@@ -56,7 +56,33 @@ def configure(cfg):
 
     # setup cmake
     cfg.env['IDF_TARGET'] = mcu
-    cfg.env['ESP_IDF_SDKCONFIG_DEFAULTS'] = os.path.join(cfg.srcnode.abspath(), 'libraries/AP_HAL_ESP32/targets/esp32/esp-idf/sdkconfig.defaults')
+    
+    # Build list of sdkconfig.defaults files: target-level + board-level (if exists)
+    target_sdkconfig = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/targets/{mcu}/esp-idf/sdkconfig.defaults')
+    board_sdkconfig = os.path.join(cfg.bldnode.abspath(), 'sdkconfig.board')
+    
+    sdkconfig_list = [target_sdkconfig]
+    if os.path.exists(board_sdkconfig):
+        # Create a combined sdkconfig.defaults that includes both target and board configs
+        combined_sdkconfig = os.path.join(cfg.bldnode.abspath(), 'sdkconfig.combined')
+        print(f"Creating combined ESP-IDF config: {combined_sdkconfig}")
+        
+        with open(combined_sdkconfig, 'w') as combined_file:
+            # Include target-level configuration
+            with open(target_sdkconfig, 'r') as target_file:
+                combined_file.write(f"# Target-level configuration from {target_sdkconfig}\n")
+                combined_file.write(target_file.read())
+                combined_file.write("\n")
+            
+            # Include board-specific configuration
+            with open(board_sdkconfig, 'r') as board_file:
+                combined_file.write(f"# Board-specific configuration from {board_sdkconfig}\n")
+                combined_file.write(board_file.read())
+        
+        cfg.env['ESP_IDF_SDKCONFIG_DEFAULTS'] = combined_sdkconfig
+        print(f"Using combined ESP-IDF config: {combined_sdkconfig}")
+    else:
+        cfg.env['ESP_IDF_SDKCONFIG_DEFAULTS'] = target_sdkconfig
     cfg.env['PROJECT_DIR'] = cfg.bldnode.abspath()
     cfg.env['SDKCONFIG'] = os.path.join(cfg.bldnode.abspath(), 'esp-idf_build/sdkconfig')
     cfg.env['PYTHON'] = cfg.env.get_flat('PYTHON')

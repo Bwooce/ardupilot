@@ -1,0 +1,7 @@
+# ESP32-S3 DevKit Board Configuration
+
+# PSRAM Configuration (uncomment and adjust if your board has PSRAM)
+# PSRAM_SIZE 8MB
+# PSRAM_MODE OPI
+# PSRAM_MALLOC_THRESHOLD 16384
+# PSRAM_RESERVE_INTERNAL 16384

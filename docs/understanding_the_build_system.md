@@ -28,5 +28,13 @@ The `waf` build system operates in two distinct phases:
 ### ESP32 (A Hybrid Approach)
 
 *   **Configuration:** The ESP32 build process is a hybrid that uses both `waf` and `cmake` (for the ESP-IDF). The ESP32-specific configuration logic is located in `Tools/ardupilotwaf/esp32.py`. This file is loaded by `waf` as a tool during the `configure` phase *only* when an ESP32 board is selected.
-*   **The Problem:** The `'Semaphore' in namespace 'Canard' does not name a type` error occurs because the `configure` function in `Tools/ardupilotwaf/esp32.py` does not add the `libraries/AP_HAL_ESP32` directory to the `INCLUDES` path.
-*   **The Solution:** The correct fix is to add the include path to the `INCLUDES` variable within the `configure` function of `Tools/ardupilotwaf/esp32.py`. This ensures that the build environment is correctly prepared for ESP32 boards, mirroring the logic for ChibiOS boards and respecting the separation between the `configure` and `build` phases.
+*   **Board-Specific Configuration:** ESP32 boards support board-specific configurations through the hwdef system. The `libraries/AP_HAL_ESP32/hwdef/scripts/esp32_hwdef.py` script processes board-specific hwdef files and generates both ArduPilot header files (`hwdef.h`) and ESP-IDF configuration files (`sdkconfig.board`).
+*   **PSRAM Configuration:** Boards with PSRAM can be configured using hwdef directives:
+    ```
+    PSRAM_SIZE 8MB
+    PSRAM_MODE OPI
+    PSRAM_MALLOC_THRESHOLD 16384
+    PSRAM_RESERVE_INTERNAL 16384
+    ```
+    These directives are automatically converted to appropriate ESP-IDF `CONFIG_SPIRAM_*` symbols.
+*   **Build Integration:** The ESP32 build system creates a combined `sdkconfig.combined` file that merges target-level defaults with board-specific configurations, ensuring proper ESP-IDF integration.
