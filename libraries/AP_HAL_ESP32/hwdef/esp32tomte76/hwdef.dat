@@ -1,0 +1,84 @@
+# ArduPilot Hardware Definition for ESP32-Tomte76 Board
+# Based on ESP32 Classic with MPU9250 SPI, BMP280 I2C, and SD card support
+# This is tomte76's version of esp32empty for use with AliExpress WROOM32 devkit clone
+
+MCU ESP32
+
+# Board identification
+define HAL_ESP32_BOARD_NAME "esp32-tomte76"
+
+# IMU Configuration - MPU9250 via SPI
+define HAL_INS_DEFAULT HAL_INS_MPU9250_SPI
+define HAL_INS_MPU9250_NAME "mpu9250"
+
+# Compass Configuration - AK8963 integrated in MPU9250
+define ALLOW_ARM_NO_COMPASS 1
+
+# Barometer Configuration - BMP280 via I2C
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
+
+# WiFi Configuration
+define HAL_ESP32_WIFI 1
+define WIFI_SSID "ardupilot123"
+define WIFI_PWD "ardupilot123"
+
+# ADC Configuration - disabled in static header
+define HAL_DISABLE_ADC_DRIVER 1
+define HAL_USE_ADC 0
+
+# LED Configuration
+define BUILD_DEFAULT_LED_TYPE Notify_LED_None
+
+# Storage Configuration
+define HAL_ESP32_SDCARD 1
+define HAL_LOGGING_FILESYSTEM_ENABLED 1
+define HAL_LOGGING_DATAFLASH_ENABLED 0  
+define HAL_LOGGING_MAVLINK_ENABLED 0
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
+define HAL_LOGGING_BACKENDS_DEFAULT 1
+
+# RMT (Remote Control) input pin
+define HAL_ESP32_RMT_RX_PIN_NUMBER 4
+
+# Device probe lists (from static header)
+define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, HAL_INS_MPU9250_NAME, ROTATION_NONE)
+define HAL_MAG_PROBE_LIST PROBE_MAG_IMU(AK8963, mpu9250, 0, ROTATION_NONE)
+define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x76)
+
+# I2C Bus Configuration
+I2C_ORDER I2C0
+I2C0_SDA_PIN 21
+I2C0_SCL_PIN 22
+I2C0_SPEED 400000
+I2C0_INTERNAL 1
+
+# UART Configuration  
+UART_ORDER SERIAL0 SERIAL1
+SERIAL0_TX_PIN 1
+SERIAL0_RX_PIN 3
+SERIAL1_TX_PIN 17
+SERIAL1_RX_PIN 16
+
+# RCOUT Configuration
+RCOUT1_PIN 25
+RCOUT2_PIN 27
+RCOUT3_PIN 33
+RCOUT4_PIN 32
+
+# RCIN Configuration
+RCIN_PIN 36
+
+# SPI1 Bus - VSPI for MPU9250
+SPI1_SCK_PIN 18
+SPI1_MISO_PIN 19
+SPI1_MOSI_PIN 23
+MPU9250_CS_PIN 5
+
+# SD Card SPI Configuration (HSPI)
+# Note: Using different SPI bus than MPU9250 to avoid conflicts
+SPI2_MOSI_PIN 13
+SPI2_MISO_PIN 12
+SPI2_SCK_PIN 14
+SPI2_CS_PIN 15

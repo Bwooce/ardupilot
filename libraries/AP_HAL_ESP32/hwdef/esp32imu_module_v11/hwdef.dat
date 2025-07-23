@@ -1,0 +1,86 @@
+# ArduPilot Hardware Definition for ESP32 IMU Module V11 Board
+# Based on ESP32 Classic with MPU60XX I2C, BMP280 I2C, and ADC support
+# Modified from esp32buzz - nkruzan
+
+MCU ESP32
+
+# Board identification
+define CONFIG_HAL_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_IMU_MODULE_V11
+define HAL_ESP32_BOARD_NAME "esp32imu_module_v11"
+
+# IMU Configuration - MPU60XX via I2C
+define HAL_INS_DEFAULT HAL_INS_MPU60XX_I2C
+define HAL_INS_MPU6000_NAME "Invensense"
+
+# Compass Configuration - external I2C compasses allowed
+define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+
+# Barometer Configuration - BMP280 via I2C
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
+define HAL_PROBE_EXTERNAL_I2C_BAROS 1
+
+# WiFi Configuration
+define HAL_ESP32_WIFI 1
+define WIFI_SSID "ardupilot123"
+define WIFI_PWD "ardupilot123"
+
+# ADC Configuration - enabled with specific pins
+define HAL_USE_ADC 1
+
+# Storage Configuration - no SD card, MAVLink logging
+define HAL_LOGGING_FILESYSTEM_ENABLED 0
+define HAL_LOGGING_DATAFLASH_ENABLED 0
+define HAL_LOGGING_MAVLINK_ENABLED 1
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
+define HAL_LOGGING_BACKENDS_DEFAULT 1
+
+# SD Card - disabled
+define HAL_ESP32_SDCARD 0
+define HAL_ESP32_SDMMC 0
+
+# RMT (Remote Control) input pin
+define HAL_ESP32_RMT_RX_PIN_NUMBER 13
+
+# Device probe lists (from static header)
+define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensense, 0, 0x68, ROTATION_NONE)
+define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
+
+# I2C Bus Configuration
+I2C_ORDER I2C0
+I2C0_SDA_PIN 4
+I2C0_SCL_PIN 5
+I2C0_SPEED 400000
+I2C0_INTERNAL 1
+
+# UART Configuration
+UART_ORDER SERIAL0 SERIAL1
+SERIAL0_TX_PIN 1
+SERIAL0_RX_PIN 3
+SERIAL1_TX_PIN 18
+SERIAL1_RX_PIN 19
+
+# RCOUT Configuration (6 channels)
+RCOUT1_PIN 33
+RCOUT2_PIN 25
+RCOUT3_PIN 32
+RCOUT4_PIN 26
+RCOUT5_PIN 27
+RCOUT6_PIN 23
+
+# RCIN Configuration
+RCIN_PIN 13
+
+# ADC Configuration (4 channels)
+ADC_ORDER ADC1 ADC2 ADC3 ADC4
+ADC1_PIN 35
+ADC1_SCALE 11
+ADC2_PIN 34
+ADC2_SCALE 11
+ADC3_PIN 39
+ADC3_SCALE 11
+ADC4_PIN 36
+ADC4_SCALE 11
+
+# No SPI buses or devices configured (empty in static header)

@@ -1,0 +1,106 @@
+# ArduPilot Hardware Definition for ESP32-DIY Board
+# Based on ESP32 Classic with ICM20XXX IMU via I2C and comprehensive peripheral support
+
+MCU ESP32
+
+# Board identification
+define HAL_ESP32_BOARD_NAME "esp32-diy"
+
+# IMU Configuration - ICM20XXX via I2C
+define HAL_INS_DEFAULT HAL_INS_ICM20XXX_I2C
+define HAL_INS_ICM20XXX_I2C_BUS 0
+define HAL_INS_ICM20XXX_I2C_ADDR 0x68
+
+# Compass Configuration - AK09916 and ICM20948
+define HAL_COMPASS_ICM20948_I2C_ADDR 0x68
+define HAL_COMPASS_AK09916_I2C_BUS 0
+define HAL_COMPASS_AK09916_I2C_ADDR 0x0C
+define HAL_COMPASS_MAX_SENSORS 3
+
+# WiFi Configuration
+define HAL_ESP32_WIFI 1
+
+# ADC Configuration - ESP32 Classic pins
+define HAL_USE_ADC 1
+
+# Battery monitoring
+define HAL_BATT_VOLT_PIN 0
+define HAL_BATT_VOLT_SCALE 18.1
+define HAL_BATT_CURR_PIN 4
+define HAL_BATT_CURR_SCALE 36
+
+# Storage Configuration
+define AP_FILESYSTEM_ESP32_ENABLED 1
+define HAL_ESP32_SDCARD 1
+define LOGGER_MAVLINK_SUPPORT 1
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+define HAL_LOGGING_BACKENDS_DEFAULT 2
+define HAL_LOGGING_STACK_SIZE 4096
+
+# Pin Configuration (from esp32diy.h)
+# Note: ESP32 Classic has different pin numbering than ESP32-S3
+
+# I2C Buses
+# Bus 0: SDA=5, SCL=18 (internal, soft)
+# Bus 1: SDA=22, SCL=23 (internal, hardware)
+
+# UART Configuration  
+# UART0: TX=1, RX=3 (USB programming)
+# UART1: TX=33, RX=39 (GPS/telemetry)
+# UART2: TX=25, RX=34 (additional serial)
+# Device probe lists (from static header)
+define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensensev2, 0, 0x68, ROTATION_ROLL_180)
+define HAL_MAG_PROBE_LIST ADD_BACKEND(DRIVER_ICM20948, AP_Compass_AK09916::probe_ICM20948_I2C(0, ROTATION_ROLL_180_YAW_270));
+define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
+
+# RMT (Remote Control) input pin  
+define HAL_ESP32_RMT_RX_PIN_NUMBER 17
+
+# I2C Bus Configuration
+I2C_ORDER I2C0 I2C1
+I2C0_SDA_PIN 5
+I2C0_SCL_PIN 18
+I2C0_SPEED 400000
+I2C0_INTERNAL 1
+I2C0_SOFT 1
+
+I2C1_SDA_PIN 22
+I2C1_SCL_PIN 23
+I2C1_SPEED 400000
+I2C1_INTERNAL 1
+
+# UART Configuration
+UART_ORDER SERIAL0 SERIAL1 SERIAL2
+SERIAL0_TX_PIN 1
+SERIAL0_RX_PIN 3
+SERIAL1_TX_PIN 33
+SERIAL1_RX_PIN 39
+SERIAL2_TX_PIN 25
+SERIAL2_RX_PIN 34
+
+# RCOUT Configuration
+RCOUT1_PIN 15
+RCOUT2_PIN 2
+RCOUT3_PIN 0
+RCOUT4_PIN 4
+
+# RCIN Configuration
+RCIN_PIN 17
+
+# ADC Configuration
+ADC_ORDER ADC1 ADC2
+ADC1_PIN 36
+ADC1_SCALE 11
+ADC2_PIN 32
+ADC2_SCALE 11
+
+# SPI Configuration for SD card
+SPI_ORDER SPI1
+SPI1_MOSI_PIN 19
+SPI1_MISO_PIN 35
+SPI1_SCK_PIN 12
+SPI1_CS_PIN 21
+SPI1_DMA_CH 1
+

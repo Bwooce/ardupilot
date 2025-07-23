@@ -1,0 +1,104 @@
+# ArduPilot Hardware Definition for ESP32-Buzz Board
+# Based on ESP32 Classic with MPU9250 IMU and BMP280 barometer via SPI
+# Complete configuration matching original esp32buzz.h static header
+
+MCU ESP32
+
+# Board identification  
+define HAL_ESP32_BOARD_NAME "esp32-buzz"
+
+# IMU Configuration - MPU9250 via SPI
+define HAL_INS_DEFAULT HAL_INS_MPU9250_SPI
+define HAL_INS_MPU9250_NAME "mpu9250"
+define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, HAL_INS_MPU9250_NAME, ROTATION_NONE)
+
+# Barometer - BMP280 via SPI
+define HAL_BARO_PROBE_LIST PROBE_BARO_SPI(BMP280, "bmp280")
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
+
+# Compass configuration
+define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+
+# Airspeed sensor disabled
+define AP_AIRSPEED_MS4525_ENABLED 0
+define AP_AIRSPEED_ENABLED 0
+define AP_AIRSPEED_ANALOG_ENABLED 0
+define AP_AIRSPEED_BACKEND_DEFAULT_ENABLED 0
+
+# ADC Configuration
+define HAL_USE_ADC 1
+
+# WiFi Configuration
+define HAL_ESP32_WIFI 1
+define WIFI_SSID "ardupilot123"
+define WIFI_PWD "ardupilot123"
+
+# Storage Configuration
+define HAL_ESP32_SDCARD 1
+define HAL_ESP32_SDMMC 1
+define AP_FILESYSTEM_ESP32_ENABLED 1
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
+
+# Logging Configuration
+define HAL_LOGGING_BACKENDS_DEFAULT 1
+define LOGGER_MAVLINK_SUPPORT 1
+
+# Pin Configuration (from esp32buzz.h)
+# ESP32 Classic pin assignments matching static header exactly
+
+# SPI1 Bus - VSPI for IMU (MPU9250) and Barometer (BMP280)
+SPI1_SCK_PIN 18
+SPI1_MISO_PIN 19  
+SPI1_MOSI_PIN 23
+MPU9250_CS_PIN 5
+BMP280_CS_PIN 26
+
+# I2C0 Bus - for external compass and sensors  
+I2C0_SDA_PIN 13
+I2C0_SCL_PIN 12
+
+# UART Configuration
+# UART0: TX=1, RX=3 (USB programming)
+SERIAL0_TX_PIN 1
+SERIAL0_RX_PIN 3
+# UART1: TX=17, RX=16 (additional serial)
+SERIAL1_TX_PIN 17
+SERIAL1_RX_PIN 16
+
+# RCOUT pins for servo/motor control (6 channels)
+RCOUT1_PIN 25
+RCOUT2_PIN 27
+RCOUT3_PIN 33
+RCOUT4_PIN 32
+RCOUT5_PIN 22
+RCOUT6_PIN 21
+
+# RCIN pin for receiver input
+RCIN_PIN 4
+
+# RMT configuration for receiver
+define HAL_ESP32_RMT_RX_PIN_NUMBER 4
+
+# ADC Configuration - ESP32 has ADC available on many pins
+# ADC2 can't co-exist with WiFi, so we use ADC1 pins only
+# Two different pin numbering schemes available:
+# OPTION1: {ADC_CHANNEL_4, 11, 1}, {ADC_CHANNEL_3, 11, 2}, {ADC_CHANNEL_1, 11, 3}, {ADC_CHANNEL_0, 11, 4}  
+# OPTION2: {ADC1_GPIO35_CHANNEL, 11, 35}, {ADC1_GPIO34_CHANNEL, 11, 34}, {ADC1_GPIO39_CHANNEL, 11, 39}, {ADC1_GPIO36_CHANNEL, 11, 36}
+# Using OPTION2 (GPIO numbers as ArduPilot pin IDs):
+ADC1_PIN 35
+ADC2_PIN 34  
+ADC3_PIN 39
+ADC4_PIN 36
+
+# Debugging options - uncomment ONE at a time to avoid stack overflow
+# define STORAGEDEBUG 1
+# define SCHEDDEBUG 1  
+# define FSDEBUG 1
+# define BUSDEBUG 1
+# define WIFIDEBUG 1
+# define INS_TIMING_DEBUG 1
+
+# Alternative IMU rotation if needed:
+# define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, HAL_INS_MPU9250_NAME, ROTATION_ROLL_180)

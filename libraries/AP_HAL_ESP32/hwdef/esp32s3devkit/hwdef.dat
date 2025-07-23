@@ -1,7 +1,96 @@
-# ESP32-S3 DevKit Board Configuration
+# ArduPilot Hardware Definition for ESP32-S3 DevKit Board  
+# Based on ESP32-S3 with MPU9250 IMU via SPI
+# Complete configuration matching original esp32s3devkit.h static header
+
+MCU ESP32S3
+
+# Board identification
+define CONFIG_HAL_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_S3DEVKIT  
+define HAL_ESP32_BOARD_NAME "esp32s3devkit"
 
 # PSRAM Configuration (uncomment and adjust if your board has PSRAM)
 # PSRAM_SIZE 8MB
 # PSRAM_MODE OPI
 # PSRAM_MALLOC_THRESHOLD 16384
 # PSRAM_RESERVE_INTERNAL 16384
+
+# IMU Configuration - MPU9250 via SPI
+define AP_INERTIALSENSOR_ENABLED 1
+define HAL_INS_DEFAULT HAL_INS_MPU9250_SPI
+define HAL_INS_MPU9250_NAME "mpu9250"
+define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, HAL_INS_MPU9250_NAME, ROTATION_NONE)
+
+# Barometer - BMP280 via SPI  
+define HAL_BARO_PROBE_LIST PROBE_BARO_SPI(BMP280, "bmp280")
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
+
+# Compass configuration
+define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+
+# Airspeed sensor disabled
+define AP_AIRSPEED_MS4525_ENABLED 0
+define AP_AIRSPEED_ENABLED 0
+define AP_AIRSPEED_ANALOG_ENABLED 0
+define AP_AIRSPEED_BACKEND_DEFAULT_ENABLED 0
+
+# ADC Configuration  
+define HAL_USE_ADC 1
+
+# WiFi Configuration
+define HAL_ESP32_WIFI 1
+define WIFI_SSID "ardupilot123" 
+define WIFI_PWD "ardupilot123"
+
+# Storage Configuration
+define HAL_ESP32_SDCARD 1
+define HAL_ESP32_SDMMC 1
+define HAVE_FILESYSTEM_SUPPORT 1
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
+define HAL_OS_POSIX_IO 1
+
+# Logging Configuration
+define HAL_LOGGING_BACKENDS_DEFAULT 1
+define LOGGER_MAVLINK_SUPPORT 1
+
+# Pin Configuration (from esp32s3devkit.h)
+# ESP32-S3 pin assignments matching static header exactly
+
+# SPI1 Bus - SPI3 for IMU (MPU9250)
+SPI1_SCK_PIN 35
+SPI1_MISO_PIN 37
+SPI1_MOSI_PIN 36  
+MPU9250_CS_PIN 34
+
+# I2C1 Bus - for external compass and sensors
+I2C1_SDA_PIN 16
+I2C1_SCL_PIN 15
+
+# UART Configuration
+# UART0: TX=43, RX=44 (USB programming)
+SERIAL0_TX_PIN 43
+SERIAL0_RX_PIN 44
+# UART1: TX=18, RX=17 (additional serial)
+SERIAL1_TX_PIN 18  
+SERIAL1_RX_PIN 17
+
+# RCOUT pins for servo/motor control (6 channels)
+RCOUT1_PIN 11
+RCOUT2_PIN 10
+RCOUT3_PIN 9
+RCOUT4_PIN 8
+RCOUT5_PIN 7
+RCOUT6_PIN 6
+
+# RCIN pin for receiver input
+RCIN_PIN 14
+
+# RMT configuration for receiver  
+define HAL_ESP32_RMT_RX_PIN_NUMBER 14
+
+# ADC pins - ESP32-S3 ADC capable pins
+ADC1_PIN 1
+ADC2_PIN 2
+ADC3_PIN 3
+ADC4_PIN 4
