@@ -1,0 +1,43 @@
+# ArduPilot Hardware Definition for the LilyGO T-2CAN
+# ESP32-S3 Development Board with dual CAN bus interfaces via MCP2515
+
+MCU ESP32S3
+
+# PSRAM Configuration - T-2CAN has OPI PSRAM
+PSRAM_SIZE 8MB
+PSRAM_MODE OPI
+PSRAM_MALLOC_THRESHOLD 16384
+PSRAM_RESERVE_INTERNAL 16384
+
+# Disable WiFi for better dual-core performance 
+define HAL_WITH_WIFI 0
+
+# Enable dual CAN bus interfaces (native ESP32-S3 TWAI + MCP2515)
+define HAL_NUM_CAN_IFACES 2
+define HAL_ENABLE_DRONECAN_DRIVERS 1
+
+# CAN Interface 1: Native ESP32-S3 TWAI (built-in CAN controller)
+CAN_TX_1=7
+CAN_RX_1=6
+
+# CAN Interface 2: MCP2515 SPI-based CAN controller
+define MCP2515_CS_PIN 10
+define MCP2515_SCLK_PIN 12  
+define MCP2515_MOSI_PIN 11
+define MCP2515_MISO_PIN 13
+define MCP2515_RST_PIN 9
+
+# Note: T-2CAN has dual CAN capability implemented via:
+# - CAN1: Native ESP32-S3 TWAI interface (pins 6/7)
+# - CAN2: MCP2515 SPI-based CAN controller (pins 9-13)
+
+# Boot button
+KEY_BOOT=0
+
+# --- UARTs ---
+# Serial 0 (USB) is used for programming and debugging via USB CDC
+# Serial 1 can be configured for telemetry
+SERIAL1_BAUD 115200
+SERIAL1_TX_PIN 1
+SERIAL1_RX_PIN 2
+SERIAL1_PROTOCOL 1  # MAVLink1

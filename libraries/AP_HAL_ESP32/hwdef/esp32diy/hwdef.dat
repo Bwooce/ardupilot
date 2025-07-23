@@ -6,59 +6,98 @@ MCU ESP32
 # Board identification
 define HAL_ESP32_BOARD_NAME "esp32-diy"
 
-# IMU Configuration - ICM20XXX via I2C
+# Sensor probe helper macros for easier configuration
+define PROBE_IMU_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_IMU_SPI(driver, devname, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))
+define PROBE_IMU_SPI2(driver, devname1, devname2, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname1),hal.spi->get_device(devname2),##args))
+define PROBE_BARO_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(GET_I2C_DEVICE(bus, addr)),##args))
+define PROBE_BARO_SPI(driver, devname, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(hal.spi->get_device(devname)),##args))
+define PROBE_MAG_I2C(driver, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_MAG_SPI(driver, devname, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(hal.spi->get_device(devname),##args))
+define PROBE_MAG_IMU(driver, imudev, imu_instance, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe_ ## imudev(imu_instance,##args))
+define PROBE_MAG_IMU_I2C(driver, imudev, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe_ ## imudev(GET_I2C_DEVICE(bus,addr),##args))
+
+# IMU Configuration - ICM20XXX via I2C (default for DIY boards)
 define HAL_INS_DEFAULT HAL_INS_ICM20XXX_I2C
 define HAL_INS_ICM20XXX_I2C_BUS 0
 define HAL_INS_ICM20XXX_I2C_ADDR 0x68
+define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensensev2, 0, 0x68, ROTATION_ROLL_180)
+
+# Alternative IMU configurations (uncomment to use):
+# For different rotations:
+# define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensensev2, 0, 0x68, ROTATION_NONE)
+# define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensensev2, 0, 0x68, ROTATION_YAW_270)
 
 # Compass Configuration - AK09916 and ICM20948
 define HAL_COMPASS_ICM20948_I2C_ADDR 0x68
 define HAL_COMPASS_AK09916_I2C_BUS 0
 define HAL_COMPASS_AK09916_I2C_ADDR 0x0C
 define HAL_COMPASS_MAX_SENSORS 3
+define HAL_MAG_PROBE_LIST ADD_BACKEND(DRIVER_ICM20948, AP_Compass_AK09916::probe_ICM20948_I2C(0, ROTATION_ROLL_180_YAW_270));
+
+# Alternative compass configurations (uncomment to use):
+# For different rotations:
+# define HAL_MAG_PROBE_LIST ADD_BACKEND(DRIVER_ICM20948, AP_Compass_AK09916::probe_ICM20948_I2C(0, ROTATION_NONE));
+
+# Barometer Configuration - BMP280 via I2C
+define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
+
+# Alternative barometer configurations (uncomment to use):
+# For different I2C addresses:
+# define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x76)
 
 # WiFi Configuration
+# 1 = TCP mode (default for DIY boards)
 define HAL_ESP32_WIFI 1
 
+# WiFi Usage Tips:
+# - For UDP mode instead: set HAL_ESP32_WIFI 2
+# - To disable MAVLink over USB serial: Set SERIAL0_PROTOCOL = 0 and reboot
+# - Client connects to 192.168.4.1 port 14550
+
 # ADC Configuration - ESP32 Classic pins
+# NOTE: ADC2 can't co-exist with WiFi, so we use ADC1 pins only
 define HAL_USE_ADC 1
 
-# Battery monitoring
+# Battery monitoring configuration
+# Voltage monitoring on GPIO36 (ADC pin 0)
 define HAL_BATT_VOLT_PIN 0
 define HAL_BATT_VOLT_SCALE 18.1
+# Current monitoring on GPIO32 (ADC pin 4)  
 define HAL_BATT_CURR_PIN 4
 define HAL_BATT_CURR_SCALE 36
 
+# Alternative battery monitoring configurations:
+# Adjust voltage divider scaling based on your resistor values
+# Common scales: 11.0 (3:1), 15.7 (4:1), 18.1 (5:1)
+
 # Storage Configuration
+# SD Card via SPI (VSPI host with custom pins)
 define AP_FILESYSTEM_ESP32_ENABLED 1
 define HAL_ESP32_SDCARD 1
 define LOGGER_MAVLINK_SUPPORT 1
 define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
 define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
 define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+
+# Logging Configuration
+# 2 = log over MAVLink (default for DIY boards for companion computer logging)
+# 1 = log to flash/SD card
 define HAL_LOGGING_BACKENDS_DEFAULT 2
 define HAL_LOGGING_STACK_SIZE 4096
 
-# Pin Configuration (from esp32diy.h)
-# Note: ESP32 Classic has different pin numbering than ESP32-S3
+# Alternative logging configurations:
+# For SD card logging instead: set HAL_LOGGING_BACKENDS_DEFAULT 1
 
-# I2C Buses
-# Bus 0: SDA=5, SCL=18 (internal, soft)
-# Bus 1: SDA=22, SCL=23 (internal, hardware)
+# Pin Configuration for ESP32-DIY Board
+# Based on ESP32 Classic with optimized pin assignments for DIY builds
 
-# UART Configuration  
-# UART0: TX=1, RX=3 (USB programming)
-# UART1: TX=33, RX=39 (GPS/telemetry)
-# UART2: TX=25, RX=34 (additional serial)
-# Device probe lists (from static header)
-define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensensev2, 0, 0x68, ROTATION_ROLL_180)
-define HAL_MAG_PROBE_LIST ADD_BACKEND(DRIVER_ICM20948, AP_Compass_AK09916::probe_ICM20948_I2C(0, ROTATION_ROLL_180_YAW_270));
-define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
-
-# RMT (Remote Control) input pin  
+# RMT (Remote Control) receiver input pin  
 define HAL_ESP32_RMT_RX_PIN_NUMBER 17
 
 # I2C Bus Configuration
+# Bus 0: SDA=GPIO5, SCL=GPIO18 (internal, software I2C for reliability)
+# Bus 1: SDA=GPIO22, SCL=GPIO23 (internal, hardware I2C for speed)
 I2C_ORDER I2C0 I2C1
 I2C0_SDA_PIN 5
 I2C0_SCL_PIN 18
@@ -71,7 +110,14 @@ I2C1_SCL_PIN 23
 I2C1_SPEED 400000
 I2C1_INTERNAL 1
 
+# Alternative I2C configurations:
+# For different pin assignments, modify the GPIO numbers above
+# Common ESP32 I2C pins: SDA(21,33), SCL(22,25,26,27)
+
 # UART Configuration
+# SERIAL0: TX=GPIO1, RX=GPIO3 (USB programming/debug console)
+# SERIAL1: TX=GPIO33, RX=GPIO39 (GPS/telemetry primary)  
+# SERIAL2: TX=GPIO25, RX=GPIO34 (additional serial/companion computer)
 UART_ORDER SERIAL0 SERIAL1 SERIAL2
 SERIAL0_TX_PIN 1
 SERIAL0_RX_PIN 3
@@ -80,27 +126,75 @@ SERIAL1_RX_PIN 39
 SERIAL2_TX_PIN 25
 SERIAL2_RX_PIN 34
 
-# RCOUT Configuration
+# Alternative UART configurations:
+# Change GPIO assignments above for different pin layouts
+# Note: GPIO34-39 are input-only on ESP32 Classic
+
+# RCOUT Configuration (servo/motor outputs)
+# 4 channels: GPIO15, GPIO2, GPIO0, GPIO4
+# WARNING: GPIO0 is a boot pin - avoid using during boot sequence
 RCOUT1_PIN 15
 RCOUT2_PIN 2
-RCOUT3_PIN 0
+RCOUT3_PIN 0  # Boot pin - use with caution
 RCOUT4_PIN 4
 
-# RCIN Configuration
+# Alternative RCOUT configurations:
+# Avoid boot pins (GPIO0, GPIO2) by using: 12, 13, 14, 16, 17, 18, 19
+# Note: Some pins may conflict with other peripherals
+
+# RCIN Configuration (receiver input)
+# GPIO17 for PWM receiver input
 RCIN_PIN 17
 
-# ADC Configuration
+# ADC Configuration for analog sensors
+# Pin 36 (ADC1_CH0) and Pin 32 (ADC1_CH4) 
+# Scale 11 = 3.3V full scale with 11x voltage divider
 ADC_ORDER ADC1 ADC2
 ADC1_PIN 36
 ADC1_SCALE 11
 ADC2_PIN 32
 ADC2_SCALE 11
 
-# SPI Configuration for SD card
+# Alternative ADC configurations:
+# Available ADC1 pins on ESP32: 32, 33, 34, 35, 36, 39
+# ADC2 pins unavailable when WiFi enabled
+
+# SPI Configuration for SD card storage
+# Uses VSPI host with custom pin assignments
+# DMA channel 1 for high-speed transfers
 SPI_ORDER SPI1
 SPI1_MOSI_PIN 19
 SPI1_MISO_PIN 35
 SPI1_SCK_PIN 12
 SPI1_CS_PIN 21
 SPI1_DMA_CH 1
+
+# Alternative SPI configurations:
+# For different SD card wiring, modify GPIO assignments above
+# HSPI alternative: MOSI=13, MISO=12, SCK=14
+
+# PSRAM Configuration - ESP32 Classic External PSRAM Support
+# ESP32 Classic supports external PSRAM via SPI interface (up to 8MB)
+# Many ESP32 development boards include 4MB or 8MB PSRAM for expanded memory
+# Uncomment and configure if your ESP32 DIY board includes PSRAM:
+# PSRAM_SIZE 4MB              # Common sizes: 4MB, 8MB (check your board specifications)
+# PSRAM_MALLOC_THRESHOLD 16384 # Minimum allocation size for PSRAM (16KB recommended)
+# PSRAM_RESERVE_INTERNAL 16384 # Reserve internal RAM for critical operations (16KB)
+# 
+# PSRAM Benefits for ESP32 Classic:
+# - Significantly increases available heap memory (from ~300KB to 4-8MB)
+# - Enables larger applications, more logging, complex algorithms
+# - Allows multiple simultaneous features (scripting, advanced logging, etc.)
+# - Essential for memory-intensive applications like computer vision
+# 
+# PSRAM Performance Notes:
+# - ESP32 Classic PSRAM is slower than internal RAM (SPI vs internal bus)
+# - Good for large buffers, logs, non-critical data structures
+# - Keep time-critical code and data in internal RAM
+# - ArduPilot automatically manages PSRAM vs internal RAM allocation
+#
+# To check if your board has PSRAM:
+# - Look for an additional 8-pin SOIC chip near the ESP32 (usually Espressif ESP-PSRAM64H)
+# - Check board documentation or schematic
+# - Many \"WROOM-32\" modules include PSRAM, \"WROOM-32D\" typically does not
 

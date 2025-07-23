@@ -22,6 +22,8 @@
 #include "esp32imu_module_v11.h" //makerfabs esp32 imu module v1.1
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_LILYGO_TCONNECT
 #include "esp32lilygo_tconnect.h" //Lilygo T-Connect
+#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_LILYGO_T2CAN
+#include "esp32lilygo_t2can.h" //Lilygo T-2CAN
 #else
 #error "Invalid CONFIG_HAL_BOARD_SUBTYPE for esp32"
 #endif

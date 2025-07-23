@@ -30,14 +30,9 @@ bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
 #else
         return false;
 #endif
-    } else if (instance == 1) {
-#if HAL_NUM_CAN_IFACES > 1
-        tx_pin = (gpio_num_t)HAL_CAN2_TX_PIN;
-        rx_pin = (gpio_num_t)HAL_CAN2_RX_PIN;
-#else
-        return false;
-#endif
     } else {
+        // Only support CAN interface 0 with native TWAI
+        // CAN interface 1+ should use MCP2515 or other external controllers
         return false;
     }
 

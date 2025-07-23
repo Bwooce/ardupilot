@@ -1,5 +1,6 @@
 # ArduPilot Hardware Definition for ESP32-S3 M5StampFly Board
 # Compact ESP32-S3 board with BMI270 IMU, BMP280 baro, and Grove connectors
+# Features: BMI270 SPI IMU, BMP280 I2C barometer, INA3221 battery monitor, 2x Grove connectors
 
 MCU ESP32S3
 
@@ -7,36 +8,81 @@ MCU ESP32S3
 define CONFIG_HAL_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_S3M5STAMPFLY
 define HAL_ESP32_BOARD_NAME "esp32s3m5stampfly"
 
-# IMU Configuration - BMI270 via SPI
+# Sensor probe helper macros for easier configuration
+define PROBE_IMU_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_IMU_SPI(driver, devname, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))
+define PROBE_IMU_SPI2(driver, devname1, devname2, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname1),hal.spi->get_device(devname2),##args))
+define PROBE_BARO_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(GET_I2C_DEVICE(bus, addr)),##args))
+define PROBE_BARO_SPI(driver, devname, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(hal.spi->get_device(devname)),##args))
+define PROBE_MAG_I2C(driver, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_MAG_SPI(driver, devname, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(hal.spi->get_device(devname),##args))
+define PROBE_MAG_IMU(driver, imudev, imu_instance, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe_ ## imudev(imu_instance,##args))
+define PROBE_MAG_IMU_I2C(driver, imudev, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe_ ## imudev(GET_I2C_DEVICE(bus,addr),##args))
+
+# IMU Configuration - BMI270 via SPI (default for M5StampFly)
 define HAL_INS_PROBE_LIST PROBE_IMU_SPI(BMI270, "bmi270", ROTATION_ROLL_180_YAW_90)
 
-# Barometer Configuration - BMP280 via I2C
+# Alternative IMU configurations (uncomment to use):
+# For different rotations if board mounted differently:
+# define HAL_INS_PROBE_LIST PROBE_IMU_SPI(BMI270, "bmi270", ROTATION_NONE)
+# define HAL_INS_PROBE_LIST PROBE_IMU_SPI(BMI270, "bmi270", ROTATION_ROLL_180)
+# define HAL_INS_PROBE_LIST PROBE_IMU_SPI(BMI270, "bmi270", ROTATION_YAW_90)
+
+# Barometer Configuration - BMP280 via I2C at address 0x76
 define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x76)
 
-# Compass Configuration - disabled by default
+# Alternative barometer configurations (uncomment to use):
+# For different I2C addresses:
+# define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
+# For Grove connector instead (bus 1):
+# define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 1, 0x76)
+
+# Compass Configuration - disabled by default (no onboard compass)
 define AP_COMPASS_ENABLE_DEFAULT 0
 define ALLOW_ARM_NO_COMPASS 1
+
+# Alternative compass configurations (uncomment to use):
+# For external compass on Grove I2C connector:
+# define AP_COMPASS_ENABLE_DEFAULT 1
+# define HAL_MAG_PROBE_LIST PROBE_MAG_I2C(HMC5843, 1, 0x1E)
 
 # Airspeed - disabled
 define AP_AIRSPEED_ENABLED 0
 define AP_AIRSPEED_ANALOG_ENABLED 0
 define AP_AIRSPEED_BACKEND_DEFAULT_ENABLED 0
 
-# ADC - disabled
+# ADC Configuration - disabled (no ADC pins used on this compact board)
 define HAL_DISABLE_ADC_DRIVER 1
 define HAL_USE_ADC 0
 
-# Battery monitoring - INA3221 configuration
+# Alternative ADC configuration (uncomment to enable if needed):
+# define HAL_USE_ADC 1
+# Note: ESP32-S3 ADC pins are limited and many are used for other functions
+
+# Battery monitoring - INA3221 I2C power monitor configuration
+# High-precision current and voltage monitoring for flight applications
 define AP_BATTERY_INA3221_ENABLED 1
 define HAL_BATTMON_INA3221_SHUNT_OHMS 0.01
 define HAL_BATTMON_INA3221_SHUNT_CONV_TIME_SEL HAL_BATTMON_INA3221_CONV_TIME_4156US
 define HAL_BATTMON_INA3221_BUS_CONV_TIME_SEL HAL_BATTMON_INA3221_CONV_TIME_4156US
 define HAL_BATTMON_INA3221_AVG_MODE_SEL HAL_BATTMON_INA3221_AVG_MODE_16
 
-# WiFi Configuration - UDP mode
+# Alternative battery monitoring configurations:
+# For different shunt resistor values:
+# define HAL_BATTMON_INA3221_SHUNT_OHMS 0.005  # 5mΩ shunt
+# For faster/slower conversion times:
+# define HAL_BATTMON_INA3221_SHUNT_CONV_TIME_SEL HAL_BATTMON_INA3221_CONV_TIME_1100US
+
+# WiFi Configuration - UDP mode (default for M5StampFly)
+# 2 = UDP mode for lower latency flight control
 define HAL_ESP32_WIFI 2
 define WIFI_SSID "ardupilot123"
 define WIFI_PWD "ardupilot123"
+
+# WiFi Usage Notes:
+# - 2 = UDP mode (recommended for flight), 1 = TCP mode
+# - For UDP: client connects as UDPCL in MissionPlanner to 192.168.4.1 port 14550
+# - UDP provides lower latency for real-time control
 
 # RC Protocol - disabled
 define AP_RCPROTOCOL_ENABLED 0
@@ -64,9 +110,9 @@ define RTC_WDT_STG_SEL_RESET_CPU 2
 define RTC_WDT_STG_SEL_RESET_SYSTEM 3
 define RTC_WDT_STG_SEL_RESET_RTC 4
 
-# I2C Bus Configuration
-# Bus 0: Internal (GPIO 3/4)
-# Bus 1: Grove Red connector (GPIO 13/15) - has 4.7kΩ pullups
+# I2C Bus Configuration  
+# Bus 0: Internal bus (GPIO 3/4) for onboard BMP280 barometer
+# Bus 1: Grove Red connector (GPIO 13/15) with 4.7kΩ pullups for external sensors
 I2C_ORDER I2C0 I2C1
 I2C0_SDA_PIN 3
 I2C0_SCL_PIN 4
@@ -78,49 +124,102 @@ I2C1_SCL_PIN 15
 I2C1_SPEED 400000
 I2C1_INTERNAL 0
 
+# Alternative I2C configurations:
+# - Can swap Grove connector pins if needed
+# - Speed can be reduced to 100000 for problematic devices
+# - Grove connector has hardware pullups, internal bus may need external pullups
+
 # UART Configuration
-# UART0: GPIO 17/18 (USB debug)
-# UART1: Grove Black connector (GPIO 1/2) - SERIAL3
+# UART0: GPIO 17/18 (unmapped pins, UART0 goes over USB)
+# UART1: Grove Black connector (GPIO 1/2) for SERIAL3 - GPS/telemetry
 UART_ORDER SERIAL0 SERIAL1
 SERIAL0_TX_PIN 17
 SERIAL0_RX_PIN 18
 SERIAL1_TX_PIN 2
 SERIAL1_RX_PIN 1
 
-# RCOUT Configuration - Quad X order (r-up, l-down, l-up, r-down)
-RCOUT1_PIN 42
-RCOUT2_PIN 10
-RCOUT3_PIN 5
-RCOUT4_PIN 41
+# Alternative UART configurations:
+# - Grove Black pins can be reassigned for different protocols
+# - UART0 pins are unmapped since UART0 traffic goes over USB
+# - Additional UART can be configured on available GPIO pins
 
-# SPI1 Bus - SPI2_HOST for BMI270
-SPI1_SCK_PIN 44
-SPI1_MISO_PIN 43
-SPI1_MOSI_PIN 14
+# RCOUT Configuration - Quad X motor order
+# Pin assignment optimized for quadcopter X configuration:
+# Motor 1 (right-up): GPIO42, Motor 2 (left-down): GPIO10
+# Motor 3 (left-up): GPIO5, Motor 4 (right-down): GPIO41
+RCOUT1_PIN 42  # Right-up motor
+RCOUT2_PIN 10  # Left-down motor  
+RCOUT3_PIN 5   # Left-up motor
+RCOUT4_PIN 41  # Right-down motor
 
-# SPI Devices
-# BMI270 IMU on main SPI bus
+# Alternative RCOUT configurations:
+# - Pin assignment can be changed for different frame types
+# - Additional channels can be added using available GPIO pins
+# - ESP32-S3 supports up to 8 PWM channels
+
+# SPI Configuration - SPI2_HOST for high-speed sensor communication
+# Used for BMI270 IMU and optional Pixart optical flow sensor
+SPI1_SCK_PIN 44   # Serial Clock
+SPI1_MISO_PIN 43  # Master In Slave Out
+SPI1_MOSI_PIN 14  # Master Out Slave In
+
+# SPI Device Configuration
+# BMI270 IMU - primary inertial sensor
 BMI270_CS_PIN 46
 
-# Pixart optical flow sensor CS (disabled via naming)
-# Note: Listed to deassert CS but disabled by driver name
-SPI1_CS_PIN 12
+# Pixart optical flow sensor - disabled by default
+# The optical flow sensor shares the SPI bus with IMU but is too slow
+# We list it here to deassert its CS pin, but disable it via naming
+SPI1_CS_PIN 12  # Pixart flow sensor CS (disabled via "pixartflow_disabled" name)
 
-# Grove Connector Pinouts (for reference):
-# Grove Red (I2C): 
-#   Pin 1: GPIO 15 (SCL, 4.7kΩ pullup)
-#   Pin 2: GPIO 13 (SDA, 4.7kΩ pullup)
-#   Pin 3: +V (5V USB or Vbat)
-#   Pin 4: GND
+# Alternative SPI configurations:
+# - SPI speed can be adjusted in device configuration
+# - Additional SPI devices can be added using available CS pins
+# - Optical flow can be enabled by changing device name from "pixartflow_disabled" to "pixartflow"
+
+# Grove Expansion Connectors - Seeed Studio Grove compatible
+# The M5StampFly has two Grove connectors for peripheral expansion:
 #
-# Grove Black (SERIAL3):
-#   Pin 1: GPIO 1 (RX)
-#   Pin 2: GPIO 3 (TX) 
-#   Pin 3: +V (5V USB or Vbat)
-#   Pin 4: GND
+# Grove Red (I2C) - Left connector, red color:
+#   Pin 1 (toward front): GPIO 15 (SCL, has 4.7kΩ pullup to 3.3V)
+#   Pin 2              : GPIO 13 (SDA, has 4.7kΩ pullup to 3.3V)  
+#   Pin 3              : +V (+5V if USB powered, else +Vbat)
+#   Pin 4 (toward rear): GND
+#
+# Grove Black (SERIAL3) - Right connector, black color:
+#   Pin 1 (toward rear) : GPIO 1 (RX for SERIAL3/UART1)
+#   Pin 2               : GPIO 2 (TX for SERIAL3/UART1)
+#   Pin 3               : +V (+5V if USB powered, else +Vbat)
+#   Pin 4 (toward front): GND
+#
+# Grove Usage Notes:
+# - Red connector: I2C bus 1, no other devices on bus, ideal for sensors
+# - Black connector: UART1/SERIAL3, ideal for GPS, telemetry, or other serial devices
+# - Both signal pins in each connector can be reassigned by editing this file
+# - Both connectors provide 5V when USB powered, Vbat otherwise
 
-# PSRAM Configuration (uncomment if your board has PSRAM)
-# PSRAM_SIZE 8MB
-# PSRAM_MODE OPI
-# PSRAM_MALLOC_THRESHOLD 16384
-# PSRAM_RESERVE_INTERNAL 16384
+# PSRAM Configuration - M5StampFly has 8MB PSRAM
+# The M5StampFly includes 8MB PSRAM with high-performance OPI interface
+# This provides massive memory expansion for advanced applications
+PSRAM_SIZE 8MB                # M5StampFly specification: 8MB PSRAM
+PSRAM_MODE OPI                # Octal Parallel Interface (high performance)
+PSRAM_MALLOC_THRESHOLD 16384  # 16KB minimum allocation for PSRAM
+PSRAM_RESERVE_INTERNAL 16384  # Reserve 16KB internal RAM for critical operations
+#
+# M5StampFly PSRAM Benefits:
+# - Expands total memory from ~400KB to 8.4MB (20x increase!)
+# - Enables advanced features: Lua scripting, computer vision, large logs
+# - Supports simultaneous WiFi + logging + sensor fusion + navigation
+# - Essential for complex autonomous flight algorithms
+# - Allows large parameter sets, waypoint lists, terrain data
+#
+# PSRAM Performance on M5StampFly:
+# - OPI interface provides excellent bandwidth (~40-50 MB/s)
+# - Minimal latency penalty for most operations
+# - DMA-compatible for high-speed sensor data processing
+# - Cache-optimized access patterns work very well
+#
+# To disable PSRAM (not recommended for M5StampFly):
+# Comment out the PSRAM_SIZE line above and uncomment below:
+# define AP_SCRIPTING_ENABLED 0      # Disable scripting to save memory
+# define HAL_LOGGING_BACKENDS_DEFAULT 2  # Use MAVLink logging instead of SD

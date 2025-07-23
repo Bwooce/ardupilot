@@ -29,6 +29,12 @@
 #include "Storage.h"
 #include "AnalogIn.h"
 #include "Util.h"
+#if HAL_NUM_CAN_IFACES > 0
+#include "CANIface.h"
+#if HAL_NUM_CAN_IFACES > 1
+#include "CANIface_MCP2515.h"
+#endif
+#endif
 #if AP_SIM_ENABLED
 #include <AP_HAL/SIMState.h>
 #endif
@@ -82,6 +88,10 @@ static ESP32::Util utilInstance;
 static Empty::OpticalFlow opticalFlowDriver;
 static Empty::Flash flashDriver;
 
+#if HAL_NUM_CAN_IFACES > 0
+static AP_HAL::CANIface* canDrivers[HAL_NUM_CAN_IFACES];
+#endif
+
 #if AP_SIM_ENABLED
 static AP_HAL::SIMState xsimstate;
 #endif
@@ -119,9 +129,62 @@ HAL_ESP32::HAL_ESP32() :
 #if HAL_WITH_DSP
         &dspDriver,
 #endif
+#if HAL_NUM_CAN_IFACES > 0
+        (AP_HAL::CANIface**)canDrivers
+#else
         nullptr
+#endif
     )
-{}
+{
+#if HAL_NUM_CAN_IFACES > 0
+    // Initialize CAN driver array based on configuration
+    for (uint8_t i = 0; i < HAL_NUM_CAN_IFACES; i++) {
+        canDrivers[i] = nullptr;
+    }
+    
+    // CAN interface 0: Native TWAI (if available)
+    if (HAL_NUM_CAN_IFACES > 0) {
+        canDrivers[0] = new ESP32::CANIface(0);
+    }
+    
+    // MCP2515 interfaces: Auto-detect based on pin definitions
+#if HAL_NUM_CAN_IFACES > 1
+    uint8_t mcp_index = 1; // Start after native TWAI
+    
+    // MCP2515 #1 (traditional pin names for backward compatibility)
+#if defined(MCP2515_CS_PIN)
+    if (mcp_index < HAL_NUM_CAN_IFACES) {
+        canDrivers[mcp_index] = new ESP32::CANIface_MCP2515(mcp_index);
+        mcp_index++;
+    }
+#endif
+
+    // MCP2515 #2 (numbered pins)
+#if HAL_NUM_CAN_IFACES > 2 && defined(MCP2515_2_CS_PIN)
+    if (mcp_index < HAL_NUM_CAN_IFACES) {
+        canDrivers[mcp_index] = new ESP32::CANIface_MCP2515(mcp_index);
+        mcp_index++;
+    }
+#endif
+
+    // MCP2515 #3 (numbered pins)
+#if HAL_NUM_CAN_IFACES > 3 && defined(MCP2515_3_CS_PIN)
+    if (mcp_index < HAL_NUM_CAN_IFACES) {
+        canDrivers[mcp_index] = new ESP32::CANIface_MCP2515(mcp_index);
+        mcp_index++;
+    }
+#endif
+
+    // MCP2515 #4 (numbered pins) - extend as needed
+#if HAL_NUM_CAN_IFACES > 4 && defined(MCP2515_4_CS_PIN)
+    if (mcp_index < HAL_NUM_CAN_IFACES) {
+        canDrivers[mcp_index] = new ESP32::CANIface_MCP2515(mcp_index);
+        mcp_index++;
+    }
+#endif
+#endif // HAL_NUM_CAN_IFACES > 1
+#endif
+}
 
 void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
 {

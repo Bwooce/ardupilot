@@ -1,6 +1,7 @@
 # ArduPilot Hardware Definition for ESP32 IMU Module V11 Board
 # Based on ESP32 Classic with MPU60XX I2C, BMP280 I2C, and ADC support
 # Modified from esp32buzz - nkruzan
+# Features: MPU60XX I2C IMU, BMP280 I2C barometer, 6 RCOUT channels, 4 ADC pins
 
 MCU ESP32
 
@@ -8,26 +9,67 @@ MCU ESP32
 define CONFIG_HAL_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_IMU_MODULE_V11
 define HAL_ESP32_BOARD_NAME "esp32imu_module_v11"
 
-# IMU Configuration - MPU60XX via I2C
+# Sensor probe helper macros for easier configuration
+define PROBE_IMU_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_IMU_SPI(driver, devname, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))
+define PROBE_IMU_SPI2(driver, devname1, devname2, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname1),hal.spi->get_device(devname2),##args))
+define PROBE_BARO_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(GET_I2C_DEVICE(bus, addr)),##args))
+define PROBE_BARO_SPI(driver, devname, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(hal.spi->get_device(devname)),##args))
+define PROBE_MAG_I2C(driver, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_MAG_SPI(driver, devname, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(hal.spi->get_device(devname),##args))
+define PROBE_MAG_IMU(driver, imudev, imu_instance, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe_ ## imudev(imu_instance,##args))
+define PROBE_MAG_IMU_I2C(driver, imudev, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe_ ## imudev(GET_I2C_DEVICE(bus,addr),##args))
+
+# IMU Configuration - MPU60XX via I2C (default for IMU module)
 define HAL_INS_DEFAULT HAL_INS_MPU60XX_I2C
 define HAL_INS_MPU6000_NAME "Invensense"
+define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensense, 0, 0x68, ROTATION_NONE)
+
+# Alternative IMU configurations (uncomment to use):
+# For different rotations if module mounted differently:
+# define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensense, 0, 0x68, ROTATION_ROLL_180)
+# define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensense, 0, 0x68, ROTATION_YAW_270)
+# For different I2C addresses:
+# define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensense, 0, 0x69, ROTATION_NONE)
 
 # Compass Configuration - external I2C compasses allowed
 define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
 
-# Barometer Configuration - BMP280 via I2C
+# Alternative compass configurations (uncomment to use):
+# For specific compass types:
+# define HAL_MAG_PROBE_LIST ADD_BACKEND(DRIVER_ICM20948, AP_Compass_AK09916::probe_ICM20948_I2C(0, ROTATION_NONE));
+
+# Barometer Configuration - BMP280 via I2C at address 0x77
 define HAL_BARO_ALLOW_INIT_NO_BARO 1
 define HAL_PROBE_EXTERNAL_I2C_BAROS 1
+define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
+
+# Alternative barometer configurations (uncomment to use):
+# For different I2C addresses:
+# define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x76)
 
 # WiFi Configuration
+# 1 = TCP mode (default for IMU module)
 define HAL_ESP32_WIFI 1
 define WIFI_SSID "ardupilot123"
 define WIFI_PWD "ardupilot123"
 
-# ADC Configuration - enabled with specific pins
+# WiFi Usage Notes:
+# - 1 = TCP mode, 2 = UDP mode
+# - For UDP: client connects as UDP in MissionPlanner to 192.168.4.1 port 14550
+# - To disable MAVLink over USB: Set SERIAL0_PROTOCOL = 0
+
+# ADC Configuration - enabled with 4 analog input pins
+# NOTE: ADC2 can't co-exist with WiFi, so we use ADC1 pins only
 define HAL_USE_ADC 1
 
-# Storage Configuration - no SD card, MAVLink logging
+# ADC Pin Configuration Notes:
+# - Uses GPIO pin numbers as ArduPilot parameter names (35, 34, 39, 36)
+# - All pins use scale factor 11 for 3.3V full scale
+# - Available ADC1 pins on ESP32: 32, 33, 34, 35, 36, 39
+
+# Storage Configuration - no SD card, MAVLink logging only
+# This IMU module doesn't have SD card support, uses MAVLink for logging
 define HAL_LOGGING_FILESYSTEM_ENABLED 0
 define HAL_LOGGING_DATAFLASH_ENABLED 0
 define HAL_LOGGING_MAVLINK_ENABLED 1
@@ -36,32 +78,57 @@ define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
 define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
 define HAL_LOGGING_BACKENDS_DEFAULT 1
 
-# SD Card - disabled
+# SD Card - disabled (not available on this board)
 define HAL_ESP32_SDCARD 0
 define HAL_ESP32_SDMMC 0
 
-# RMT (Remote Control) input pin
+# Alternative storage configurations:
+# For boards with SD card support, enable:
+# define HAL_ESP32_SDCARD 1
+# define HAL_LOGGING_FILESYSTEM_ENABLED 1
+
+# Debug Options - uncomment ONE at a time to avoid stack overflow
+# WARNING: Each debug option uses significant stack space
+# define ESP32_STORAGE_DEBUG 1    # Storage system debugging
+# define ESP32_SCHED_DEBUG 1      # Scheduler debugging  
+# define ESP32_FS_DEBUG 1         # Filesystem debugging
+# define ESP32_BUS_DEBUG 1        # I2C/SPI bus debugging
+# define ESP32_ANALOGIN_DEBUG 1   # ADC debugging
+
+# RMT (Remote Control) receiver input pin
 define HAL_ESP32_RMT_RX_PIN_NUMBER 13
 
-# Device probe lists (from static header)
-define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensense, 0, 0x68, ROTATION_NONE)
-define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
+# Pin Configuration for ESP32 IMU Module V11
+# Optimized pin assignments for IMU module with 6 RCOUT channels and 4 ADC pins
 
 # I2C Bus Configuration
+# Bus 0: SDA=GPIO4, SCL=GPIO5 (internal bus for IMU and barometer)
+# Used for MPU60XX at 0x68 and BMP280 at 0x77
 I2C_ORDER I2C0
 I2C0_SDA_PIN 4
 I2C0_SCL_PIN 5
 I2C0_SPEED 400000
 I2C0_INTERNAL 1
 
+# Alternative I2C configurations:
+# For different pin assignments, modify GPIO numbers above
+# Common ESP32 I2C pins: SDA(13,21,33), SCL(14,22,25,26,27)
+
 # UART Configuration
+# SERIAL0: TX=GPIO1, RX=GPIO3 (USB programming/debug console)
+# SERIAL1: TX=GPIO18, RX=GPIO19 (GPS/telemetry connection)
 UART_ORDER SERIAL0 SERIAL1
 SERIAL0_TX_PIN 1
 SERIAL0_RX_PIN 3
 SERIAL1_TX_PIN 18
 SERIAL1_RX_PIN 19
 
-# RCOUT Configuration (6 channels)
+# Alternative UART configurations:
+# GPS/telemetry can be moved to different pins if needed
+# Available UART pins: TX(2,12,14,16,17), RX(13,15,16,17)
+
+# RCOUT Configuration (6 channels for servo/motor outputs)
+# Pin assignment: GPIO33, GPIO25, GPIO32, GPIO26, GPIO27, GPIO23
 RCOUT1_PIN 33
 RCOUT2_PIN 25
 RCOUT3_PIN 32
@@ -69,18 +136,36 @@ RCOUT4_PIN 26
 RCOUT5_PIN 27
 RCOUT6_PIN 23
 
-# RCIN Configuration
+# Alternative RCOUT configurations:
+# For different pin assignments, use available GPIO pins: 2, 4, 12, 13, 14, 15, 16, 17
+# Avoid pins already used: I2C (4,5), UART (1,3,18,19), RCIN (13), ADC (34,35,36,39)
+
+# RCIN Configuration (receiver input)
+# GPIO13 for PWM receiver input (also used for RMT)
 RCIN_PIN 13
 
-# ADC Configuration (4 channels)
+# Alternative RCIN configurations:
+# Can use any available GPIO pin: 2, 12, 14, 15, 16, 17
+# Input-only pins also work well: 34, 35, 36, 39 (but these are used for ADC)
+
+# ADC Configuration (4 channels for analog sensors)
+# Uses all available ADC1 input-only pins with 11x scaling
+# Pin mapping: GPIO35→ADC35, GPIO34→ADC34, GPIO39→ADC39, GPIO36→ADC36
 ADC_ORDER ADC1 ADC2 ADC3 ADC4
-ADC1_PIN 35
+ADC1_PIN 35  # Input-only pin, ideal for analog sensors
 ADC1_SCALE 11
-ADC2_PIN 34
+ADC2_PIN 34  # Input-only pin, ideal for analog sensors
 ADC2_SCALE 11
-ADC3_PIN 39
+ADC3_PIN 39  # Input-only pin, ideal for analog sensors
 ADC3_SCALE 11
-ADC4_PIN 36
+ADC4_PIN 36  # Input-only pin, ideal for analog sensors
 ADC4_SCALE 11
 
-# No SPI buses or devices configured (empty in static header)
+# Alternative ADC configurations:
+# - Scale factor 11 = 3.3V full scale with voltage divider
+# - Can reduce number of ADC channels if not all needed
+# - Other ADC1 pins available: 32, 33 (but used for RCOUT)
+
+# SPI Configuration - not used on this board
+# Static header shows empty SPI configuration: HAL_ESP32_SPI_BUSES {}
+# This IMU module uses I2C for all sensors, no SPI devices

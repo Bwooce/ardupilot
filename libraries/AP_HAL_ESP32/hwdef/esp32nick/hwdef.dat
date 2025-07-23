@@ -1,0 +1,89 @@
+# ArduPilot Hardware Definition for ESP32-Nick Board
+# Based on ESP32 Classic with MPU9250 IMU and comprehensive peripheral support
+# Complete configuration matching original esp32nick.h static header
+
+MCU ESP32
+
+# Board identification  
+define HAL_ESP32_BOARD_NAME "esp32-nick"
+define CONFIG_HAL_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_NICK
+
+# IMU Configuration - MPU9250 via SPI
+define HAL_INS_DEFAULT HAL_INS_MPU9250_SPI
+define HAL_INS_MPU9250_NAME "mpu9250"
+define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, HAL_INS_MPU9250_NAME, ROTATION_NONE)
+
+# Barometer - BMP280 via SPI
+define HAL_BARO_PROBE_LIST PROBE_BARO_SPI(BMP280, "bmp280")
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
+
+# Compass - AK8963 integrated in MPU9250
+define HAL_MAG_PROBE_LIST PROBE_MAG_IMU(AK8963, mpu9250, 0, ROTATION_NONE)
+define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+define ALLOW_ARM_NO_COMPASS 1
+define AP_COMPASS_AK8963_ENABLED 1
+
+# WiFi Configuration
+define HAL_ESP32_WIFI 1
+define WIFI_SSID "ardupilot123"
+define WIFI_PWD "ardupilot123"
+
+# Storage Configuration
+define HAVE_FILESYSTEM_SUPPORT 1
+define HAL_OS_POSIX_IO 1
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+define HAL_ESP32_SDMMC 1
+define HAL_ESP32_SDCARD 1
+
+# Logging Configuration
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
+define LOGGER_MAVLINK_SUPPORT 1
+define HAL_LOGGING_BACKENDS_DEFAULT 1
+define HAL_LOGGING_DATAFLASH_ENABLED 0
+define HAL_LOGGING_MAVLINK_ENABLED 0
+
+# Terrain Directory
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
+
+# ADC Configuration - ESP32 Classic pins
+define HAL_USE_ADC 1
+
+# Pin Configuration (from esp32nick.h)
+# ESP32 Classic pin assignments matching static header exactly
+
+# SPI1 Bus - VSPI for IMU (MPU9250)
+SPI1_SCK_PIN 18
+SPI1_MISO_PIN 19  
+SPI1_MOSI_PIN 23
+MPU9250_CS_PIN 5
+
+# I2C1 Bus - for external compass and sensors
+I2C1_SDA_PIN 13
+I2C1_SCL_PIN 12
+
+# UART Configuration
+# UART0: TX=1, RX=3 (USB programming)
+SERIAL0_TX_PIN 1
+SERIAL0_RX_PIN 3
+
+# UART1: TX=17, RX=16 (GPS with compass)
+SERIAL1_TX_PIN 17
+SERIAL1_RX_PIN 16
+
+# RCOUT pins for servo/motor control (6 channels)
+RCOUT1_PIN 21
+RCOUT2_PIN 22
+RCOUT3_PIN 27
+RCOUT4_PIN 25
+RCOUT5_PIN 32
+RCOUT6_PIN 33
+
+# RCIN pin for RC input (RMT)
+RCIN_PIN 4
+define HAL_ESP32_RMT_RX_PIN_NUMBER 4
+
+# ADC pins for analog input (4 channels)
+ADC1_PIN 34
+ADC2_PIN 35
+ADC3_PIN 39
+ADC4_PIN 36

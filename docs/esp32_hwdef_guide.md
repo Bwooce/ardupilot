@@ -15,6 +15,21 @@ libraries/AP_HAL_ESP32/hwdef/<board_name>/hwdef.dat
 
 ## Supported hwdef Options
 
+### WiFi Configuration
+
+WiFi can be disabled at the board level to optimize dual-core usage:
+
+```
+# Disable WiFi for better dual-core performance
+define HAL_WITH_WIFI 0
+```
+
+When WiFi is disabled, the hwdef system automatically:
+- Disables ESP-IDF WiFi components (`CONFIG_ESP_WIFI_ENABLED`)
+- Pins the main task to CPU0 (`CONFIG_ESP_MAIN_TASK_AFFINITY_CPU0`)
+- Disables WiFi task configurations
+- Allows ArduPilot to utilize both cores more effectively
+
 ### PSRAM Configuration
 
 For boards with external PSRAM/SPIRAM, you can configure the memory settings:
@@ -50,7 +65,7 @@ PSRAM_RESERVE_INTERNAL 16384
 
 ### Example Configurations
 
-**Board with 8MB OPI PSRAM (like LilyGO T-Connect):**
+**Board with 8MB OPI PSRAM (like LilyGO T-Connect, T-2CAN):**
 ```
 PSRAM_SIZE 8MB
 PSRAM_MODE OPI
@@ -90,6 +105,11 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=16384
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 ```
+
+## Board-Specific Considerations
+
+### Dual CAN Boards (e.g., T-2CAN)
+Some ESP32 boards feature dual CAN interfaces using both native TWAI and external CAN controllers (like MCP2515). Currently, ArduPilot only supports the native ESP32 TWAI interface. External CAN controllers would require additional driver implementation.
 
 ## Adding New hwdef Options
 

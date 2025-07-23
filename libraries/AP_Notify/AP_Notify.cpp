@@ -385,9 +385,11 @@ void AP_Notify::add_backends(void)
                                                DISCRETE_RGB_POLARITY));
                 break;
 #endif
+#if HAL_APA102_ENABLED
             case Notify_LED_APA102:
                 ADD_BACKEND(NEW_NOTHROW AP_Notify_APA102_LED());
                 break;
+#endif
         }
     }
 

@@ -1195,9 +1195,29 @@ class esp32(Board):
                 HAL_PARAM_DEFAULTS_PATH='"@ROMFS/defaults.parm"',
             )
 
+        # Use generated board headers instead of static ones
         env.INCLUDES += [
-                cfg.srcnode.find_dir('libraries/AP_HAL_ESP32/boards').abspath(),
+                cfg.bldnode.find_dir('boards').abspath(),
             ]
+        
+        # Include hwdef.h in compilation for ESP32 builds
+        hwdef_h = cfg.bldnode.find_or_declare('hwdef.h').abspath()
+        env.CFLAGS += ['-include', hwdef_h]
+        env.CXXFLAGS += ['-include', hwdef_h]
+        
+        # Parse hwdef.dat for APA102 pins to set environment variables
+        hwdef_path = 'libraries/AP_HAL_ESP32/hwdef/%s/hwdef.dat' % self.get_name()
+        if os.path.exists(hwdef_path):
+            with open(hwdef_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('APA102_DATA_PIN='):
+                        pin_num = line.split('=')[1]
+                        env.APA102_DATA = pin_num
+                    elif line.startswith('APA102_CLOCK_PIN='):
+                        pin_num = line.split('=')[1] 
+                        env.APA102_CLOCK = pin_num
+        
         env.AP_PROGRAM_AS_STLIB = True
         #if cfg.options.enable_profile:
         #    env.CXXFLAGS += ['-pg',

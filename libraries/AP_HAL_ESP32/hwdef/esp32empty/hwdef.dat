@@ -1,0 +1,84 @@
+# ArduPilot Hardware Definition for ESP32-Empty Board
+# Based on ESP32 Classic - minimal configuration for testing and development
+# This board contains no sensors by design - great for novice users to gradually add sensors
+
+MCU ESP32
+
+# Board identification
+define HAL_ESP32_BOARD_NAME "esp32-empty"
+
+# Serial Protocol Configuration
+define DEFAULT_SERIAL2_PROTOCOL SerialProtocol_MAVLink2
+define DEFAULT_SERIAL2_BAUD 57600
+define DEFAULT_SERIAL3_PROTOCOL SerialProtocol_GPS
+define DEFAULT_SERIAL3_BAUD 38400
+define DEFAULT_SERIAL4_PROTOCOL SerialProtocol_None
+define DEFAULT_SERIAL5_PROTOCOL SerialProtocol_None
+define DEFAULT_SERIAL6_PROTOCOL SerialProtocol_None
+define DEFAULT_SERIAL7_PROTOCOL SerialProtocol_None
+define DEFAULT_SERIAL8_PROTOCOL SerialProtocol_None
+define DEFAULT_SERIAL9_PROTOCOL SerialProtocol_None
+
+# IMU Configuration - none by design
+define HAL_INS_DEFAULT HAL_INS_NONE
+
+# Compass - disabled, allow boot without compass
+define AP_COMPASS_ENABLE_DEFAULT 0
+define ALLOW_ARM_NO_COMPASS 1
+
+# Barometer - allow boot without baro
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
+
+# ADC - disabled
+define HAL_DISABLE_ADC_DRIVER 1
+define HAL_USE_ADC 0
+
+# Airspeed - disabled
+define AP_AIRSPEED_ENABLED 0
+define AP_AIRSPEED_ANALOG_ENABLED 0
+define AP_AIRSPEED_BACKEND_DEFAULT_ENABLED 0
+
+# LED - disabled
+define DEFAULT_NTF_LED_TYPES Notify_LED_None
+
+# RC Protocol - disabled for minimal setup
+define AP_RCPROTOCOL_ENABLED 0
+
+# WiFi Configuration
+define HAL_ESP32_WIFI 1
+define WIFI_SSID "ardupilot-esp32"
+define WIFI_PWD "ardupilot-esp32"
+
+# Logging Configuration
+define HAL_LOGGING_FILESYSTEM_ENABLED 0
+define HAL_LOGGING_DATAFLASH_ENABLED 0
+define HAL_LOGGING_MAVLINK_ENABLED 0
+define HAL_LOGGING_BACKENDS_DEFAULT 1
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
+
+# Motor frame configuration - only quad enabled to save RAM
+define AP_MOTORS_FRAME_DEFAULT_ENABLED 0
+define AP_MOTORS_FRAME_QUAD_ENABLED 1
+
+# Pin Configuration (from esp32empty.h)
+# Note: ESP32 Classic minimal pin setup
+
+# I2C Bus - available for external sensors
+# SDA=13, SCL=14 (internal, soft)
+
+# UART Configuration  
+# UART0: TX=1, RX=3 (USB programming)
+# UART1: TX=18, RX=34 (GPS) 
+# UART2: TX=17, RX=16 (MAVLink telemetry)
+SERIAL1_TX_PIN 18
+SERIAL1_RX_PIN 34
+SERIAL2_TX_PIN 17
+SERIAL2_RX_PIN 16
+
+# RCOUT pins for servo/motor control
+# GPIO 25, 27, 33, 32, 22, 21
+
+# RMT (Remote Control) input pin  
+define HAL_ESP32_RMT_RX_PIN_NUMBER 4

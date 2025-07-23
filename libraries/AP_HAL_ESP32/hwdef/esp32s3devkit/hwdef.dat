@@ -1,8 +1,41 @@
 # ArduPilot Hardware Definition for ESP32-S3 DevKit Board  
 # Based on ESP32-S3 with MPU9250 IMU via SPI
 # Complete configuration matching original esp32s3devkit.h static header
+#
+# This board supports multiple IMU and sensor configurations:
+# - Primary: MPU9250 IMU with AK8963 compass via SPI
+# - Alternative: ICM20XXX IMUs via I2C
+# - External I2C sensors: BMP280 barometer, additional compasses
+# - ADC inputs on multiple pins with flexible pin numbering
+# - 6-channel RCOUT for servo/motor control
+# - WiFi connectivity with TCP/UDP mavlink options
+# - SD card storage via SDMMC (faster) or SPI (flexible)
+# - Full debugging and development support
 
 MCU ESP32S3
+
+# Sensor probe helper macros for dynamic device detection
+# These allow the same hwdef to work with different sensor combinations
+define PROBE_IMU_I2C(driver, bus, addr, args...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_IMU_SPI(driver, devname, args...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))
+define PROBE_IMU_SPI2(driver, devname1, devname2, args...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname1),hal.spi->get_device(devname2),##args))
+define PROBE_BARO_I2C(driver, bus, addr, args...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(GET_I2C_DEVICE(bus, addr)),##args))
+define PROBE_BARO_SPI(driver, devname, args...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(hal.spi->get_device(devname)),##args))
+define PROBE_MAG_I2C(driver, bus, addr, args...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_MAG_SPI(driver, devname, args...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(hal.spi->get_device(devname),##args))
+define PROBE_MAG_IMU(driver, imudev, imu_instance, args...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe_ ## imudev(imu_instance,##args))
+define PROBE_MAG_IMU_I2C(driver, imudev, bus, addr, args...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe_ ## imudev(GET_I2C_DEVICE(bus,addr),##args))
+
+# ESP-IDF RTC watchdog definitions (missing from some ESP-IDF versions)
+define RTC_WDT_STG_SEL_OFF 0
+define RTC_WDT_STG_SEL_INT 1
+define RTC_WDT_STG_SEL_RESET_CPU 2
+define RTC_WDT_STG_SEL_RESET_SYSTEM 3
+define RTC_WDT_STG_SEL_RESET_RTC 4
+
+# Boolean definitions for configuration clarity
+define TRUE 1
+define FALSE 0
 
 # Board identification
 define CONFIG_HAL_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_S3DEVKIT  
@@ -14,18 +47,41 @@ define HAL_ESP32_BOARD_NAME "esp32s3devkit"
 # PSRAM_MALLOC_THRESHOLD 16384
 # PSRAM_RESERVE_INTERNAL 16384
 
-# IMU Configuration - MPU9250 via SPI
+# IMU Configuration Options
+# Primary configuration: MPU9250 via SPI with integrated AK8963 compass
 define AP_INERTIALSENSOR_ENABLED 1
 define HAL_INS_DEFAULT HAL_INS_MPU9250_SPI
 define HAL_INS_MPU9250_NAME "mpu9250"
 define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, HAL_INS_MPU9250_NAME, ROTATION_NONE)
+# Alternative IMU rotation if needed:
+# define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, HAL_INS_MPU9250_NAME, ROTATION_ROLL_180)
+#
+# Alternative I2C IMU configuration (comment out SPI config above and uncomment below):
+# define HAL_INS_DEFAULT HAL_INS_ICM20XXX_I2C  
+# define HAL_INS_ICM20XXX_I2C_BUS 0
+# define HAL_INS_ICM20XXX_I2C_ADDR 0x68
+# define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensensev2, 0, 0x68, ROTATION_YAW_270)
 
-# Barometer - BMP280 via SPI  
-define HAL_BARO_PROBE_LIST PROBE_BARO_SPI(BMP280, "bmp280")
+# Barometer Configuration
+# Primary: BMP280 via I2C (matches static header)
+define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
+# Alternative: BMP280 via SPI (if connected to SPI bus)
+# define HAL_BARO_PROBE_LIST PROBE_BARO_SPI(BMP280, "bmp280")
 define HAL_BARO_ALLOW_INIT_NO_BARO 1
 
-# Compass configuration
+# Compass Configuration
+# Primary: AK8963 integrated in MPU9250
+define HAL_COMPASS_DEFAULT HAL_COMPASS_AK8963_MPU9250
+define AP_COMPASS_AK8963_ENABLED TRUE
+define HAL_MAG_PROBE_LIST ADD_BACKEND(DRIVER_AK8963, AP_Compass_AK8963::probe_mpu9250(0, ROTATION_NONE))
 define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+# Alternative compass configurations:
+# define HAL_COMPASS_ICM20948_I2C_ADDR 0x68
+# define HAL_COMPASS_AK09916_I2C_BUS 0  
+# define HAL_COMPASS_AK09916_I2C_ADDR 0x0C
+# define HAL_COMPASS_MAX_SENSORS 3
+# define HAL_MAG_PROBE_LIST ADD_BACKEND(DRIVER_ICM20948, AP_Compass_AK09916::probe_ICM20948_I2C(0, ROTATION_NONE))
+# define HAL_MAG_PROBE_LIST PROBE_MAG_SPI(Invensense, "mpu9250")
 
 # Airspeed sensor disabled
 define AP_AIRSPEED_MS4525_ENABLED 0
@@ -33,17 +89,40 @@ define AP_AIRSPEED_ENABLED 0
 define AP_AIRSPEED_ANALOG_ENABLED 0
 define AP_AIRSPEED_BACKEND_DEFAULT_ENABLED 0
 
-# ADC Configuration  
-define HAL_USE_ADC 1
+# ADC Configuration
+# ESP32-S3 has many ADC-capable pins, but ADC2 cannot coexist with WiFi
+# Choose pins from ADC1 for reliable operation with WiFi enabled
+define HAL_USE_ADC TRUE
+# ADC pin numbering options - choose one consistent scheme:
+# Option 1: Use ADC channel numbers (recommended):
+# define HAL_ESP32_ADC_PINS {ADC_CHANNEL_4, 11, 1}, {ADC_CHANNEL_3, 11, 2}, {ADC_CHANNEL_1, 11, 3}, {ADC_CHANNEL_0, 11, 4}
+# Option 2: Use GPIO numbers directly:
+# define HAL_ESP32_ADC_PINS {ADC_GPIO35_CHANNEL, 11, 35}, {ADC_GPIO34_CHANNEL, 11, 34}, {ADC_GPIO39_CHANNEL, 11, 39}, {ADC_GPIO36_CHANNEL, 11, 36}
+# Format: {channel, gain_multiplier, ardupilot_pin_number}
+# Gain 11 provides good range for 3.3V signals
+# 
+# Alternative: Disable ADC if not needed
+# define HAL_DISABLE_ADC_DRIVER 1
 
 # WiFi Configuration
+# WiFi mode: 1=TCP, 2=UDP (for UDP, connect as UDPCL in Mission Planner to 192.168.4.1:14550)
 define HAL_ESP32_WIFI 1
 define WIFI_SSID "ardupilot123" 
 define WIFI_PWD "ardupilot123"
+# 
+# Tips for WiFi usage:
+# - For TCP/UDP mavlink, consider disabling USB serial: set SERIAL0_PROTOCOL=0
+# - Recommended logging parameters when using WiFi:
+#   LOG_BACKEND_TYPE=1 (log to SD card)
+#   LOG_DISARMED=1 (log when disarmed)
+#   SERIAL0_PROTOCOL=0 (disable USB serial to reduce interference)
 
 # Storage Configuration
+# SD Card support with SDMMC (faster, uses dedicated pins) or SPI (flexible pinout)
 define HAL_ESP32_SDCARD 1
-define HAL_ESP32_SDMMC 1
+define HAL_ESP32_SDMMC 1  # Use MMC mode for better performance
+# Alternative SPI SD card configuration (comment out SDMMC above and uncomment below):
+# define HAL_ESP32_SDSPI {.host=VSPI_HOST, .dma_ch=2, .mosi=GPIO_NUM_2, .miso=GPIO_NUM_15, .sclk=GPIO_NUM_14, .cs=GPIO_NUM_21}
 define HAVE_FILESYSTEM_SUPPORT 1
 define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
 define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
@@ -51,46 +130,77 @@ define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
 define HAL_OS_POSIX_IO 1
 
 # Logging Configuration
+# Backend types: 1=flash/SD card, 2=mavlink-over-wifi to companion computer
 define HAL_LOGGING_BACKENDS_DEFAULT 1
 define LOGGER_MAVLINK_SUPPORT 1
 
 # Pin Configuration (from esp32s3devkit.h)
 # ESP32-S3 pin assignments matching static header exactly
+#
+# ESP32-S3 Pin Constraints:
+# - GPIO 0: Boot mode control (pull high for normal boot)
+# - GPIO 19, 20: USB D-/D+ (reserved for USB OTG)
+# - GPIO 26-32: PSRAM/Flash pins (if used)
+# - GPIO 33-37: Available for SPI (used here)
+# - GPIO 43, 44: UART0 TX/RX (USB programming)
+# - ADC2 pins cannot be used with WiFi enabled
 
-# SPI1 Bus - SPI3 for IMU (MPU9250)
-SPI1_SCK_PIN 35
-SPI1_MISO_PIN 37
-SPI1_MOSI_PIN 36  
-MPU9250_CS_PIN 34
+# SPI1 Bus - SPI3_HOST (VSPI) for IMU sensors
+# Note: Uses GPIO 34-37 which are safe for SPI on ESP32-S3
+SPI1_SCK_PIN 35    # SPI clock
+SPI1_MISO_PIN 37   # SPI data in 
+SPI1_MOSI_PIN 36   # SPI data out
+MPU9250_CS_PIN 34  # MPU9250 chip select
+# Additional SPI device chip selects can use other available GPIOs
 
-# I2C1 Bus - for external compass and sensors
-I2C1_SDA_PIN 16
-I2C1_SCL_PIN 15
+# I2C1 Bus - for external sensors and expansion
+# Uses standard I2C pins with 400kHz speed
+I2C1_SDA_PIN 16    # I2C data line
+I2C1_SCL_PIN 15    # I2C clock line
+# Alternative I2C pins if needed:
+# I2C1_SDA_PIN 21, I2C1_SCL_PIN 22
 
 # UART Configuration
-# UART0: TX=43, RX=44 (USB programming)
-SERIAL0_TX_PIN 43
-SERIAL0_RX_PIN 44
-# UART1: TX=18, RX=17 (additional serial)
-SERIAL1_TX_PIN 18  
-SERIAL1_RX_PIN 17
+# UART0: Default USB programming interface
+SERIAL0_TX_PIN 43  # USB UART TX (connected to USB-to-serial chip)
+SERIAL0_RX_PIN 44  # USB UART RX (connected to USB-to-serial chip)
+# UART1: Additional serial port for telemetry/GPS
+SERIAL1_TX_PIN 18  # Hardware UART1 TX
+SERIAL1_RX_PIN 17  # Hardware UART1 RX
+# Alternative UART pins if needed:
+# SERIAL1_TX_PIN 4, SERIAL1_RX_PIN 5
 
 # RCOUT pins for servo/motor control (6 channels)
-RCOUT1_PIN 11
-RCOUT2_PIN 10
-RCOUT3_PIN 9
-RCOUT4_PIN 8
-RCOUT5_PIN 7
-RCOUT6_PIN 6
+# These pins support PWM output for ESCs and servos
+RCOUT1_PIN 11      # Motor/servo 1
+RCOUT2_PIN 10      # Motor/servo 2
+RCOUT3_PIN 9       # Motor/servo 3
+RCOUT4_PIN 8       # Motor/servo 4
+RCOUT5_PIN 7       # Motor/servo 5
+RCOUT6_PIN 6       # Motor/servo 6
+# Alternative RCOUT pins if needed:
+# Can use GPIO 1-6, 12-14, 21, 38-42, 45-48
 
-# RCIN pin for receiver input
-RCIN_PIN 14
+# RCIN pin for receiver input (PPM/SBUS)
+RCIN_PIN 14        # RC receiver input
+# Alternative RCIN pins: GPIO 12, 13, 21
 
-# RMT configuration for receiver  
+# RMT configuration for receiver protocol decoding
 define HAL_ESP32_RMT_RX_PIN_NUMBER 14
 
-# ADC pins - ESP32-S3 ADC capable pins
-ADC1_PIN 1
-ADC2_PIN 2
-ADC3_PIN 3
-ADC4_PIN 4
+# ADC pins - ESP32-S3 ADC1 capable pins (ADC2 conflicts with WiFi)
+# These correspond to the ADC_CHANNEL definitions above
+ADC1_PIN 1         # ADC1_CH0 - can also use GPIO 2,3,4
+ADC2_PIN 2         # ADC1_CH1 
+ADC3_PIN 3         # ADC1_CH2
+ADC4_PIN 4         # ADC1_CH3
+# Additional ADC1 pins available: GPIO 5,6,7,8,9,10
+# Avoid ADC2 pins (GPIO 11-20) when WiFi is enabled
+
+# Debugging Options (uncomment for additional debug output)
+# define INSEDEBUG 1      # IMU/INS debugging
+# define STORAGEDEBUG 1   # Storage system debugging  
+# define SCHEDDEBUG 1     # Scheduler debugging
+# define FSDEBUG 1        # Filesystem debugging
+# define BUSDEBUG 1       # I2C/SPI bus debugging
+# WARNING: Debug options may cause stack overflows on ESP32 - use with caution

@@ -115,6 +115,12 @@ void RCOutput::init()
 
     _initialized = true; // assume we are initialized, any error will call abort()
 
+    // Return early if no RCOUT pins are configured
+    if (MAX_CHANNELS == 0) {
+        printf("No RCOUT pins configured, RCOutput disabled\n");
+        return;
+    }
+
     RCOutput::pwm_group *curr_group = &pwm_group_list[0];
     RCOutput::pwm_chan *curr_ch = &pwm_chan_list[0];
     int chan = 0;

@@ -57,6 +57,25 @@ def configure(cfg):
     # setup cmake
     cfg.env['IDF_TARGET'] = mcu
     
+    # Process hwdef files to generate board-specific configuration
+    board_name = getattr(cfg.options, 'board', '').replace('esp32', '')
+    if board_name:
+        hwdef_dir = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/hwdef/{cfg.options.board}')
+        hwdef_file = os.path.join(hwdef_dir, 'hwdef.dat')
+        
+        if os.path.exists(hwdef_file):
+            # Run the ESP32 hwdef processor
+            hwdef_script = os.path.join(cfg.srcnode.abspath(), 'libraries/AP_HAL_ESP32/hwdef/scripts/esp32_hwdef.py')
+            if os.path.exists(hwdef_script):
+                import subprocess
+                build_dir = cfg.bldnode.abspath()
+                cmd = [cfg.env.PYTHON[0], hwdef_script, '-D', build_dir, hwdef_file]
+                print(f"Processing hwdef: {' '.join(cmd)}")
+                try:
+                    subprocess.run(cmd, check=True, cwd=cfg.srcnode.abspath())
+                except subprocess.CalledProcessError as e:
+                    cfg.fatal(f"hwdef processing failed: {e}")
+    
     # Build list of sdkconfig.defaults files: target-level + board-level (if exists)
     target_sdkconfig = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/targets/{mcu}/esp-idf/sdkconfig.defaults')
     board_sdkconfig = os.path.join(cfg.bldnode.abspath(), 'sdkconfig.board')

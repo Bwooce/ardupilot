@@ -1,4 +1,7 @@
 #include "APA102_LED.h"
+
+#if HAL_APA102_ENABLED
+
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Notify/AP_Notify.h>
 #include <AP_GPS/AP_GPS.h>
@@ -90,3 +93,5 @@ void AP_Notify_APA102_LED::send_end_frame()
         clock_pin->write(1);
     }
 }
+
+#endif // HAL_APA102_ENABLED

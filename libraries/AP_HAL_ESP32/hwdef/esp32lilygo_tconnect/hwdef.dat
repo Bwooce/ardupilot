@@ -13,19 +13,101 @@ define HAL_NUM_CAN_IFACES 1
 define HAL_ENABLE_DRONECAN_DRIVERS 1
 define HAL_WITH_WIFI 0
 
-# CAN pins
-CAN_TX_1=4
-CAN_RX_1=5
+# Standard ESP32-S3 board configuration
+define HAL_ESP32_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_S3
+define HAL_WITH_UAVCAN 1
+define HAL_MAX_CAN_PROTOCOL_DRIVERS 1
+define HAL_ENABLE_LIDAR_DRIVERS 1
+define HAL_ENABLE_DRONECAN 1
+define CAN1_PROTOCOL DRONECAN
+define HAL_USE_OTG 1
+define HAL_I2C_INTERNAL_MASK 1
+define HAL_I2C_EXTERNAL_MASK 2
+
+# Sensor defaults for T-Connect board
+define HAL_IMU_TEMP_DEFAULT 55
+define HAL_DEFAULT_INS_FAST_SAMPLE 1
+define HAL_COMPASS_DEFAULT HAL_COMPASS_AK09915
+define HAL_BARO_DEFAULT HAL_BARO_DPS310
+
+# Vehicle frame defaults
+define HAL_DEFAULT_FRAME_CLASS 2
+define HAL_DEFAULT_FRAME_TYPE 2
+
+# Feature configuration
+define HAL_MINIMIZE_FEATURES 0
+define HAL_MINIMIZE_FLASH_SIZE 0
+define HAL_ENABLE_NETWORKING 0
+define HAL_NETWORKING_BACKEND_CHIBIOS 1
+define HAL_OS_FATFS_IO 1
+
+# Storage directories
+define HAL_BOARD_LOG_DIRECTORY "/APM/LOGS"
+define HAL_BOARD_TERRAIN_DIRECTORY "/APM/TERRAIN"
+
+# Peripheral support
+define HAL_RCINPUT_WITH_AP_RADIO 1
+define HAL_MOUNT_ENABLED 1
+define HAL_RALLY_ENABLED 1
+define HAL_BEACON_ENABLED 1
+define HAL_PROXIMITY_ENABLED 1
+define HAL_ADSB_ENABLED 0
+define HAL_TORQEEDO_ENABLED 1
+define HAL_GENERATOR_ENABLED 1
+define HAL_EFI_ENABLED 1
+define HAL_WHEEL_ENCODER_ENABLED 1
+define HAL_DRONECAN_ESC_ENABLED 1
+
+# Bootloader configuration
+define HAL_ENABLE_CANBOOTLOADER 1
+define HAL_CANBOOTLOADER_TIMEOUT 5000
+define HAL_BOOTLOADER_TIMEOUT 5000
+
+# Storage configuration
+define HAL_USE_EMPTY_STORAGE 1
+define FLASH_RESERVE_START_KB 64
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
+
+# Additional peripherals
+define HAL_SPRAYER_ENABLED 1
+define HAL_GRIPPER_ENABLED 1
+define HAL_LANDING_GEAR_ENABLED 1
+define HAL_BUTTON_ENABLED 1
+define HAL_DEBUG_BUILD 0
+define HAL_ENABLE_THREAD_STATISTICS 1
+
+# T-Connect Board Pin Configuration
+# Based on https://github.com/Xinyuan-LilyGO/T-Connect/blob/main/libraries/Mylibrary/pin_config.h
+
+# CAN Interface 4 (rightmost connector)
+CAN_TX_1=9
+CAN_RX_1=10
 
 # APA102 LED pins
+define HAL_APA102_ENABLED 1
 APA102_DATA_PIN=8
 APA102_CLOCK_PIN=3
 
 # Boot button
 KEY_BOOT=0
 
-# --- UARTs ---
-# Serial 0 (USB) is used for programming and debugging
+# UART Interfaces - All RS485/CAN connector pins are hardwired and unavailable for general use
+# Interface 1: GPIO 4,5 (hardwired RS485/CAN)
+# Interface 2: GPIO 6,7 (hardwired RS485/CAN) 
+# Interface 3: GPIO 17,18 (hardwired RS485/CAN)
+# Interface 4: GPIO 9,10 (hardwired CAN, configured above)
+
+# Serial 1 for CRSF/ELRS using available GPIO pins from top-left header
+# Using GPIO 1,2 from the available pin header block
+SERIAL1_TX_PIN 1
+SERIAL1_RX_PIN 2
 SERIAL1_BAUD 115200
-SERIAL1_TX_PIN 12
-SERIAL1_RX_PIN 13
+
+# QWIIC connector configured as UART for GPS (43/44)
+# Despite the name "QWIIC", these pins are labeled TX/RX on the T-Connect
+SERIAL2_TX_PIN 43
+SERIAL2_RX_PIN 44  
+SERIAL2_BAUD 38400
+
+# RMT (Remote Control) receiver input pin
+define HAL_ESP32_RMT_RX_PIN_NUMBER GPIO_NUM_14

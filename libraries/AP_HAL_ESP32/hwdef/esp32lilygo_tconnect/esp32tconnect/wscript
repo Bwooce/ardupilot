@@ -1,0 +1,13 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+Build configuration for LilyGO T-Connect ESP32-S3 board
+ArduPilot Rover build configuration with WiFi disabled
+"""
+
+def build(bld):
+    pass
+
+def configure(cfg):
+    pass
