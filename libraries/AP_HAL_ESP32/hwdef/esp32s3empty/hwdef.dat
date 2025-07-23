@@ -1,7 +1,115 @@
-# ESP32-S3 Empty Board Configuration
+# ArduPilot Hardware Definition for ESP32-S3 Empty Board
+# Minimal template configuration with no sensors - suitable for custom builds
 
-# PSRAM Configuration (uncomment and adjust if your board has PSRAM)
+MCU ESP32S3
+
+# Board identification
+define CONFIG_HAL_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_S3EMPTY
+define HAL_ESP32_BOARD_NAME "esp32s3empty"
+
+# No sensors configured - template board
+define HAL_INS_DEFAULT HAL_INS_NONE
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
+
+# Compass Configuration - disabled 
+define AP_COMPASS_ENABLE_DEFAULT 0
+define ALLOW_ARM_NO_COMPASS 1
+
+# Airspeed - disabled
+define AP_AIRSPEED_ENABLED 0
+define AP_AIRSPEED_ANALOG_ENABLED 0
+define AP_AIRSPEED_BACKEND_DEFAULT_ENABLED 0
+
+# ADC - disabled
+define HAL_DISABLE_ADC_DRIVER 1
+define HAL_USE_ADC 0
+
+# WiFi Configuration - UDP mode
+define HAL_ESP32_WIFI 2
+define WIFI_SSID "ardupilot123" 
+define WIFI_PWD "ardupilot123"
+
+# RC Protocol - disabled
+define AP_RCPROTOCOL_ENABLED 0
+
+# Storage Configuration - minimal logging
+define HAL_LOGGING_FILESYSTEM_ENABLED 0
+define HAL_LOGGING_DATAFLASH_ENABLED 0
+define HAL_LOGGING_MAVLINK_ENABLED 0
+define HAL_LOGGING_BACKENDS_DEFAULT 1
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
+
+# Filesystem and scripting - disabled for minimal build
+define AP_FILESYSTEM_ESP32_ENABLED 0
+define AP_SCRIPTING_ENABLED 0
+define HAL_USE_EMPTY_STORAGE 1
+
+# Motor frame optimization - only quad enabled to save DRAM
+define AP_MOTORS_FRAME_DEFAULT_ENABLED 0
+define AP_MOTORS_FRAME_QUAD_ENABLED 1
+
+# RMT pin for RC input - avoiding I2C SCL conflict
+define HAL_ESP32_RMT_RX_PIN_NUMBER 16
+
+# ESP-IDF missing defines (temporary)
+define RTC_WDT_STG_SEL_OFF 0
+define RTC_WDT_STG_SEL_INT 1
+define RTC_WDT_STG_SEL_RESET_CPU 2
+define RTC_WDT_STG_SEL_RESET_SYSTEM 3
+define RTC_WDT_STG_SEL_RESET_RTC 4
+
+# I2C Bus Configuration - basic single bus
+I2C_ORDER I2C0
+I2C0_SDA_PIN 13
+I2C0_SCL_PIN 14
+I2C0_SPEED 400000
+I2C0_INTERNAL 1
+I2C0_SOFT 1
+
+# UART Configuration
+# UART0: GPIO 43/44 (USB debug)
+# UART1: GPIO 17/18 (general purpose)
+UART_ORDER SERIAL0 SERIAL1
+SERIAL0_TX_PIN 43
+SERIAL0_RX_PIN 44
+SERIAL1_TX_PIN 18
+SERIAL1_RX_PIN 17
+
+# RCOUT Configuration - 6 channels
+RCOUT1_PIN 11
+RCOUT2_PIN 10
+RCOUT3_PIN 9
+RCOUT4_PIN 8
+RCOUT5_PIN 7
+RCOUT6_PIN 6
+
+# RCIN Configuration - using RMT pin 
+# Note: In original static header, GPIO 14 was shared between I2C SCL and RCIN
+# This creates a pin conflict, so using a different pin for RCIN
+RCIN_PIN 16
+
+# No SPI buses or devices configured (empty template)
+
+# PSRAM Configuration (uncomment if your board has PSRAM)
 # PSRAM_SIZE 8MB
 # PSRAM_MODE OPI
 # PSRAM_MALLOC_THRESHOLD 16384
 # PSRAM_RESERVE_INTERNAL 16384
+
+# Alternative pin configurations (commented examples):
+# 
+# For custom sensor configurations, uncomment and modify:
+# define HAL_INS_DEFAULT HAL_INS_MPU9250_SPI
+# define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, "mpu9250", ROTATION_NONE)
+# 
+# For SPI devices:
+# SPI1_SCK_PIN 35
+# SPI1_MISO_PIN 37
+# SPI1_MOSI_PIN 36
+# MPU9250_CS_PIN 34
+#
+# For additional I2C buses:
+# I2C1_SDA_PIN 16
+# I2C1_SCL_PIN 15

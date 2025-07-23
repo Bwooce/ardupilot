@@ -1,6 +1,125 @@
-# ESP32-S3 M5StampFly Board Configuration
+# ArduPilot Hardware Definition for ESP32-S3 M5StampFly Board
+# Compact ESP32-S3 board with BMI270 IMU, BMP280 baro, and Grove connectors
 
-# PSRAM Configuration (uncomment and adjust if your board has PSRAM)
+MCU ESP32S3
+
+# Board identification
+define CONFIG_HAL_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_S3M5STAMPFLY
+define HAL_ESP32_BOARD_NAME "esp32s3m5stampfly"
+
+# IMU Configuration - BMI270 via SPI
+define HAL_INS_PROBE_LIST PROBE_IMU_SPI(BMI270, "bmi270", ROTATION_ROLL_180_YAW_90)
+
+# Barometer Configuration - BMP280 via I2C
+define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x76)
+
+# Compass Configuration - disabled by default
+define AP_COMPASS_ENABLE_DEFAULT 0
+define ALLOW_ARM_NO_COMPASS 1
+
+# Airspeed - disabled
+define AP_AIRSPEED_ENABLED 0
+define AP_AIRSPEED_ANALOG_ENABLED 0
+define AP_AIRSPEED_BACKEND_DEFAULT_ENABLED 0
+
+# ADC - disabled
+define HAL_DISABLE_ADC_DRIVER 1
+define HAL_USE_ADC 0
+
+# Battery monitoring - INA3221 configuration
+define AP_BATTERY_INA3221_ENABLED 1
+define HAL_BATTMON_INA3221_SHUNT_OHMS 0.01
+define HAL_BATTMON_INA3221_SHUNT_CONV_TIME_SEL HAL_BATTMON_INA3221_CONV_TIME_4156US
+define HAL_BATTMON_INA3221_BUS_CONV_TIME_SEL HAL_BATTMON_INA3221_CONV_TIME_4156US
+define HAL_BATTMON_INA3221_AVG_MODE_SEL HAL_BATTMON_INA3221_AVG_MODE_16
+
+# WiFi Configuration - UDP mode
+define HAL_ESP32_WIFI 2
+define WIFI_SSID "ardupilot123"
+define WIFI_PWD "ardupilot123"
+
+# RC Protocol - disabled
+define AP_RCPROTOCOL_ENABLED 0
+
+# Storage Configuration - MAVLink logging only
+define HAL_LOGGING_FILESYSTEM_ENABLED 0
+define HAL_LOGGING_DATAFLASH_ENABLED 0
+define HAL_LOGGING_MAVLINK_ENABLED 1
+define HAL_LOGGING_BACKENDS_DEFAULT 2
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
+
+# Filesystem and scripting - disabled for space
+define AP_FILESYSTEM_ESP32_ENABLED 0
+define AP_SCRIPTING_ENABLED 0
+
+# RMT pin for RC input
+define HAL_ESP32_RMT_RX_PIN_NUMBER 16
+
+# ESP-IDF missing defines (temporary)
+define RTC_WDT_STG_SEL_OFF 0
+define RTC_WDT_STG_SEL_INT 1
+define RTC_WDT_STG_SEL_RESET_CPU 2
+define RTC_WDT_STG_SEL_RESET_SYSTEM 3
+define RTC_WDT_STG_SEL_RESET_RTC 4
+
+# I2C Bus Configuration
+# Bus 0: Internal (GPIO 3/4)
+# Bus 1: Grove Red connector (GPIO 13/15) - has 4.7kΩ pullups
+I2C_ORDER I2C0 I2C1
+I2C0_SDA_PIN 3
+I2C0_SCL_PIN 4
+I2C0_SPEED 400000
+I2C0_INTERNAL 1
+
+I2C1_SDA_PIN 13
+I2C1_SCL_PIN 15
+I2C1_SPEED 400000
+I2C1_INTERNAL 0
+
+# UART Configuration
+# UART0: GPIO 17/18 (USB debug)
+# UART1: Grove Black connector (GPIO 1/2) - SERIAL3
+UART_ORDER SERIAL0 SERIAL1
+SERIAL0_TX_PIN 17
+SERIAL0_RX_PIN 18
+SERIAL1_TX_PIN 2
+SERIAL1_RX_PIN 1
+
+# RCOUT Configuration - Quad X order (r-up, l-down, l-up, r-down)
+RCOUT1_PIN 42
+RCOUT2_PIN 10
+RCOUT3_PIN 5
+RCOUT4_PIN 41
+
+# SPI1 Bus - SPI2_HOST for BMI270
+SPI1_SCK_PIN 44
+SPI1_MISO_PIN 43
+SPI1_MOSI_PIN 14
+
+# SPI Devices
+# BMI270 IMU on main SPI bus
+BMI270_CS_PIN 46
+
+# Pixart optical flow sensor CS (disabled via naming)
+# Note: Listed to deassert CS but disabled by driver name
+SPI1_CS_PIN 12
+
+# Grove Connector Pinouts (for reference):
+# Grove Red (I2C): 
+#   Pin 1: GPIO 15 (SCL, 4.7kΩ pullup)
+#   Pin 2: GPIO 13 (SDA, 4.7kΩ pullup)
+#   Pin 3: +V (5V USB or Vbat)
+#   Pin 4: GND
+#
+# Grove Black (SERIAL3):
+#   Pin 1: GPIO 1 (RX)
+#   Pin 2: GPIO 3 (TX) 
+#   Pin 3: +V (5V USB or Vbat)
+#   Pin 4: GND
+
+# PSRAM Configuration (uncomment if your board has PSRAM)
 # PSRAM_SIZE 8MB
 # PSRAM_MODE OPI
 # PSRAM_MALLOC_THRESHOLD 16384

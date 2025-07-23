@@ -1,0 +1,77 @@
+# ArduPilot Hardware Definition for ESP32-Icarus Board  
+# Based on ESP32 Classic with MPU6000 IMU via SPI and WiFi capabilities
+
+MCU ESP32
+
+# Board identification
+define HAL_ESP32_BOARD_NAME "esp32-icarus"
+
+# IMU Configuration - MPU6000 via SPI
+define HAL_INS_DEFAULT AP_FEATURE_BOARD_DETECT
+define HAL_INS_MPU60x0_NAME "MPU6000"
+
+# Compass - allow boot without compass
+define ALLOW_ARM_NO_COMPASS 1
+
+# WiFi Configuration
+define HAL_ESP32_WIFI 1
+
+# MAVLink Configuration
+define HAL_ESP32_NO_MAVLINK_0 1
+
+# Storage Configuration
+define HAL_ESP32_SDCARD 1
+define HAL_ESP32_SDMMC 1
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
+
+# ADC Configuration - disabled
+define HAL_DISABLE_ADC_DRIVER 1
+define HAL_USE_ADC 0
+
+# Pin Configuration (from esp32icarus.h)
+# Note: ESP32 Classic has different pin numbering than ESP32-S3
+
+# RMT (Remote Control) input pin  
+define HAL_ESP32_RMT_RX_PIN_NUMBER 36
+
+# I2C Bus Configuration - external bus
+I2C_ORDER I2C0
+I2C0_SDA_PIN 26
+I2C0_SCL_PIN 25
+I2C0_SPEED 400000
+I2C0_INTERNAL 0
+
+# UART Configuration
+UART_ORDER SERIAL0 SERIAL1 SERIAL2
+SERIAL0_TX_PIN 1
+SERIAL0_RX_PIN 3
+SERIAL1_TX_PIN 32
+SERIAL1_RX_PIN 34
+SERIAL2_TX_PIN 33
+SERIAL2_RX_PIN 35
+
+# RCOUT Configuration - 6 channels  
+# Note: Changed from original pins (9,10,27,13,22,21) due to ESP32 pin restrictions
+# Using safe GPIO pins that don't conflict with Flash/PSRAM/USB or UARTs
+RCOUT1_PIN 16
+RCOUT2_PIN 4
+RCOUT3_PIN 27
+RCOUT4_PIN 13
+RCOUT5_PIN 22
+RCOUT6_PIN 21
+
+# RCIN Configuration
+RCIN_PIN 36
+
+# SPI1 Bus - VSPI for MPU6000
+SPI1_SCK_PIN 18
+SPI1_MISO_PIN 19
+SPI1_MOSI_PIN 23
+
+# SPI Device - MPU6000 IMU
+MPU6000_CS_PIN 5
+
+# Common definitions
+define TRUE 1
