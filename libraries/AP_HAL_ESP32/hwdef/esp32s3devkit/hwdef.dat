@@ -161,6 +161,8 @@ I2C1_SCL_PIN 15    # I2C clock line
 # I2C1_SDA_PIN 21, I2C1_SCL_PIN 22
 
 # UART Configuration
+UART_ORDER SERIAL0 SERIAL1
+
 # UART0: Default USB programming interface
 SERIAL0_TX_PIN 43  # USB UART TX (connected to USB-to-serial chip)
 SERIAL0_RX_PIN 44  # USB UART RX (connected to USB-to-serial chip)

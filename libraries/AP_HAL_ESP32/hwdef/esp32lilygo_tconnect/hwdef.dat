@@ -1,7 +1,22 @@
 # ArduPilot Hardware Definition for the LilyGO T-Connect
+# ESP32-S3 based DroneCAN hub for rover applications
+# Features: 8MB OPI PSRAM, DroneCAN interface, minimal sensors for rover operation
 #
 
 MCU ESP32S3
+
+# Board identification
+define HAL_ESP32_BOARD_NAME "esp32lilygo_tconnect"
+
+# Sensor probe helper macros for easier configuration
+define PROBE_IMU_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_IMU_SPI(driver, devname, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))
+define PROBE_BARO_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(GET_I2C_DEVICE(bus, addr)),##args))
+define PROBE_MAG_I2C(driver, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(GET_I2C_DEVICE(bus, addr),##args))
+
+# Boolean definitions for configuration clarity
+define TRUE 1
+define FALSE 0
 
 # PSRAM Configuration - T-Connect has 8MB OPI PSRAM
 PSRAM_SIZE 8MB
@@ -9,77 +24,64 @@ PSRAM_MODE OPI
 PSRAM_MALLOC_THRESHOLD 16384
 PSRAM_RESERVE_INTERNAL 16384
 
+# DroneCAN configuration - primary interface
 define HAL_NUM_CAN_IFACES 1
 define HAL_ENABLE_DRONECAN_DRIVERS 1
-define HAL_WITH_WIFI 0
-
-# Standard ESP32-S3 board configuration
-define HAL_ESP32_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_S3
 define HAL_WITH_UAVCAN 1
 define HAL_MAX_CAN_PROTOCOL_DRIVERS 1
-define HAL_ENABLE_LIDAR_DRIVERS 1
 define HAL_ENABLE_DRONECAN 1
 define CAN1_PROTOCOL DRONECAN
+
+# Board identification
+define HAL_ESP32_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_S3
 define HAL_USE_OTG 1
-define HAL_I2C_INTERNAL_MASK 1
-define HAL_I2C_EXTERNAL_MASK 2
 
-# Sensor defaults for T-Connect board
-define HAL_IMU_TEMP_DEFAULT 55
-define HAL_DEFAULT_INS_FAST_SAMPLE 1
-define HAL_COMPASS_DEFAULT HAL_COMPASS_AK09915
-define HAL_BARO_DEFAULT HAL_BARO_DPS310
+# Rover-specific sensor configuration - minimal requirements
+# Rover can operate with compass-free navigation for basic operation
+define HAL_COMPASS_ENABLED 0
+define ALLOW_ARM_NO_COMPASS 1
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
 
-# Vehicle frame defaults
-define HAL_DEFAULT_FRAME_CLASS 2
-define HAL_DEFAULT_FRAME_TYPE 2
+# IMU Configuration - Enable minimal IMU for AHRS backend
+# ArduPilot rover requires AHRS backend for startup
+define AP_INERTIALSENSOR_ENABLED 1
+define HAL_INS_DEFAULT HAL_INS_NONE
 
-# Feature configuration
-define HAL_MINIMIZE_FEATURES 0
-define HAL_MINIMIZE_FLASH_SIZE 0
-define HAL_ENABLE_NETWORKING 0
-define HAL_NETWORKING_BACKEND_CHIBIOS 1
-define HAL_OS_FATFS_IO 1
+# Enable DCM AHRS backend (minimal attitude estimation)
+define AP_AHRS_DCM_ENABLED 1
+
+# Alternative IMU configurations (uncomment when IMU hardware is available):
+# For MPU6000/MPU9250 via I2C:
+# define AP_INERTIALSENSOR_ENABLED 1
+# define HAL_INS_DEFAULT HAL_INS_MPU60XX_I2C
+# define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensensev2, 0, 0x68, ROTATION_NONE)
+
+# For ICM20XXX IMUs via I2C:
+# define AP_INERTIALSENSOR_ENABLED 1
+# define HAL_INS_DEFAULT HAL_INS_ICM20XXX_I2C  
+# define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensensev3, 0, 0x68, ROTATION_NONE)
+
+# Vehicle frame defaults for rover
+define HAL_DEFAULT_FRAME_CLASS 2  # Rover
+define HAL_DEFAULT_FRAME_TYPE 0   # Undefined/Generic rover
+
+# Storage configuration - Use PSRAM for in-memory logging
+define HAL_LOGGING_DATAFLASH_ENABLED 0
+define HAL_LOGGING_FILESYSTEM_ENABLED 0
+define HAL_LOGGING_MAVLINK_ENABLED 1
+define HAL_LOGGING_BACKENDS_DEFAULT 2
 
 # Storage directories
 define HAL_BOARD_LOG_DIRECTORY "/APM/LOGS"
 define HAL_BOARD_TERRAIN_DIRECTORY "/APM/TERRAIN"
 
-# Peripheral support
-define HAL_RCINPUT_WITH_AP_RADIO 1
-define HAL_MOUNT_ENABLED 1
-define HAL_RALLY_ENABLED 1
-define HAL_BEACON_ENABLED 1
-define HAL_PROXIMITY_ENABLED 1
-define HAL_ADSB_ENABLED 0
-define HAL_TORQEEDO_ENABLED 1
-define HAL_GENERATOR_ENABLED 1
-define HAL_EFI_ENABLED 1
-define HAL_WHEEL_ENCODER_ENABLED 1
-define HAL_DRONECAN_ESC_ENABLED 1
-
-# Bootloader configuration
-define HAL_ENABLE_CANBOOTLOADER 1
-define HAL_CANBOOTLOADER_TIMEOUT 5000
-define HAL_BOOTLOADER_TIMEOUT 5000
-
-# Storage configuration
-define HAL_USE_EMPTY_STORAGE 1
-define FLASH_RESERVE_START_KB 64
-define HAL_BARO_ALLOW_INIT_NO_BARO 1
-
-# Additional peripherals
-define HAL_SPRAYER_ENABLED 1
-define HAL_GRIPPER_ENABLED 1
-define HAL_LANDING_GEAR_ENABLED 1
-define HAL_BUTTON_ENABLED 1
-define HAL_DEBUG_BUILD 0
-define HAL_ENABLE_THREAD_STATISTICS 1
+# Feature configuration for DroneCAN hub
+define HAL_MINIMIZE_FEATURES 0
+define HAL_MINIMIZE_FLASH_SIZE 0
+define HAL_OS_FATFS_IO 1
 
 # T-Connect Board Pin Configuration
-# Based on https://github.com/Xinyuan-LilyGO/T-Connect/blob/main/libraries/Mylibrary/pin_config.h
-
-# CAN Interface 4 (rightmost connector)
+# CAN Interface (primary function)
 CAN_TX_1=9
 CAN_RX_1=10
 
@@ -88,26 +90,94 @@ define HAL_APA102_ENABLED 1
 APA102_DATA_PIN=8
 APA102_CLOCK_PIN=3
 
-# Boot button
-KEY_BOOT=0
+# RCOUT Configuration - Rover motor outputs
+RCOUT1_PIN 11  # Right motor
+RCOUT2_PIN 12  # Left motor
 
-# UART Interfaces - All RS485/CAN connector pins are hardwired and unavailable for general use
-# Interface 1: GPIO 4,5 (hardwired RS485/CAN)
-# Interface 2: GPIO 6,7 (hardwired RS485/CAN) 
-# Interface 3: GPIO 17,18 (hardwired RS485/CAN)
-# Interface 4: GPIO 9,10 (hardwired CAN, configured above)
-
-# Serial 1 for CRSF/ELRS using available GPIO pins from top-left header
-# Using GPIO 1,2 from the available pin header block
+# Serial interfaces
+# SERIAL0 is USB (built-in)
+UART_ORDER SERIAL0 SERIAL1 SERIAL2
+SERIAL0_TX_PIN 43  # USB-Serial/JTAG
+SERIAL0_RX_PIN 44  # USB-Serial/JTAG# SERIAL1 for CRSF/ELRS 
 SERIAL1_TX_PIN 1
 SERIAL1_RX_PIN 2
 SERIAL1_BAUD 115200
 
-# QWIIC connector configured as UART for GPS (43/44)
-# Despite the name "QWIIC", these pins are labeled TX/RX on the T-Connect
-SERIAL2_TX_PIN 43
-SERIAL2_RX_PIN 44  
+# SERIAL2 for GPS
+SERIAL2_TX_PIN 17
+SERIAL2_RX_PIN 18  
 SERIAL2_BAUD 38400
 
-# RMT (Remote Control) receiver input pin
+# I2C bus configuration - for external sensors
+I2C_ORDER I2C0
+I2C0_SDA_PIN 41
+I2C0_SCL_PIN 42
+I2C0_SPEED 400000
+I2C0_INTERNAL 1
+
+# External sensor probe configuration (for DroneCAN hub operation)
+define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+
+# Alternative: Enable specific external sensors via I2C (uncomment to use):
+# For BMP280 barometer via I2C:
+# define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
+# For HMC5843/HMC5883 compass via I2C:
+# define HAL_MAG_PROBE_LIST PROBE_MAG_I2C(HMC5843, 0, 0x1e)
+# For QMC5883L compass via I2C:
+# define HAL_MAG_PROBE_LIST PROBE_MAG_I2C(QMC5883L, 0, 0x0d)
+
+# ADC Configuration - T-Connect has limited ADC pins available
+# ADC2 cannot coexist with WiFi, so use ADC1 pins if needed
+# define HAL_USE_ADC 1
+# ADC1_PIN 4  # GPIO4 - ADC1_CH3 (if available and not conflicting)
+
+# Alternative: Disable ADC completely (default for DroneCAN hub)
+define HAL_DISABLE_ADC_DRIVER 1
+define HAL_USE_ADC 0
+
+# WiFi Configuration (optional - can interfere with DroneCAN timing)
+# Uncomment to enable WiFi for development/debugging:
+# define HAL_ESP32_WIFI 1
+# define WIFI_SSID "tconnect_rover"
+# define WIFI_PWD "ardupilot123"
+
+# WiFi Usage Notes:
+# - WiFi mode: 1=TCP, 2=UDP (for UDP, connect as UDPCL in Mission Planner to 192.168.4.1:14550)
+# - For rover applications, prefer DroneCAN + USB MAVLink over WiFi for better reliability
+# - To use WiFi-only: Set SERIAL0_PROTOCOL=0 and reboot
+
+# RMT configuration for receiver input (if needed)
 define HAL_ESP32_RMT_RX_PIN_NUMBER GPIO_NUM_14
+
+# Alternative RMT pins if GPIO14 conflicts:
+# define HAL_ESP32_RMT_RX_PIN_NUMBER GPIO_NUM_7
+
+# Alternative serial port configurations:
+# For different UART pins if needed:
+# SERIAL1_TX_PIN 17, SERIAL1_RX_PIN 18 (alternative pins)
+# SERIAL2_TX_PIN 21, SERIAL2_RX_PIN 20 (alternative pins)
+
+# Storage configuration options:
+# Alternative: Enable SD card support via SPI (if SD card connected):
+# define HAL_ESP32_SDCARD 1
+# define HAL_ESP32_SDSPI {.host=VSPI_HOST, .dma_ch=2, .mosi=GPIO_NUM_X, .miso=GPIO_NUM_X, .sclk=GPIO_NUM_X, .cs=GPIO_NUM_X}
+
+# Debugging options - Enable minimal debug to avoid compilation issues
+# define BUSDEBUG 1       # Debug I2C/SPI bus operations (causes build failures)
+# define WIFIDEBUG 1      # Debug WiFi operations (if enabled)
+# define SCHEDDEBUG 1     # Debug task scheduling
+# define HAL_DEBUG_BUILD 1 # Enable general debug output (causes build failures)
+
+# Additional debugging for startup issues - minimal set
+# define DEBUG 1         # Causes build failures
+define AP_SIM_ENABLED 0
+define HAL_WITH_DSP 0
+
+# Enable ESP32 specific debug that doesn't break build
+define HAL_GPIO_LED_ON 1
+
+# Add custom debug printing for startup sequence
+define STARTUP_DEBUG 1
+
+# Enable console output for debugging
+define HAL_CONSOLE_ENABLED 1

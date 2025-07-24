@@ -37,16 +37,52 @@ CAN_P1_OPTIONS 1
 # Bit 9 (512) = EnableFlexDebug - Custom debug messages from nodes
 CAN_D1_UC_OPTION 768
 
-# Serial configuration for debug output
-# Ensure SERIAL0 (USB) uses MAVLink for debug message visibility
+# Serial configuration for debug output - Enable maximum debugging
+# SERIAL0 (USB) for debug messages and MAVLink
 SERIAL0_PROTOCOL 2
 SERIAL0_BAUD 115200
 
-# Disable file logging to prevent "No space left" issues on ESP32 flash
-# CAN debug messages will still appear via MAVLink on SERIAL0
-LOG_BACKEND_TYPE 0
-LOG_DISARMED 0
+# Debug logging configuration - Maximum verbosity for troubleshooting
+LOG_FILE_DSRMROT 1
+LOG_DISARMED 1
+LOG_REPLAY 1
+
+# Enable all debug message categories
+SYS_DEBUG 1
+
+# Enable MAVLink-only logging using PSRAM (8MB available)
+LOG_BACKEND_TYPE 2
+LOG_DISARMED 1
+
+# Configure MAVLink logging parameters  
+LOG_MAV_BUFSIZE 16
 
 # Alternative: Use minimal logging if file logging is needed
 # LOG_FILE_DSRMROT 1
 # LOG_MAX_FILES 2
+
+# Navigation and AHRS Configuration for DroneCAN hub operation
+# Enable minimal EKF for basic attitude estimation
+EK3_ENABLE 1
+EK3_IMU_MASK 0
+
+# Disable GPS requirement for rover (DroneCAN hub may not have GPS)
+EK3_GPS_TYPE 0
+
+# Use compass-free navigation since compass is disabled
+COMPASS_USE 0
+COMPASS_USE2 0
+COMPASS_USE3 0
+
+# Configure vehicle frame type for rover
+FRAME_CLASS 2
+
+# Disable arming checks that might prevent startup
+ARMING_CHECK 0
+
+# Basic motor configuration for rover
+MOT_PWM_FREQ 50
+
+# Disable unnecessary sensors for DroneCAN hub operation
+RNGFND1_TYPE 0
+RNGFND2_TYPE 0

@@ -188,8 +188,11 @@ HAL_ESP32::HAL_ESP32() :
 
 void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
 {
+    printf("[DEBUG] HAL_ESP32::run() starting with callbacks\n");
     ((ESP32::Scheduler *)hal.scheduler)->set_callbacks(callbacks);
+    printf("[DEBUG] HAL_ESP32::run() calling hal.scheduler->init()\n");
     hal.scheduler->init();
+    printf("[DEBUG] HAL_ESP32::run() hal.scheduler->init() returned - this should not happen!\n");
 }
 
 void AP_HAL::init()

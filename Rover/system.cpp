@@ -7,6 +7,7 @@ static void failsafe_check_static()
 
 void Rover::init_ardupilot()
 {
+    
     // initialise notify system
     notify.init();
     notify_mode(control_mode);
@@ -281,11 +282,13 @@ void Rover::startup_INS(void)
     hal.scheduler->delay(100);
 
     ahrs.init();
+    
     // say to EKF that rover only move by going forward
     ahrs.set_fly_forward(true);
     ahrs.set_vehicle_class(AP_AHRS::VehicleClass::GROUND);
 
     ins.init(scheduler.get_loop_rate_hz());
+    
     ahrs.reset();
 }
 

@@ -5,6 +5,7 @@
    CONDITIONS OF ANY KIND, either express or implied.
 */
 #include <stddef.h>
+#include <stdio.h>
 
 int main(int argc, char *argv[]);
 

@@ -299,6 +299,7 @@ extern AP_Vehicle& vehicle;
  */
 void AP_Vehicle::setup()
 {
+    
     // load the default values of variables listed in var_info[]
     AP_Param::setup_sketch_defaults();
 
@@ -541,6 +542,7 @@ void AP_Vehicle::setup()
 
 void AP_Vehicle::loop()
 {
+    
 #if AP_SCHEDULER_ENABLED
     scheduler.loop();
     G_Dt = scheduler.get_loop_period_s();
