@@ -81,7 +81,8 @@ define HAL_MINIMIZE_FLASH_SIZE 0
 define HAL_OS_FATFS_IO 1
 
 # T-Connect Board Pin Configuration
-# CAN Interface (primary function)
+# CAN Interface (primary function) - VERIFIED WORKING PINS
+# These pins have been tested and confirmed working for CAN communication
 CAN_TX_1=9
 CAN_RX_1=10
 

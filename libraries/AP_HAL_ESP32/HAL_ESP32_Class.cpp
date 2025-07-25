@@ -192,7 +192,8 @@ void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
     ((ESP32::Scheduler *)hal.scheduler)->set_callbacks(callbacks);
     printf("[DEBUG] HAL_ESP32::run() calling hal.scheduler->init()\n");
     hal.scheduler->init();
-    printf("[DEBUG] HAL_ESP32::run() hal.scheduler->init() returned - this should not happen!\n");
+    printf("[DEBUG] HAL_ESP32::run() hal.scheduler->init() completed - ESP32 tasks created\n");
+    printf("[DEBUG] HAL_ESP32::run() ESP32 scheduler uses FreeRTOS tasks, main loop runs in _main_thread\n");
 }
 
 void AP_HAL::init()

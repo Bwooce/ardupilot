@@ -73,6 +73,7 @@ void Scheduler::init()
     printf("%s:%d \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
 
+    printf("SCHEDULER: Starting ESP32 Scheduler initialization\n");
     hal.console->printf("%s:%d running with CONFIG_FREERTOS_HZ=%d\n", __PRETTY_FUNCTION__, __LINE__,CONFIG_FREERTOS_HZ);
 
     // keep main tasks that need speed on CPU 0
@@ -127,6 +128,9 @@ void Scheduler::init()
     }
 
     //   xTaskCreatePinnedToCore(_print_profile, "APM_PROFILE", IO_SS, this, IO_PRIO, nullptr,SLOWCPU);
+    
+    printf("SCHEDULER: All tasks created, init() should NOT return!\n");
+    printf("SCHEDULER: This indicates scheduler implementation is incorrect\n");
 }
 
 template <typename T>
@@ -545,13 +549,18 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
 #ifdef SCHEDDEBUG
     printf("%s:%d start\n", __PRETTY_FUNCTION__, __LINE__);
 #endif
+    printf("MAIN_THREAD: ESP32 main thread started\n");
     Scheduler *sched = (Scheduler *)arg;
 
+    printf("MAIN_THREAD: Initializing peripherals...\n");
 #ifndef HAL_DISABLE_ADC_DRIVER
+    printf("MAIN_THREAD: Initializing analogin...\n");
     hal.analogin->init();
 #endif
+    printf("MAIN_THREAD: Initializing rcout...\n");
     hal.rcout->init();
 
+    printf("MAIN_THREAD: Calling setup()...\n");
     sched->callbacks->setup();
 
     sched->set_system_initialized();

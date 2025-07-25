@@ -38,8 +38,8 @@ CAN_P1_OPTIONS 1
 CAN_D1_UC_OPTION 768
 
 # Serial configuration for debug output - Enable maximum debugging
-# SERIAL0 (USB) for debug messages and MAVLink
-SERIAL0_PROTOCOL 2
+# SERIAL0 (USB) for debug messages and MAVLink (2)
+SERIAL0_PROTOCOL -1
 SERIAL0_BAUD 115200
 
 # Debug logging configuration - Maximum verbosity for troubleshooting
@@ -55,7 +55,7 @@ LOG_BACKEND_TYPE 2
 LOG_DISARMED 1
 
 # Configure MAVLink logging parameters  
-LOG_MAV_BUFSIZE 16
+#LOG_MAV_BUFSIZE 16
 
 # Alternative: Use minimal logging if file logging is needed
 # LOG_FILE_DSRMROT 1

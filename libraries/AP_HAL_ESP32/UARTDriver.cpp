@@ -15,8 +15,11 @@
 
 #include <AP_HAL_ESP32/UARTDriver.h>
 #include <AP_Math/AP_Math.h>
+#include <AP_SerialManager/AP_SerialManager.h>
 
 #include "esp_log.h"
+#include "driver/usb_serial_jtag.h"
+#include "hal/usb_serial_jtag_ll.h"
 
 extern const AP_HAL::HAL& hal;
 
@@ -27,9 +30,10 @@ UARTDesc uart_desc[] = {HAL_ESP32_UART_DEVICES};
 
 void UARTDriver::vprintf(const char *fmt, va_list ap)
 {
-
     uart_port_t p = uart_desc[uart_num].port;
     if (p == 0) {
+        // Always use ESP32 logging system for USB-Serial/JTAG interface
+        // vprintf() only handles formatted text, never binary MAVLink data
         esp_log_writev(ESP_LOG_INFO, "", fmt, ap);
     } else {
         AP_HAL::UARTDriver::vprintf(fmt, ap);
@@ -47,30 +51,39 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
     if (uart_num < ARRAY_SIZE(uart_desc)) {
         uart_port_t p = uart_desc[uart_num].port;
         if (!_initialized) {
-
-            uart_config_t config = {
-                .baud_rate = (int)b,
-                .data_bits = UART_DATA_8_BITS,
-                .parity = UART_PARITY_DISABLE,
-                .stop_bits = UART_STOP_BITS_1,
-                .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-            };
-            uart_param_config(p, &config);
-            uart_set_pin(p,
-                         uart_desc[uart_num].tx,
-                         uart_desc[uart_num].rx,
-                         UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-            //uart_driver_install(p, 2*UART_FIFO_LEN, 0, 0, nullptr, 0);
-            uart_driver_install(p, 2*UART_HW_FIFO_LEN(p), 0, 0, nullptr, 0);
+            if (p == 0) {
+                // Initialize USB-Serial/JTAG driver for port 0 (ESP32-S3)
+                usb_serial_jtag_driver_config_t usb_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+                usb_config.rx_buffer_size = RX_BUF_SIZE;
+                usb_config.tx_buffer_size = TX_BUF_SIZE;
+                usb_serial_jtag_driver_install(&usb_config);
+            } else {
+                // Initialize regular UART for other ports
+                uart_config_t config = {
+                    .baud_rate = (int)b,
+                    .data_bits = UART_DATA_8_BITS,
+                    .parity = UART_PARITY_DISABLE,
+                    .stop_bits = UART_STOP_BITS_1,
+                    .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+                };
+                uart_param_config(p, &config);
+                uart_set_pin(p,
+                             uart_desc[uart_num].tx,
+                             uart_desc[uart_num].rx,
+                             UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+                uart_driver_install(p, 2*UART_HW_FIFO_LEN(p), 0, 0, nullptr, 0);
+            }
             _readbuf.set_size(RX_BUF_SIZE);
             _writebuf.set_size(TX_BUF_SIZE);
             _uart_owner_thd = xTaskGetCurrentTaskHandle();
 
             _initialized = true;
         } else {
-            flush();
-            uart_set_baudrate(p, b);
-
+            if (p != 0) {
+                // Only set baudrate for regular UARTs, not USB-Serial/JTAG
+                flush();
+                uart_set_baudrate(p, b);
+            }
         }
     }
     _baudrate = b;
@@ -79,7 +92,14 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
 void UARTDriver::_end()
 {
     if (_initialized) {
-        uart_driver_delete(uart_desc[uart_num].port);
+        uart_port_t p = uart_desc[uart_num].port;
+        if (p == 0) {
+            // Uninstall USB-Serial/JTAG driver for port 0
+            usb_serial_jtag_driver_uninstall();
+        } else {
+            // Uninstall regular UART driver for other ports
+            uart_driver_delete(p);
+        }
         _readbuf.set_size(0);
         _writebuf.set_size(0);
     }
@@ -89,7 +109,14 @@ void UARTDriver::_end()
 void UARTDriver::_flush()
 {
     uart_port_t p = uart_desc[uart_num].port;
-    uart_flush(p);
+    if (p == 0) {
+        // Flush USB-Serial/JTAG interface
+        // Note: usb_serial_jtag driver auto-flushes, but we ensure it here
+        usb_serial_jtag_ll_txfifo_flush();
+    } else {
+        // Flush regular UART
+        uart_flush(p);
+    }
 }
 
 bool UARTDriver::is_initialized()
@@ -157,7 +184,13 @@ void IRAM_ATTR UARTDriver::read_data()
     uart_port_t p = uart_desc[uart_num].port;
     int count = 0;
     do {
-        count = uart_read_bytes(p, _buffer, sizeof(_buffer), 0);
+        if (p == 0) {
+            // Use USB-Serial/JTAG interface for port 0 (ESP32-S3)
+            count = usb_serial_jtag_read_bytes(_buffer, sizeof(_buffer), 0);
+        } else {
+            // Use regular UART for other ports
+            count = uart_read_bytes(p, _buffer, sizeof(_buffer), 0);
+        }
         if (count > 0) {
             _readbuf.write(_buffer, count);
         }
@@ -172,7 +205,13 @@ void IRAM_ATTR UARTDriver::write_data()
     do {
         count = _writebuf.peekbytes(_buffer, sizeof(_buffer));
         if (count > 0) {
-            count = uart_tx_chars(p, (const char*) _buffer, count);
+            if (p == 0) {
+                // Use USB-Serial/JTAG interface for port 0 (ESP32-S3)
+                count = usb_serial_jtag_write_bytes(_buffer, count, 0);
+            } else {
+                // Use regular UART for other ports
+                count = uart_tx_chars(p, (const char*) _buffer, count);
+            }
             _writebuf.advance(count);
         }
     } while (count > 0);
