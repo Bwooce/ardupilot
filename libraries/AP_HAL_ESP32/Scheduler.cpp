@@ -129,8 +129,7 @@ void Scheduler::init()
 
     //   xTaskCreatePinnedToCore(_print_profile, "APM_PROFILE", IO_SS, this, IO_PRIO, nullptr,SLOWCPU);
     
-    printf("SCHEDULER: All tasks created, init() should NOT return!\n");
-    printf("SCHEDULER: This indicates scheduler implementation is incorrect\n");
+    printf("SCHEDULER: All tasks created successfully\n");
 }
 
 template <typename T>

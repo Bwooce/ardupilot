@@ -43,23 +43,20 @@ SERIAL0_PROTOCOL -1
 SERIAL0_BAUD 115200
 
 # Debug logging configuration - Maximum verbosity for troubleshooting
-LOG_FILE_DSRMROT 1
-LOG_DISARMED 1
 LOG_REPLAY 1
 
 # Enable all debug message categories
 SYS_DEBUG 1
 
-# Enable MAVLink-only logging using PSRAM (8MB available)
-LOG_BACKEND_TYPE 2
+# Enable file-based logging to PSRAM filesystem (8MB available)
+LOG_BACKEND_TYPE 1
 LOG_DISARMED 1
+LOG_FILE_DSRMROT 1
+LOG_MAX_FILES 5
 
-# Configure MAVLink logging parameters  
-#LOG_MAV_BUFSIZE 16
-
-# Alternative: Use minimal logging if file logging is needed
-# LOG_FILE_DSRMROT 1
-# LOG_MAX_FILES 2
+# Alternative: Use MAVLink-only logging (comment out above, uncomment below)
+# LOG_BACKEND_TYPE 2
+# LOG_MAV_BUFSIZE 16
 
 # Navigation and AHRS Configuration for DroneCAN hub operation
 # Enable minimal EKF for basic attitude estimation
