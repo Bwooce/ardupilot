@@ -1,47 +1,103 @@
-# Default parameters for LilyGO T-2CAN board
-# This board is designed for dual CAN bus communication via MCP2515
-
-# CAN bus configuration (dual CAN: native ESP32-S3 TWAI + MCP2515)
-CAN_D1_PROTOCOL 1    # DroneCAN protocol on CAN1 (native TWAI)
-CAN_P1_DRIVER 1      # Enable CAN driver 1 (native TWAI)
-# CAN2 (MCP2515) is supported via HAL_NUM_CAN_IFACES=2 in hwdef.dat
-
-# Serial configuration for telemetry
-SERIAL1_PROTOCOL 1   # MAVLink1 protocol  
-SERIAL1_BAUD 57600   # Standard MAVLink baud rate
-
-# Battery monitoring via DroneCAN
-BATT_MONITOR 8       # DroneCAN battery monitor
-
-# ESC configuration via DroneCAN  
-MOT_PWM_TYPE 6       # DroneCAN ESCs
-
-# Enable DroneCAN servo outputs
-SERVO1_FUNCTION 70   # Throttle Left (for rover)
-SERVO3_FUNCTION 26   # Ground steering
-
-# GPS via DroneCAN
-GPS_TYPE 9           # DroneCAN GPS
-
-# Compass via DroneCAN
-COMPASS_TYPEMASK 144 # DroneCAN compass only
-
-# Rover-specific defaults
-FRAME_CLASS 2        # Rover frame
-
-# CAN Debug Configuration (commented out - uncomment for troubleshooting)
-# Enable comprehensive CAN debugging when needed:
+# NOTE FOR DEVELOPERS:
+# When making changes to this file, please ensure the corresponding
+# board documentation is updated to reflect the new default parameters.
 #
-# CAN_LOGLEVEL 4         # Maximum CAN logging (0=None, 1=Error, 2=Warning, 3=Info, 4=Debug)
-# CAN_P1_OPTIONS 1       # Log all CAN frames on CAN1 (bit 0 = LogAllFrames)
-# CAN_D1_UC_OPTION 768   # DroneCAN debug: EnableStats(256) + EnableFlexDebug(512)
-# LOG_DISARMED 1         # Enable logging while disarmed for CAN initialization debugging
-#
-# Dual CAN debugging options (for MCP2515 interface):
-# CAN_P2_DRIVER 2        # Enable CAN driver 2 (MCP2515) - requires driver index configuration
-# CAN_D2_PROTOCOL 1      # DroneCAN protocol on CAN2 (MCP2515)
-# CAN_P2_OPTIONS 1       # Log all CAN frames on CAN2 (MCP2515)
-# CAN_D2_UC_OPTION 768   # DroneCAN debug options for CAN2 (MCP2515)
-#
-# Note: Full CAN frame logging can generate large amounts of log data.
-# Use selectively for troubleshooting specific issues.
+# Default parameters for the LilyGO T-2CAN
+
+# Set SERIAL1 for telemetry (external GCS connection)
+SERIAL1_PROTOCOL 2
+SERIAL1_BAUD 115200
+
+# Enable dual DroneCAN on both CAN ports
+CAN_P1_DRIVER 1
+CAN_D1_PROTOCOL 1
+CAN_P2_DRIVER 2
+CAN_D2_PROTOCOL 1
+
+# Configure Battery Monitoring via DroneCAN
+BATT_MONITOR 8
+
+# Configure DroneCAN ESCs
+MOT_PWM_TYPE 0 # Set to None, as we are using DroneCAN ESCs
+CAN_D1_UC_ESC_BM 1 # Enable ESC RPM feedback on CAN1
+CAN_D1_UC_ESC_CM 1 # Enable ESC Motor command output on CAN1
+CAN_D2_UC_ESC_BM 2 # Enable ESC RPM feedback on CAN2
+CAN_D2_UC_ESC_CM 2 # Enable ESC Motor command output on CAN2
+
+# Configure DroneCAN steering servo on SERVO3
+# Set SERVO3_FUNCTION to 0, as the output is now on CAN
+SERVO3_FUNCTION 0
+# Assign SERVO3 to DroneCAN (bitmask: 1<<(3-1) = 4)
+CAN_D1_UC_SRV_BM 4
+
+# CAN Debug Configuration - Comprehensive debugging for development/troubleshooting
+# Enable maximum CAN logging for debugging (0=None, 1=Error, 2=Warning, 3=Info, 4=Debug)
+CAN_LOGLEVEL 4
+
+# Log all CAN frames to dataflash for both CAN interfaces (bit 0 = LogAllFrames)
+CAN_P1_OPTIONS 1
+CAN_P2_OPTIONS 1
+
+# DroneCAN debug options (bitmask):
+# Bit 8 (256) = EnableStats - CAN bus performance metrics
+# Bit 9 (512) = EnableFlexDebug - Custom debug messages from nodes
+CAN_D1_UC_OPTION 768
+CAN_D2_UC_OPTION 768
+
+# Serial configuration for debug output - Enable maximum debugging
+# SERIAL0 (USB) for debug messages and MAVLink (2)
+SERIAL0_PROTOCOL 2
+SERIAL0_BAUD 115200
+
+# Debug logging configuration - Maximum verbosity for troubleshooting
+LOG_REPLAY 1
+
+# Enable all debug message categories
+SYS_DEBUG 1
+
+# Enable file-based logging to PSRAM filesystem (8MB available)
+LOG_BACKEND_TYPE 1
+LOG_DISARMED 1
+LOG_FILE_DSRMROT 1
+LOG_MAX_FILES 5
+
+# Alternative: Use MAVLink-only logging (comment out above, uncomment below)
+# LOG_BACKEND_TYPE 2
+# LOG_MAV_BUFSIZE 16
+
+# Navigation and AHRS Configuration for dual CAN hub operation
+# Enable minimal EKF for basic attitude estimation
+EK3_ENABLE 1
+EK3_IMU_MASK 0
+
+# Disable GPS requirement for rover (dual CAN hub may not have GPS)
+EK3_GPS_TYPE 0
+
+# Use compass-free navigation since compass is disabled
+COMPASS_USE 0
+COMPASS_USE2 0
+COMPASS_USE3 0
+
+# Configure vehicle frame type for rover
+FRAME_CLASS 2
+
+# Disable arming checks that might prevent startup
+ARMING_CHECK 0
+
+# Basic motor configuration for rover
+MOT_PWM_FREQ 50
+
+# Disable unnecessary sensors for dual CAN hub operation
+RNGFND1_TYPE 0
+RNGFND2_TYPE 0
+
+# LCD1602 I2C Display Configuration
+# Enable HD44780 16x2 LCD display on I2C address 0x27 (PCF8574 backpack)
+NTF_DISPLAY_TYPE 3
+NTF_LED_TYPES 256
+
+# Dual CAN Configuration Notes:
+# This board supports two CAN interfaces:
+# - CAN1: Native ESP32-S3 TWAI controller (pins 6/7)
+# - CAN2: MCP2515 SPI-based CAN controller (pins 9-13)
+# Both interfaces are configured for DroneCAN protocol with full debugging enabled

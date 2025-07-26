@@ -1,7 +1,23 @@
 # ArduPilot Hardware Definition for the LilyGO T-2CAN
-# ESP32-S3 Development Board with dual CAN bus interfaces via MCP2515
+# ESP32-S3 based dual CAN interface board for DroneCAN networks
+# Features: 8MB OPI PSRAM, dual CAN interfaces (TWAI + MCP2515), minimal sensors for CAN hub operation
+#
 
 MCU ESP32S3
+
+# Board identification
+define HAL_ESP32_BOARD_NAME "esp32lilygo_t2can"
+define CONFIG_HAL_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_LILYGO_T2CAN
+
+# Sensor probe helper macros for easier configuration
+define PROBE_IMU_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_IMU_SPI(driver, devname, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))
+define PROBE_BARO_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(GET_I2C_DEVICE(bus, addr)),##args))
+define PROBE_MAG_I2C(driver, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(GET_I2C_DEVICE(bus, addr),##args))
+
+# Boolean definitions for configuration clarity
+define TRUE 1
+define FALSE 0
 
 # PSRAM Configuration - T-2CAN has OPI PSRAM
 PSRAM_SIZE 8MB
@@ -9,7 +25,7 @@ PSRAM_MODE OPI
 PSRAM_MALLOC_THRESHOLD 16384
 PSRAM_RESERVE_INTERNAL 16384
 
-# Disable WiFi for better dual-core performance 
+# Disable WiFi for better dual-core performance and reduced power consumption
 define HAL_WITH_WIFI 0
 
 # Enable dual CAN bus interfaces (native ESP32-S3 TWAI + MCP2515)
@@ -17,6 +33,7 @@ define HAL_NUM_CAN_IFACES 2
 define HAL_ENABLE_DRONECAN_DRIVERS 1
 
 # CAN Interface 1: Native ESP32-S3 TWAI (built-in CAN controller)
+# VERIFIED WORKING PINS - these pins have been tested and confirmed working for CAN communication
 CAN_TX_1=7
 CAN_RX_1=6
 
@@ -34,14 +51,104 @@ define MCP2515_RST_PIN 9
 # Boot button
 KEY_BOOT=0
 
-# --- UARTs ---
-UART_ORDER SERIAL0 SERIAL1
+# IMU Configuration - Disable by default for DroneCAN hub operation
+# For MPU6000/MPU9250 via I2C:
+# Uncomment these lines to enable IMU:
+# define HAL_INS_DEFAULT HAL_INS_MPU60XX_I2C
+# define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensensev2, 0, 0x68, ROTATION_NONE)
 
-# Serial 0 (USB) is used for programming and debugging via USB CDC
+# For ICM20XXX IMUs via I2C:
+# Uncomment these lines to enable IMU:
+# define HAL_INS_DEFAULT HAL_INS_ICM20XXX_I2C  
+# define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensensev3, 0, 0x68, ROTATION_NONE)
+
+# Barometer Configuration - Disable by default for DroneCAN hub operation
+# Uncomment to enable specific barometer:
+# define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
+
+# Compass Configuration - Disable by default for DroneCAN hub operation
+# No built-in compass - use external if needed
+define COMPASS_MAX_INSTANCES 0
+define HAL_COMPASS_DEFAULT HAL_COMPASS_NONE
+
+# GPS Configuration - Disable by default since this is typically a CAN hub
+# Uncomment if GPS functionality is needed:
+# define HAL_EXTERNAL_AHRS_ENABLED 0
+
+# Buzzer/LED Configuration 
+# Note: Add your LED/buzzer pins here based on T-2CAN hardware
+
+# PWM Output Configuration - Minimal for CAN hub operation
+# Add PWM pins if needed for actuator control
+
+# --- UART Configuration ---
+UART_ORDER SERIAL0 SERIAL1 SERIAL2
+
+# Serial 0 (USB-Serial/JTAG): Console and MAVLink
+# ESP32-S3 USB-Serial/JTAG interface - hardware pins, cannot be changed
 SERIAL0_TX_PIN 43
 SERIAL0_RX_PIN 44
-# Serial 1 can be configured for telemetry
-SERIAL1_BAUD 115200
+SERIAL0_BAUD 115200
+
+# Serial 1: Telemetry/External connections
 SERIAL1_TX_PIN 1
 SERIAL1_RX_PIN 2
-SERIAL1_PROTOCOL 1  # MAVLink1
+SERIAL1_BAUD 115200
+
+# Serial 2: Additional UART for external devices
+SERIAL2_TX_PIN 17
+SERIAL2_RX_PIN 18
+SERIAL2_BAUD 115200
+
+# I2C bus configuration - for external sensors
+I2C_ORDER I2C0
+I2C0_SDA_PIN 21
+I2C0_SCL_PIN 22
+I2C0_SPEED 400000
+I2C0_INTERNAL 1
+
+# Enable external sensor probing via I2C
+define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+
+# Alternative: Enable specific external sensors via I2C (uncomment to use):
+# For BMP280 barometer via I2C:
+# define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
+# For HMC5843/HMC5883 compass via I2C:
+# define HAL_MAG_PROBE_LIST PROBE_MAG_I2C(HMC5843, 0, 0x1e)
+# For QMC5883L compass via I2C:
+# define HAL_MAG_PROBE_LIST PROBE_MAG_I2C(QMC5883L, 0, 0x0d)
+
+# SPI Configuration for MCP2515 CAN controller
+SPI_ORDER SPI2
+SPI2_SCK_PIN 12
+SPI2_MISO_PIN 13  
+SPI2_MOSI_PIN 11
+
+# Flash Storage Configuration - Standard ESP32-S3 setup
+STORAGE_FLASH_PAGE 4096
+define HAL_STORAGE_SIZE 32768
+
+# Safety and Arming Configuration - Relaxed for CAN hub operation
+define HAL_MINIMIZE_FEATURES 0
+define HAL_BUILD_AP_PERIPH 0
+
+# Logging Configuration - Enable comprehensive logging for debugging
+define HAL_LOGGING_ENABLED 1
+define HAL_LOGGING_DATAFLASH_ENABLED 1
+
+# ESC Telemetry Configuration - Disable extended telemetry for ESP32
+define HAL_WITH_ESC_TELEM 0
+define AP_EXTENDED_ESC_TELEM_ENABLED 0
+
+# Debug Configuration (comment out for production builds)
+# define HAL_DEBUG_BUILD 1
+# define BUSDEBUG 1       # Debug I2C/SPI bus operations (causes build failures)
+
+# USB Configuration - Enable USB for console and MAVLink
+define HAL_HAVE_USB_SERIAL 1
+
+# Filesystem logging configuration - Required for LOG_BACKEND_TYPE 1
+define HAL_BOARD_LOG_DIRECTORY "/APM/LOGS"
+
+# LCD1602 I2C Display Support
+define HAL_DISPLAY_ENABLED 1

@@ -83,3 +83,8 @@ MOT_PWM_FREQ 50
 # Disable unnecessary sensors for DroneCAN hub operation
 RNGFND1_TYPE 0
 RNGFND2_TYPE 0
+
+# LCD1602 I2C Display Configuration
+# Enable HD44780 16x2 LCD display on I2C address 0x27 (PCF8574 backpack)
+NTF_DISPLAY_TYPE 3
+NTF_LED_TYPES 256

@@ -22,6 +22,7 @@
 
 #include "Display_SH1106_I2C.h"
 #include "Display_SSD1306_I2C.h"
+#include "Display_HD44780_I2C.h"
 #include "Display_SITL.h"
 
 #include "AP_Notify.h"
@@ -345,6 +346,10 @@ bool Display::init(void)
             _driver = Display_SH1106_I2C::probe(std::move(hal.i2c_mgr->get_device(i, NOTIFY_DISPLAY_I2C_ADDR)));
             break;
         }
+        case DISPLAY_HD44780: {
+            _driver = Display_HD44780_I2C::probe(std::move(hal.i2c_mgr->get_device(i, NOTIFY_DISPLAY_HD44780_I2C_ADDR)));
+            break;
+        }
         case DISPLAY_SITL: {
 #ifdef WITH_SITL_OSD
             _driver = Display_SITL::probe(); // never fails
@@ -458,6 +463,14 @@ void Display::draw_text(uint16_t x, uint16_t y, const char* c)
     if (nullptr == c) {
         return;
     }
+    
+    // Check if we have a character display - if so, use its direct text writing
+    if (_driver && _driver->get_display_type() == Display_Backend::DISPLAY_TYPE_CHARACTER) {
+        _driver->draw_text(x, y, c);
+        return;
+    }
+    
+    // Otherwise use the original pixel-based approach for OLED displays
     while (*c != 0) {
 #ifndef AP_NOTIFY_DISPLAY_USE_EMOJI
         if (*c >= ' ' && *c <= '~') {

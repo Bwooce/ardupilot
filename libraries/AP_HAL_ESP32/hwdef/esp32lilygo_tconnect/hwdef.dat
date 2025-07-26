@@ -182,3 +182,5 @@ define STARTUP_DEBUG 1
 
 # Enable console output for debugging
 define HAL_CONSOLE_ENABLED 1
+# LCD1602 I2C Display Support
+define HAL_DISPLAY_ENABLED 1
