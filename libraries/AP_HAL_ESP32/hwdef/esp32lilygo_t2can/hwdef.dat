@@ -28,9 +28,19 @@ PSRAM_RESERVE_INTERNAL 16384
 # Disable WiFi for better dual-core performance and reduced power consumption
 define HAL_WITH_WIFI 0
 
-# Enable dual CAN bus interfaces (native ESP32-S3 TWAI + MCP2515)
+# DroneCAN configuration - dual CAN interfaces
 define HAL_NUM_CAN_IFACES 2
 define HAL_ENABLE_DRONECAN_DRIVERS 1
+define HAL_WITH_UAVCAN 1
+define HAL_MAX_CAN_PROTOCOL_DRIVERS 2
+define HAL_CANMANAGER_ENABLED 1
+
+# Enable dual CAN bus interfaces (native ESP32-S3 TWAI + MCP2515)
+define HAL_WITH_UAVCAN 1
+define HAL_MAX_CAN_PROTOCOL_DRIVERS 2
+define HAL_ENABLE_DRONECAN 1
+define CAN1_PROTOCOL DRONECAN
+define CAN2_PROTOCOL DRONECAN
 
 # CAN Interface 1: Native ESP32-S3 TWAI (built-in CAN controller)
 # VERIFIED WORKING PINS - these pins have been tested and confirmed working for CAN communication

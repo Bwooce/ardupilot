@@ -188,8 +188,7 @@ class ESP32HWDef(hwdef.HWDef):
         self.validate_configuration()
         if self.generate_defines:
             self.generate_hwdef_h()
-        # Generate complete ESP32 board header 
-        self.generate_board_header()
+        # Board-specific headers removed - hwdef.h contains all necessary configuration
         # Generate ESP-IDF config if PSRAM is configured
         self.write_esp_idf_config()
         return 0
