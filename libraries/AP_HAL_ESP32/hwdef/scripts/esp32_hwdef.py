@@ -516,12 +516,24 @@ class ESP32HWDef(hwdef.HWDef):
             for bus in sorted(self.spi_buses, key=lambda x: x['num']):
                 if bus['sck'] is not None and bus['miso'] is not None and bus['mosi'] is not None:
                     # Map ArduPilot SPI buses to ESP32 SPI hosts correctly
+                    # Priority: fastest controller gets lowest ArduPilot number
+                    mcu_lower = self.mcu.lower()
+                    
                     if bus['num'] == 1:
-                        host = "SPI3_HOST"  # VSPI for SPI1
+                        host = "SPI2_HOST"  # HSPI for SPI1 (fastest)
                     elif bus['num'] == 2:
-                        host = "SPI2_HOST"  # HSPI for SPI2  
+                        host = "SPI3_HOST"  # VSPI for SPI2 (slower)
+                    elif bus['num'] == 3:
+                        # SPI1 usage depends on ESP32 variant and flash/PSRAM configuration
+                        if mcu_lower in ['esp32c3', 'esp32c6', 'esp32h2']:
+                            host = "SPI1_HOST"  # SPI1 more usable on C3/C6/H2
+                        elif mcu_lower in ['esp32s2', 'esp32s3'] and not self.psram_config:
+                            host = "SPI1_HOST"  # SPI1 usable if no PSRAM on S2/S3
+                        else:
+                            self.error(f"SPI3 (SPI1_HOST) not available on {self.mcu} with PSRAM/OPI flash")
+                            continue
                     else:
-                        self.error(f"ESP32-S3 only supports SPI1 and SPI2, not SPI{bus['num']}")
+                        self.error(f"ESP32 only supports SPI1, SPI2, and SPI3, not SPI{bus['num']}")
                         continue
                     entry = f"    {{.host={host}, .dma_ch=1, .mosi=GPIO_NUM_{bus['mosi']}, .miso=GPIO_NUM_{bus['miso']}, .sclk=GPIO_NUM_{bus['sck']}}}"
                     spi_bus_entries.append(entry)
