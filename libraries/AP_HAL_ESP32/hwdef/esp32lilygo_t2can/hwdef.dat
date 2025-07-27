@@ -15,9 +15,6 @@ define PROBE_IMU_SPI(driver, devname, args ...) ADD_BACKEND(AP_InertialSensor_ #
 define PROBE_BARO_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(GET_I2C_DEVICE(bus, addr)),##args))
 define PROBE_MAG_I2C(driver, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(GET_I2C_DEVICE(bus, addr),##args))
 
-# Boolean definitions for configuration clarity
-define TRUE 1
-define FALSE 0
 
 # PSRAM Configuration - T-2CAN has OPI PSRAM
 PSRAM_SIZE 8MB

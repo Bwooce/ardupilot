@@ -14,9 +14,6 @@ define PROBE_IMU_SPI(driver, devname, args ...) ADD_BACKEND(AP_InertialSensor_ #
 define PROBE_BARO_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(GET_I2C_DEVICE(bus, addr)),##args))
 define PROBE_MAG_I2C(driver, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(GET_I2C_DEVICE(bus, addr),##args))
 
-# Boolean definitions for configuration clarity
-define TRUE 1
-define FALSE 0
 
 # PSRAM Configuration - T-Connect has 8MB OPI PSRAM
 PSRAM_SIZE 8MB
@@ -184,6 +181,6 @@ define STARTUP_DEBUG 1
 define HAL_CONSOLE_ENABLED 1
 
 # CAN debug level (0=none, 1=errors, 2=warnings, 3=info, 4=verbose)
-define CAN_LOGLEVEL 4
+define CAN_LOGLEVEL 2
 # LCD1602 I2C Display Support
 define HAL_DISPLAY_ENABLED 1

@@ -20,8 +20,6 @@
 
 MCU ESP32
 
-# Boolean definitions for configuration clarity
-define TRUE 1
 
 # Board identification
 define HAL_ESP32_BOARD_NAME "esp32-icarus"

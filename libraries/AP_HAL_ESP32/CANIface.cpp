@@ -220,32 +220,16 @@ void CANIface::tx_task(void *arg)
         message.rtr = 0;   // Data frame, not remote transmission request
         memcpy(message.data, tx_item.frame.data, tx_item.frame.dlc);
 
-        // Implement retry limit to prevent infinite blocking on failed transmissions
-        const uint8_t max_retries = 3;
-        const TickType_t retry_timeout_ms = 50; // 50ms timeout per retry
+        // Single transmission attempt for DroneCAN compliance
+        // DroneCAN handles reliability at protocol layer, HAL retries violate timing assumptions
+        const TickType_t timeout_ms = 1; // Minimal timeout for real-time performance
         
-        esp_err_t result = ESP_FAIL;
-        for (uint8_t retry = 0; retry < max_retries; retry++) {
-            result = twai_transmit(&message, pdMS_TO_TICKS(retry_timeout_ms));
-            if (result == ESP_OK) {
-                break; // Success, exit retry loop
-            }
-            
-            // Check if frame deadline expired during retry attempts
-            uint64_t now_us = AP_HAL::micros64();
-            if (tx_item.deadline_us != 0 && now_us > tx_item.deadline_us) {
-#if CAN_LOGLEVEL >= 3
-                printf("CAN TX: Aborting retries for expired frame ID=0x%08X (deadline=%llu, now=%llu)\n", 
-                       (unsigned)tx_item.frame.id, tx_item.deadline_us, now_us);
-#endif
-                break; // Stop retries for expired frame
-            }
-        }
+        esp_err_t result = twai_transmit(&message, pdMS_TO_TICKS(timeout_ms));
         
         if (result != ESP_OK) {
-#if CAN_LOGLEVEL >= 2
-            printf("CAN TX ERROR: Failed to transmit message ID=0x%08X after %d retries, error=%d\n", 
-                   (unsigned)tx_item.frame.id, max_retries, result);
+#if CAN_LOGLEVEL >= 3
+            printf("CAN TX: Failed to transmit message ID=0x%08X, error=%d\n", 
+                   (unsigned)tx_item.frame.id, result);
 #endif
         }
     }
