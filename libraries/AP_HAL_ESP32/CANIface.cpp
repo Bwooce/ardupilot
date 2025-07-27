@@ -85,7 +85,7 @@ bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
     }
 
     printf("CAN: Creating TX queue...\n");
-    tx_queue = xQueueCreate(128, sizeof(AP_HAL::CANFrame));
+    tx_queue = xQueueCreate(128, sizeof(CanTxItem));
     if (tx_queue == NULL) {
         printf("CAN: Failed to create TX queue\n");
         return false;
@@ -107,7 +107,12 @@ int16_t CANIface::send(const AP_HAL::CANFrame &frame, uint64_t tx_deadline, AP_H
         return -1;
     }
 
-    if (xQueueSendToBack(tx_queue, &frame, 0) != pdPASS) {
+    CanTxItem tx_item;
+    tx_item.frame = frame;
+    tx_item.deadline_us = tx_deadline;
+    tx_item.flags = flags;
+
+    if (xQueueSendToBack(tx_queue, &tx_item, 0) != pdPASS) {
         return 0;
     }
 
@@ -169,31 +174,78 @@ void CANIface::rx_task(void *arg)
 void CANIface::tx_task(void *arg)
 {
     CANIface *iface = (CANIface *)arg;
-    AP_HAL::CANFrame frame;
+    CanTxItem tx_item;
 
     while (true) {
-        if (xQueueReceive(iface->tx_queue, &frame, portMAX_DELAY) != pdPASS) {
-            continue;
-        }
+        // Continuously pull frames from queue until we get a non-expired one
+        uint32_t expired_count = 0;
+        do {
+            if (xQueueReceive(iface->tx_queue, &tx_item, portMAX_DELAY) != pdPASS) {
+                continue;
+            }
+
+            uint64_t now_us = AP_HAL::micros64();
+            
+            // Check if this frame has expired
+            if (tx_item.deadline_us != 0 && now_us > tx_item.deadline_us) {
+                expired_count++;
+#if CAN_LOGLEVEL >= 3
+                // Only log first few expired frames to avoid spam
+                if (expired_count <= 5 || expired_count % 10 == 0) {
+                    printf("CAN TX: Dropped expired frame ID=0x%08X (deadline=%llu, now=%llu) [count=%lu]\n", 
+                           (unsigned)tx_item.frame.id, tx_item.deadline_us, now_us, (unsigned long)expired_count);
+                }
+#endif
+                continue; // Get next frame
+            }
+            
+            // Frame is not expired, break out of loop to transmit it
+            break;
+            
+        } while (true);
 
 #if CAN_LOGLEVEL >= 4
-        printf("CAN TX: ID=0x%08X DLC=%d DATA=[", (unsigned)frame.id, frame.dlc);
-        for (int i = 0; i < frame.dlc; i++) {
-            printf("%02X", frame.data[i]);
-            if (i < frame.dlc - 1) printf(" ");
+        printf("CAN TX: ID=0x%08X DLC=%d DATA=[", (unsigned)tx_item.frame.id, tx_item.frame.dlc);
+        for (int i = 0; i < tx_item.frame.dlc; i++) {
+            printf("%02X", tx_item.frame.data[i]);
+            if (i < tx_item.frame.dlc - 1) printf(" ");
         }
         printf("]\n");
 #endif
 
         twai_message_t message;
-        message.identifier = frame.id;
-        message.data_length_code = frame.dlc;
-        memcpy(message.data, frame.data, frame.dlc);
+        message.identifier = tx_item.frame.id;
+        message.data_length_code = tx_item.frame.dlc;
+        message.extd = 1;  // Enable 29-bit extended CAN frames (required for DroneCAN)
+        message.rtr = 0;   // Data frame, not remote transmission request
+        memcpy(message.data, tx_item.frame.data, tx_item.frame.dlc);
 
-        esp_err_t result = twai_transmit(&message, portMAX_DELAY);
+        // Implement retry limit to prevent infinite blocking on failed transmissions
+        const uint8_t max_retries = 3;
+        const TickType_t retry_timeout_ms = 50; // 50ms timeout per retry
+        
+        esp_err_t result = ESP_FAIL;
+        for (uint8_t retry = 0; retry < max_retries; retry++) {
+            result = twai_transmit(&message, pdMS_TO_TICKS(retry_timeout_ms));
+            if (result == ESP_OK) {
+                break; // Success, exit retry loop
+            }
+            
+            // Check if frame deadline expired during retry attempts
+            uint64_t now_us = AP_HAL::micros64();
+            if (tx_item.deadline_us != 0 && now_us > tx_item.deadline_us) {
+#if CAN_LOGLEVEL >= 3
+                printf("CAN TX: Aborting retries for expired frame ID=0x%08X (deadline=%llu, now=%llu)\n", 
+                       (unsigned)tx_item.frame.id, tx_item.deadline_us, now_us);
+#endif
+                break; // Stop retries for expired frame
+            }
+        }
+        
         if (result != ESP_OK) {
 #if CAN_LOGLEVEL >= 2
-            printf("CAN TX ERROR: Failed to transmit message, error=%d\n", result);
+            printf("CAN TX ERROR: Failed to transmit message ID=0x%08X after %d retries, error=%d\n", 
+                   (unsigned)tx_item.frame.id, max_retries, result);
 #endif
         }
     }

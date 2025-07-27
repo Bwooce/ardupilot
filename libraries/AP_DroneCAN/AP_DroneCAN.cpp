@@ -70,6 +70,10 @@ extern const AP_HAL::HAL& hal;
 #ifndef DRONECAN_NODE_POOL_SIZE
 #if HAL_CANFD_SUPPORTED
 #define DRONECAN_NODE_POOL_SIZE 16384
+#elif CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+// Increase pool size for ESP32 to reduce buffer overruns
+// ESP32-S3 has 8MB PSRAM so 16KB is reasonable
+#define DRONECAN_NODE_POOL_SIZE 16384
 #else
 #define DRONECAN_NODE_POOL_SIZE 8192
 #endif
@@ -637,7 +641,9 @@ void AP_DroneCAN::handle_hobbywing_StatusMsg1(const CanardRxTransfer& transfer, 
 {
     uint8_t esc_index;
     if (hobbywing_find_esc_index(transfer.source_node_id, esc_index)) {
+#if HAL_WITH_ESC_TELEM
         update_rpm(esc_index, msg.rpm);
+#endif
     }
 }
 
@@ -670,6 +676,12 @@ void AP_DroneCAN::send_node_status(void)
     }
     _node_status_last_send_ms = now;
     node_status_msg.uptime_sec = now / 1000;
+    
+#if CAN_LOGLEVEL >= 4  
+    printf("DroneCAN: Sending NodeStatus (uptime=%lu, now=%lu, last=%lu)\n", 
+           node_status_msg.uptime_sec, now, _node_status_last_send_ms);
+#endif
+    
     node_status.broadcast(node_status_msg);
 
     if (option_is_set(Options::ENABLE_STATS)) {
@@ -829,6 +841,18 @@ void AP_DroneCAN::SRV_send_himark(void)
 
 void AP_DroneCAN::SRV_send_esc(void)
 {
+#if CAN_LOGLEVEL >= 3
+    static uint32_t esc_send_call_count = 0;
+    static uint32_t last_esc_log_ms = 0;
+    esc_send_call_count++;
+    uint32_t now_ms = AP_HAL::millis();
+    if (now_ms - last_esc_log_ms >= 1000) {  // Log every second
+        printf("DroneCAN: SRV_send_esc() called %lu times in last second\n", (unsigned long)esc_send_call_count);
+        esc_send_call_count = 0;
+        last_esc_log_ms = now_ms;
+    }
+#endif
+
     uavcan_equipment_esc_RawCommand esc_msg;
 
     uint8_t active_esc_num = 0, max_esc_num = 0;
@@ -864,8 +888,15 @@ void AP_DroneCAN::SRV_send_esc(void)
 
         if (esc_raw.broadcast(esc_msg)) {
             _esc_send_count++;
+#if CAN_LOGLEVEL >= 4
+            printf("DroneCAN: Sent ESC RawCommand (count=%lu, esc_num=%u, active=%u)\n", 
+                   (unsigned long)_esc_send_count, max_esc_num, active_esc_num);
+#endif
         } else {
             _fail_send_count++;
+#if CAN_LOGLEVEL >= 3
+            printf("DroneCAN: Failed ESC RawCommand (fail_count=%lu)\n", (unsigned long)_fail_send_count);
+#endif
         }
         // immediately push data to CAN bus
         canard_iface.processTx(true);
@@ -929,6 +960,18 @@ void AP_DroneCAN::SRV_send_esc_hobbywing(void)
 void AP_DroneCAN::SRV_push_servos()
 {
     WITH_SEMAPHORE(SRV_sem);
+    
+#if CAN_LOGLEVEL >= 3
+    static uint32_t push_count = 0;
+    static uint32_t last_log_ms = 0;
+    push_count++;
+    uint32_t now_ms = AP_HAL::millis();
+    if (now_ms - last_log_ms >= 1000) {  // Log every second
+        printf("DroneCAN: SRV_push_servos() called %lu times in last second\n", push_count);
+        push_count = 0;
+        last_log_ms = now_ms;
+    }
+#endif
 
     uint32_t non_zero_channels = 0;
     for (uint8_t i = 0; i < DRONECAN_SRV_NUMBER; i++) {
