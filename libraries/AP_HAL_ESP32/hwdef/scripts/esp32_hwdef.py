@@ -426,6 +426,11 @@ class ESP32HWDef(hwdef.HWDef):
             f.write("#undef HAL_USE_ADC\n")
             f.write("#define HAL_USE_ADC 0\n")
         
+        # Ensure GCS support is enabled by default for ESP32 (required after board header removal)
+        if 'HAL_GCS_ENABLED' not in self.intdefines:
+            f.write("#undef HAL_GCS_ENABLED\n")
+            f.write("#define HAL_GCS_ENABLED 1\n")
+        
         # Add standard TRUE/FALSE constants for compatibility
         f.write("#undef TRUE\n")
         f.write("#define TRUE 1\n")

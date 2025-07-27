@@ -34,6 +34,7 @@ define HAL_ENABLE_DRONECAN_DRIVERS 1
 define HAL_WITH_UAVCAN 1
 define HAL_MAX_CAN_PROTOCOL_DRIVERS 2
 define HAL_CANMANAGER_ENABLED 1
+define HAL_WITH_ESC_TELEM 1
 
 # Enable dual CAN bus interfaces (native ESP32-S3 TWAI + MCP2515)
 define HAL_WITH_UAVCAN 1
@@ -146,8 +147,8 @@ define HAL_BUILD_AP_PERIPH 0
 define HAL_LOGGING_ENABLED 1
 define HAL_LOGGING_DATAFLASH_ENABLED 1
 
-# ESC Telemetry Configuration - Disable extended telemetry for ESP32
-define HAL_WITH_ESC_TELEM 0
+# ESC Telemetry Configuration - Enable for DroneCAN ESCs
+# HAL_WITH_ESC_TELEM enabled above in DroneCAN section
 define AP_EXTENDED_ESC_TELEM_ENABLED 0
 
 # Debug Configuration (comment out for production builds)
