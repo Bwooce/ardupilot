@@ -515,8 +515,14 @@ class ESP32HWDef(hwdef.HWDef):
             spi_bus_entries = []
             for bus in sorted(self.spi_buses, key=lambda x: x['num']):
                 if bus['sck'] is not None and bus['miso'] is not None and bus['mosi'] is not None:
-                    # Map SPI1 to VSPI_HOST (SPI3), as per ESP32 conventions
-                    host = "VSPI_HOST" if bus['num'] == 1 else f"SPI{bus['num'] + 2}_HOST"
+                    # Map ArduPilot SPI buses to ESP32 SPI hosts correctly
+                    if bus['num'] == 1:
+                        host = "SPI3_HOST"  # VSPI for SPI1
+                    elif bus['num'] == 2:
+                        host = "SPI2_HOST"  # HSPI for SPI2  
+                    else:
+                        self.error(f"ESP32-S3 only supports SPI1 and SPI2, not SPI{bus['num']}")
+                        continue
                     entry = f"    {{.host={host}, .dma_ch=1, .mosi=GPIO_NUM_{bus['mosi']}, .miso=GPIO_NUM_{bus['miso']}, .sclk=GPIO_NUM_{bus['sck']}}}"
                     spi_bus_entries.append(entry)
             

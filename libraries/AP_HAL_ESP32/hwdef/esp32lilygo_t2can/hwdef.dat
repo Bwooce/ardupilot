@@ -7,7 +7,8 @@ MCU ESP32S3
 
 # Board identification
 define HAL_ESP32_BOARD_NAME "esp32lilygo_t2can"
-define CONFIG_HAL_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_LILYGO_T2CAN
+define HAL_ESP32_BOARD_SUBTYPE HAL_BOARD_SUBTYPE_ESP32_S3
+define HAL_USE_OTG 1
 
 # Sensor probe helper macros for easier configuration
 define PROBE_IMU_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
@@ -22,18 +23,9 @@ PSRAM_MODE OPI
 PSRAM_MALLOC_THRESHOLD 16384
 PSRAM_RESERVE_INTERNAL 16384
 
-# Disable WiFi for better dual-core performance and reduced power consumption
-define HAL_WITH_WIFI 0
-
-# DroneCAN configuration - dual CAN interfaces
+# DroneCAN configuration - dual CAN interfaces  
 define HAL_NUM_CAN_IFACES 2
 define HAL_ENABLE_DRONECAN_DRIVERS 1
-define HAL_WITH_UAVCAN 1
-define HAL_MAX_CAN_PROTOCOL_DRIVERS 2
-define HAL_CANMANAGER_ENABLED 1
-define HAL_WITH_ESC_TELEM 1
-
-# Enable dual CAN bus interfaces (native ESP32-S3 TWAI + MCP2515)
 define HAL_WITH_UAVCAN 1
 define HAL_MAX_CAN_PROTOCOL_DRIVERS 2
 define HAL_ENABLE_DRONECAN 1
@@ -56,32 +48,38 @@ define MCP2515_RST_PIN 9
 # - CAN1: Native ESP32-S3 TWAI interface (pins 6/7)
 # - CAN2: MCP2515 SPI-based CAN controller (pins 9-13)
 
-# Boot button
-KEY_BOOT=0
+# Rover-specific sensor configuration - minimal requirements
+# Rover can operate with compass-free navigation for basic operation
+define HAL_COMPASS_ENABLED 0
+define ALLOW_ARM_NO_COMPASS 1
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
 
-# IMU Configuration - Disable by default for DroneCAN hub operation
-# For MPU6000/MPU9250 via I2C:
-# Uncomment these lines to enable IMU:
-# define HAL_INS_DEFAULT HAL_INS_MPU60XX_I2C
-# define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensensev2, 0, 0x68, ROTATION_NONE)
+# IMU Configuration - Enable minimal IMU for AHRS backend
+# ArduPilot rover requires AHRS backend for startup
+define AP_INERTIALSENSOR_ENABLED 1
+define HAL_INS_DEFAULT HAL_INS_NONE
 
-# For ICM20XXX IMUs via I2C:
-# Uncomment these lines to enable IMU:
-# define HAL_INS_DEFAULT HAL_INS_ICM20XXX_I2C  
-# define HAL_INS_PROBE_LIST PROBE_IMU_I2C(Invensensev3, 0, 0x68, ROTATION_NONE)
+# Enable DCM AHRS backend (minimal attitude estimation)
+define AP_AHRS_DCM_ENABLED 1
 
-# Barometer Configuration - Disable by default for DroneCAN hub operation
-# Uncomment to enable specific barometer:
-# define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
+# Vehicle frame defaults for rover
+define HAL_DEFAULT_FRAME_CLASS 2  # Rover
+define HAL_DEFAULT_FRAME_TYPE 0   # Undefined/Generic rover
 
-# Compass Configuration - Disable by default for DroneCAN hub operation
-# No built-in compass - use external if needed
-define COMPASS_MAX_INSTANCES 0
-define HAL_COMPASS_DEFAULT HAL_COMPASS_NONE
+# Storage configuration - Use PSRAM for in-memory logging
+define HAL_LOGGING_DATAFLASH_ENABLED 0
+define HAL_LOGGING_FILESYSTEM_ENABLED 0
+define HAL_LOGGING_MAVLINK_ENABLED 1
+define HAL_LOGGING_BACKENDS_DEFAULT 2
 
-# GPS Configuration - Disable by default since this is typically a CAN hub
-# Uncomment if GPS functionality is needed:
-# define HAL_EXTERNAL_AHRS_ENABLED 0
+# Storage directories
+define HAL_BOARD_LOG_DIRECTORY "/APM/LOGS"
+define HAL_BOARD_TERRAIN_DIRECTORY "/APM/TERRAIN"
+
+# Feature configuration for DroneCAN hub
+define HAL_MINIMIZE_FEATURES 0
+define HAL_MINIMIZE_FLASH_SIZE 0
+define HAL_OS_FATFS_IO 1
 
 # Buzzer/LED Configuration 
 # Note: Add your LED/buzzer pins here based on T-2CAN hardware
@@ -110,8 +108,8 @@ SERIAL2_BAUD 115200
 
 # I2C bus configuration - for external sensors
 I2C_ORDER I2C0
-I2C0_SDA_PIN 21
-I2C0_SCL_PIN 22
+I2C0_SDA_PIN 41
+I2C0_SCL_PIN 42
 I2C0_SPEED 400000
 I2C0_INTERNAL 1
 
@@ -132,31 +130,36 @@ SPI2_SCK_PIN 12
 SPI2_MISO_PIN 13  
 SPI2_MOSI_PIN 11
 
-# Flash Storage Configuration - Standard ESP32-S3 setup
-STORAGE_FLASH_PAGE 4096
-define HAL_STORAGE_SIZE 32768
+# External sensor probe configuration (for DroneCAN hub operation)
+define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
 
-# Safety and Arming Configuration - Relaxed for CAN hub operation
-define HAL_MINIMIZE_FEATURES 0
-define HAL_BUILD_AP_PERIPH 0
+# ADC Configuration - T-2CAN has limited ADC pins available
+# ADC2 cannot coexist with WiFi, so use ADC1 pins if needed
+# define HAL_USE_ADC 1
+# ADC1_PIN 4  # GPIO4 - ADC1_CH3 (if available and not conflicting)
 
-# Logging Configuration - Enable comprehensive logging for debugging
-define HAL_LOGGING_ENABLED 1
-define HAL_LOGGING_DATAFLASH_ENABLED 1
+# Alternative: Disable ADC completely (default for DroneCAN hub)
+define HAL_DISABLE_ADC_DRIVER 1
+define HAL_USE_ADC 0
 
-# ESC Telemetry Configuration - Enable for DroneCAN ESCs
-# HAL_WITH_ESC_TELEM enabled above in DroneCAN section
-define AP_EXTENDED_ESC_TELEM_ENABLED 0
+# RMT configuration for receiver input (if needed)
+define HAL_ESP32_RMT_RX_PIN_NUMBER GPIO_NUM_14
 
-# Debug Configuration (comment out for production builds)
-# define HAL_DEBUG_BUILD 1
-# define BUSDEBUG 1       # Debug I2C/SPI bus operations (causes build failures)
+# Debugging options - Enable minimal debug to avoid compilation issues
+define AP_SIM_ENABLED 0
+define HAL_WITH_DSP 0
 
-# USB Configuration - Enable USB for console and MAVLink
-define HAL_HAVE_USB_SERIAL 1
+# Enable ESP32 specific debug that doesn't break build
+define HAL_GPIO_LED_ON 1
 
-# Filesystem logging configuration - Required for LOG_BACKEND_TYPE 1
-define HAL_BOARD_LOG_DIRECTORY "/APM/LOGS"
+# Add custom debug printing for startup sequence
+define STARTUP_DEBUG 1
+
+# Enable console output for debugging
+define HAL_CONSOLE_ENABLED 1
+
+# CAN debug level (0=none, 1=errors, 2=warnings, 3=info, 4=verbose)
+define CAN_LOGLEVEL 2
 
 # LCD1602 I2C Display Support
 define HAL_DISPLAY_ENABLED 1
