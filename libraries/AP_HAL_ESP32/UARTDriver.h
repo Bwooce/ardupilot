@@ -79,14 +79,15 @@ public:
 
 private:
     bool _initialized;
-    const size_t TX_BUF_SIZE = 1024;
-    const size_t RX_BUF_SIZE = 1024;
+    size_t TX_BUF_SIZE = 1024;
+    size_t RX_BUF_SIZE = 1024;
     uint8_t _buffer[32];
     ByteBuffer _readbuf{0};
     ByteBuffer _writebuf{0};
     Semaphore _write_mutex;
     void read_data();
     void write_data();
+    void calculate_buffer_sizes(uint32_t baudrate, uint16_t &rxS, uint16_t &txS);
 
     uint8_t uart_num;
 
@@ -96,6 +97,9 @@ private:
     uint32_t _baudrate;
 
     const tskTaskControlBlock* _uart_owner_thd;
+    
+    // Event-driven processing instead of polling
+    QueueHandle_t _uart_event_queue;
 
     void _receive_timestamp_update(void);
 
