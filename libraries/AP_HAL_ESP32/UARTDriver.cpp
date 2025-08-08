@@ -63,6 +63,9 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
             RX_BUF_SIZE = rxS;
             TX_BUF_SIZE = txS;
             
+            // Debug: Log buffer sizes (can be removed later)
+            printf("ESP32 UART%d: baud=%d, RX=%d, TX=%d\n", uart_num, (int)b, (int)rxS, (int)txS);
+            
             if (p == 0) {
                 // Initialize USB-Serial/JTAG driver for port 0 (ESP32-S3)
                 _uart_event_queue = nullptr;  // USB doesn't use event queue
@@ -347,7 +350,8 @@ void UARTDriver::calculate_buffer_sizes(uint32_t baudrate, uint16_t &rxS, uint16
     // Scale RX buffer with baud rate to handle burst traffic
     // Ensure we can buffer at least 100ms of data at full rate
     if (baudrate > 0) {
-        uint32_t bytes_per_100ms = baudrate / 100; // roughly bytes per 100ms
+        // Convert baud (bits/sec) to bytes/sec, then to bytes per 100ms
+        uint32_t bytes_per_100ms = (baudrate / 10) / 10; // /10 for bits->bytes, /10 for 100ms
         min_rx_buffer = MAX(min_rx_buffer, bytes_per_100ms);
     }
     
