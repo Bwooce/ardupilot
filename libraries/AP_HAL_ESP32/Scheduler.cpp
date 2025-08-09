@@ -73,7 +73,9 @@ void Scheduler::init()
     printf("%s:%d \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
 
-    printf("SCHEDULER: Starting ESP32 Scheduler initialization\n");
+    // Debug to console only (SERIAL0/USB) - safe from MAVLink contamination
+    hal.console->printf("SCHEDULER: Starting ESP32 Scheduler initialization\n");
+    // Safe console output - hal.console points to SERIAL0 only
     hal.console->printf("%s:%d running with CONFIG_FREERTOS_HZ=%d\n", __PRETTY_FUNCTION__, __LINE__,CONFIG_FREERTOS_HZ);
 
     // keep main tasks that need speed on CPU 0

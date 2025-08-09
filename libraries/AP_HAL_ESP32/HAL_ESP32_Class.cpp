@@ -46,13 +46,13 @@ static ESP32::WiFiDriver serial1Driver; //tcp, client should connect to 192.168.
 #elif HAL_ESP32_WIFI == 2
 static ESP32::WiFiUdpDriver serial1Driver; //udp
 #else
-static Empty::UARTDriver serial1Driver;
+static ESP32::UARTDriver serial1Driver(1); // UART1 for SERIAL1
 #endif
 #else
-static Empty::UARTDriver serial1Driver;
+static ESP32::UARTDriver serial1Driver(1); // UART1 for SERIAL1
 #endif
-static ESP32::UARTDriver serial2Driver(2);
-static ESP32::UARTDriver serial3Driver(1);
+static ESP32::UARTDriver serial2Driver(2); // UART2 for SERIAL2
+static Empty::UARTDriver serial3Driver; // No UART3 on ESP32
 static Empty::UARTDriver serial4Driver;
 static Empty::UARTDriver serial5Driver;
 static Empty::UARTDriver serial6Driver;
@@ -100,11 +100,11 @@ extern const AP_HAL::HAL& hal;
 
 HAL_ESP32::HAL_ESP32() :
     AP_HAL::HAL(
-        &cons, //Console/mavlink
-        &serial1Driver, //Telem 1
-        &serial2Driver, //Telem 2
-        &serial3Driver, //GPS 1
-        &serial4Driver, //GPS 2
+        &cons, //Console/mavlink (UART0)
+        &serial1Driver, //Telem 1 (UART1 or WiFi)
+        &serial2Driver, //Telem 2 (UART2)
+        &serial3Driver, //GPS 1 (unused - no UART3)
+        &serial4Driver, //GPS 2 (unused)
         &serial5Driver, //Extra 1
         &serial6Driver, //Extra 2
         &serial7Driver, //Extra 3
@@ -188,12 +188,13 @@ HAL_ESP32::HAL_ESP32() :
 
 void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
 {
-    printf("[DEBUG] HAL_ESP32::run() starting with callbacks\n");
+    // Debug output to console only (SERIAL0/USB) - never to MAVLink ports
+    cons.printf("[DEBUG] HAL_ESP32::run() starting with callbacks\n");
     ((ESP32::Scheduler *)hal.scheduler)->set_callbacks(callbacks);
-    printf("[DEBUG] HAL_ESP32::run() calling hal.scheduler->init()\n");
+    cons.printf("[DEBUG] HAL_ESP32::run() calling hal.scheduler->init()\n");
     hal.scheduler->init();
-    printf("[DEBUG] HAL_ESP32::run() hal.scheduler->init() completed - ESP32 tasks created\n");
-    printf("[DEBUG] HAL_ESP32::run() ESP32 scheduler uses FreeRTOS tasks, main loop runs in _main_thread\n");
+    cons.printf("[DEBUG] HAL_ESP32::run() hal.scheduler->init() completed - ESP32 tasks created\n");
+    cons.printf("[DEBUG] HAL_ESP32::run() ESP32 scheduler uses FreeRTOS tasks, main loop runs in _main_thread\n");
 }
 
 void AP_HAL::init()
