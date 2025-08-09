@@ -63,8 +63,7 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
             RX_BUF_SIZE = rxS;
             TX_BUF_SIZE = txS;
             
-            // Debug: Log buffer sizes (can be removed later)
-            printf("ESP32 UART%d: baud=%d, RX=%d, TX=%d\n", uart_num, (int)b, (int)rxS, (int)txS);
+            // Debug output removed to prevent MAVLink corruption
             
             if (p == 0) {
                 // Initialize USB-Serial/JTAG driver for port 0 (ESP32-S3)
