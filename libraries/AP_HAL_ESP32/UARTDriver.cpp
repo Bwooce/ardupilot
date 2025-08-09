@@ -14,6 +14,7 @@
  */
 
 #include <AP_HAL_ESP32/UARTDriver.h>
+#include "ESP32_Debug.h"
 #include <AP_Math/AP_Math.h>
 #include <AP_SerialManager/AP_SerialManager.h>
 
@@ -63,7 +64,8 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
             RX_BUF_SIZE = rxS;
             TX_BUF_SIZE = txS;
             
-            // Debug output removed to prevent MAVLink corruption
+            // Debug via MAVLink STATUSTEXT - safe from serial contamination
+            ESP32_DEBUG_VERBOSE("UART%d initialized: baud=%d, RX=%d, TX=%d", uart_num, (int)b, (int)rxS, (int)txS);
             
             if (p == 0) {
                 // Initialize USB-Serial/JTAG driver for port 0 (ESP32-S3)

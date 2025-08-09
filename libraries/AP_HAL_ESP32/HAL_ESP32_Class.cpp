@@ -17,6 +17,7 @@
 #include <AP_HAL_Empty/AP_HAL_Empty_Private.h>
 
 #include "HAL_ESP32_Class.h"
+#include "ESP32_Debug.h"
 #include "Scheduler.h"
 #include "I2CDevice.h"
 #include "SPIDevice.h"
@@ -188,13 +189,13 @@ HAL_ESP32::HAL_ESP32() :
 
 void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
 {
-    // Debug output to console only (SERIAL0/USB) - never to MAVLink ports
-    cons.printf("[DEBUG] HAL_ESP32::run() starting with callbacks\n");
+    // Debug via MAVLink STATUSTEXT - safe from serial contamination
+    ESP32_DEBUG_INFO("HAL run starting with callbacks");
     ((ESP32::Scheduler *)hal.scheduler)->set_callbacks(callbacks);
-    cons.printf("[DEBUG] HAL_ESP32::run() calling hal.scheduler->init()\n");
+    ESP32_DEBUG_INFO("Calling scheduler init");
     hal.scheduler->init();
-    cons.printf("[DEBUG] HAL_ESP32::run() hal.scheduler->init() completed - ESP32 tasks created\n");
-    cons.printf("[DEBUG] HAL_ESP32::run() ESP32 scheduler uses FreeRTOS tasks, main loop runs in _main_thread\n");
+    ESP32_DEBUG_INFO("Scheduler init completed - ESP32 tasks created");
+    ESP32_DEBUG_VERBOSE("ESP32 scheduler uses FreeRTOS tasks, main loop in _main_thread");
 }
 
 void AP_HAL::init()
