@@ -161,9 +161,11 @@ uint32_t UARTDriver::_available()
     
     // MAVLink processing requires access from multiple threads - remove restriction
     
-    // Direct buffer access - mutex removed to prevent partial reads
-    // Buffer overflow already fixed, data integrity more important than race condition protection
-    return _readbuf.available();
+    // Thread-safe buffer access - simple blocking
+    _read_mutex.take_blocking();
+    uint32_t result = _readbuf.available();
+    _read_mutex.give();
+    return result;
 }
 
 uint32_t UARTDriver::txspace()
@@ -185,16 +187,57 @@ ssize_t IRAM_ATTR UARTDriver::_read(uint8_t *buffer, uint16_t count)
     
     // MAVLink processing requires access from multiple threads - remove restriction
 
-    // Direct buffer read - mutex removed to prevent partial reads
-    // Atomic buffer operation is more important than race condition protection
-    const uint32_t ret = _readbuf.read(buffer, count);
+    // MAVLink-aware packet read - ensure complete packets only
+    _read_mutex.take_blocking();
     
-    if (ret == 0) {
+    // Check if we have enough data for at least a MAVLink header
+    uint32_t available = _readbuf.available();
+    if (available < 12) {  // Minimum MAVLink v2 header size
+        _read_mutex.give();
         return 0;
     }
-
-    _receive_timestamp_update();
-    return ret;
+    
+    // Peek at the first byte to check for MAVLink start
+    uint8_t start_byte;
+    if (_readbuf.peekbytes(&start_byte, 1) != 1) {
+        _read_mutex.give();
+        return 0;
+    }
+    
+    // If not MAVLink start, read single byte to advance buffer
+    if (start_byte != 0xFD) {  // MAVLink v2 start byte
+        const uint32_t ret = _readbuf.read(buffer, MIN(count, 1));
+        _read_mutex.give();
+        if (ret > 0) {
+            _receive_timestamp_update();
+        }
+        return ret;
+    }
+    
+    // We have a potential MAVLink packet, peek at payload length
+    uint8_t header[12];
+    if (_readbuf.peekbytes(header, 12) != 12) {
+        _read_mutex.give();
+        return 0;
+    }
+    
+    // Calculate complete packet size: header(12) + payload + CRC(2)
+    uint8_t payload_len = header[1];
+    uint32_t packet_size = 12 + payload_len + 2;
+    
+    // Only read if we have the complete packet
+    if (available >= packet_size && count >= packet_size) {
+        const uint32_t ret = _readbuf.read(buffer, packet_size);
+        _read_mutex.give();
+        if (ret > 0) {
+            _receive_timestamp_update();
+        }
+        return ret;
+    }
+    
+    // If caller's buffer too small or incomplete packet, don't read
+    _read_mutex.give();
+    return 0;
 }
 
 void IRAM_ATTR UARTDriver::_timer_tick(void)
