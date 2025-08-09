@@ -38,7 +38,7 @@ void ESP32Debug::debug_print(uint8_t level, const char* prefix, const char* fmt,
     vsnprintf(buffer + prefix_len, sizeof(buffer) - prefix_len, fmt, args);
     
     // Map debug levels to MAVLink severity levels
-    uint8_t severity;
+    MAV_SEVERITY severity;
     switch (level) {
         case ESP32_DEBUG_ERRORS:
             severity = MAV_SEVERITY_ERROR;
