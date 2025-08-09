@@ -187,57 +187,67 @@ ssize_t IRAM_ATTR UARTDriver::_read(uint8_t *buffer, uint16_t count)
     
     // MAVLink processing requires access from multiple threads - remove restriction
 
-    // MAVLink-aware packet read - ensure complete packets only
+    // Thread-safe buffer read with MAVLink packet awareness
     _read_mutex.take_blocking();
     
-    // Check if we have enough data for at least a MAVLink header
     uint32_t available = _readbuf.available();
-    if (available < 12) {  // Minimum MAVLink v2 header size
+    if (available == 0) {
         _read_mutex.give();
         return 0;
     }
     
-    // Peek at the first byte to check for MAVLink start
+    // Check if this looks like MAVLink data
     uint8_t start_byte;
-    if (_readbuf.peekbytes(&start_byte, 1) != 1) {
-        _read_mutex.give();
-        return 0;
+    bool is_mavlink = false;
+    if (_readbuf.peekbytes(&start_byte, 1) == 1 && start_byte == 0xFD) {
+        is_mavlink = true;
     }
     
-    // If not MAVLink start, read single byte to advance buffer
-    if (start_byte != 0xFD) {  // MAVLink v2 start byte
-        const uint32_t ret = _readbuf.read(buffer, MIN(count, 1));
-        _read_mutex.give();
-        if (ret > 0) {
-            _receive_timestamp_update();
+    uint32_t ret = 0;
+    
+    if (is_mavlink && available >= 12) {
+        // MAVLink packet handling - ensure complete packets
+        uint8_t header[12];
+        if (_readbuf.peekbytes(header, 12) == 12) {
+            uint8_t payload_len = header[1];
+            uint32_t packet_size = 12 + payload_len + 2;
+            
+            // Only read complete MAVLink packets
+            if (available >= packet_size && count >= packet_size) {
+                ret = _readbuf.read(buffer, packet_size);
+            }
+            // If incomplete packet or buffer too small, wait (keep mutex held with timeout)
+            else {
+                // Brief wait for more data while holding mutex
+                _read_mutex.give();
+                hal.scheduler->delay_microseconds(100);
+                if (_read_mutex.take(10)) {
+                    // Try again after brief wait
+                    available = _readbuf.available();
+                    if (available >= packet_size && count >= packet_size) {
+                        ret = _readbuf.read(buffer, packet_size);
+                    }
+                    _read_mutex.give();
+                } 
+                if (ret > 0 && ret == packet_size) {
+                    _receive_timestamp_update();
+                }
+                return ret;
+            }
         }
-        return ret;
+    } 
+    
+    // Non-MAVLink protocols or fallback: normal atomic read
+    if (ret == 0) {
+        ret = _readbuf.read(buffer, MIN(count, available));
     }
     
-    // We have a potential MAVLink packet, peek at payload length
-    uint8_t header[12];
-    if (_readbuf.peekbytes(header, 12) != 12) {
-        _read_mutex.give();
-        return 0;
-    }
-    
-    // Calculate complete packet size: header(12) + payload + CRC(2)
-    uint8_t payload_len = header[1];
-    uint32_t packet_size = 12 + payload_len + 2;
-    
-    // Only read if we have the complete packet
-    if (available >= packet_size && count >= packet_size) {
-        const uint32_t ret = _readbuf.read(buffer, packet_size);
-        _read_mutex.give();
-        if (ret > 0) {
-            _receive_timestamp_update();
-        }
-        return ret;
-    }
-    
-    // If caller's buffer too small or incomplete packet, don't read
     _read_mutex.give();
-    return 0;
+    
+    if (ret > 0) {
+        _receive_timestamp_update();
+    }
+    return ret;
 }
 
 void IRAM_ATTR UARTDriver::_timer_tick(void)
