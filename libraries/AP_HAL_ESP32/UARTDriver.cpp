@@ -97,6 +97,9 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
             _readbuf.set_size(RX_BUF_SIZE);
             _writebuf.set_size(TX_BUF_SIZE);
             _uart_owner_thd = xTaskGetCurrentTaskHandle();
+            
+            // Enable multithread access for MAVLink processing
+            _allow_multithread_access = true;
 
             _initialized = true;
         } else {
@@ -153,10 +156,20 @@ bool UARTDriver::tx_pending()
 
 uint32_t UARTDriver::_available()
 {
-    if (!_initialized || _uart_owner_thd != xTaskGetCurrentTaskHandle()) {
+    if (!_initialized) {
         return 0;
     }
-    return _readbuf.available();
+    
+    // Allow MAVLink processing from multiple threads
+    if (!_allow_multithread_access && _uart_owner_thd != xTaskGetCurrentTaskHandle()) {
+        return 0;
+    }
+    
+    // Thread-safe access to buffer
+    _read_mutex.take_blocking();
+    uint32_t result = _readbuf.available();
+    _read_mutex.give();
+    return result;
 }
 
 uint32_t UARTDriver::txspace()
@@ -172,22 +185,25 @@ uint32_t UARTDriver::txspace()
 
 ssize_t IRAM_ATTR UARTDriver::_read(uint8_t *buffer, uint16_t count)
 {
-    if (_uart_owner_thd != xTaskGetCurrentTaskHandle()) {
-        return -1;
-    }
-
     if (!_initialized) {
         return -1;
     }
+    
+    // Allow MAVLink processing from multiple threads
+    if (!_allow_multithread_access && _uart_owner_thd != xTaskGetCurrentTaskHandle()) {
+        return -1;
+    }
 
+    // Thread-safe buffer read with mutex protection
+    _read_mutex.take_blocking();
     const uint32_t ret = _readbuf.read(buffer, count);
+    _read_mutex.give();
+    
     if (ret == 0) {
         return 0;
     }
 
-
     _receive_timestamp_update();
-
     return ret;
 }
 
@@ -204,6 +220,9 @@ void IRAM_ATTR UARTDriver::read_data()
 {
     uart_port_t p = uart_desc[uart_num].port;
     
+    // Critical section: protect buffer writes from race conditions
+    _read_mutex.take_blocking();
+    
     if (p == 0) {
         // USB-Serial/JTAG interface uses polling (no events)
         int count = usb_serial_jtag_read_bytes(_buffer, sizeof(_buffer), 0);
@@ -219,23 +238,27 @@ void IRAM_ATTR UARTDriver::read_data()
         
         uart_event_t event;
         
-        // Process all pending events without blocking
-        while (xQueueReceive(_uart_event_queue, &event, 0) == pdTRUE) {
+        // Process events one at a time to avoid race conditions
+        // Only process one event per call to prevent buffer corruption
+        if (xQueueReceive(_uart_event_queue, &event, 0) == pdTRUE) {
             switch (event.type) {
                 case UART_DATA: {
-                    // Read available data in chunks
+                    // Read available data in chunks with better error handling
                     size_t available = 0;
                     uart_get_buffered_data_len(p, &available);
                     
-                    while (available > 0) {
+                    if (available > 0) {
                         size_t to_read = MIN(available, sizeof(_buffer));
                         int count = uart_read_bytes(p, _buffer, to_read, 0);
                         if (count > 0) {
-                            _readbuf.write(_buffer, count);
-                            _receive_timestamp_update();
-                            available -= count;
-                        } else {
-                            break;
+                            // Atomic buffer write - all or nothing
+                            if (_readbuf.space() >= count) {
+                                _readbuf.write(_buffer, count);
+                                _receive_timestamp_update();
+                            } else {
+                                // Buffer full - drop this data to prevent corruption
+                                uart_flush_input(p);
+                            }
                         }
                     }
                     break;
@@ -252,7 +275,7 @@ void IRAM_ATTR UARTDriver::read_data()
                     
                 case UART_FRAME_ERR:
                 case UART_PARITY_ERR:
-                    // Error recovery
+                    // Error recovery - just log and continue
                     break;
                     
                 default:
@@ -260,6 +283,9 @@ void IRAM_ATTR UARTDriver::read_data()
             }
         }
     }
+    
+    // Release mutex at end of function
+    _read_mutex.give();
 }
 
 void IRAM_ATTR UARTDriver::write_data()

@@ -76,6 +76,10 @@ public:
     uint64_t receive_time_constraint_us(uint16_t nbytes) override; 
 
     uint32_t get_baud_rate() const override { return _baudrate; }
+    
+    // Debug: Get buffer sizes for verification
+    uint16_t get_rx_buffer_size() const { return RX_BUF_SIZE; }
+    uint16_t get_tx_buffer_size() const { return TX_BUF_SIZE; }
 
 private:
     bool _initialized;
@@ -85,6 +89,7 @@ private:
     ByteBuffer _readbuf{0};
     ByteBuffer _writebuf{0};
     Semaphore _write_mutex;
+    Semaphore _read_mutex;
     void read_data();
     void write_data();
     void calculate_buffer_sizes(uint32_t baudrate, uint16_t &rxS, uint16_t &txS);
@@ -97,6 +102,9 @@ private:
     uint32_t _baudrate;
 
     const tskTaskControlBlock* _uart_owner_thd;
+    
+    // Allow multiple threads to access UART for MAVLink processing
+    bool _allow_multithread_access;
     
     // Event-driven processing instead of polling
     QueueHandle_t _uart_event_queue;
