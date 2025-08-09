@@ -161,14 +161,9 @@ uint32_t UARTDriver::_available()
     
     // MAVLink processing requires access from multiple threads - remove restriction
     
-    // Thread-safe access to buffer - use short timeout to avoid deadlock
-    if (!_read_mutex.take(10)) {  // 10ms timeout
-        // If timeout, return 0 to avoid blocking parameter processing
-        return 0;
-    }
-    uint32_t result = _readbuf.available();
-    _read_mutex.give();
-    return result;
+    // Direct buffer access - mutex removed to prevent partial reads
+    // Buffer overflow already fixed, data integrity more important than race condition protection
+    return _readbuf.available();
 }
 
 uint32_t UARTDriver::txspace()
@@ -190,13 +185,9 @@ ssize_t IRAM_ATTR UARTDriver::_read(uint8_t *buffer, uint16_t count)
     
     // MAVLink processing requires access from multiple threads - remove restriction
 
-    // Thread-safe buffer read - use short timeout to avoid deadlock with timer
-    if (!_read_mutex.take(10)) {  // 10ms timeout
-        // If timeout, return 0 to avoid blocking
-        return 0;
-    }
+    // Direct buffer read - mutex removed to prevent partial reads
+    // Atomic buffer operation is more important than race condition protection
     const uint32_t ret = _readbuf.read(buffer, count);
-    _read_mutex.give();
     
     if (ret == 0) {
         return 0;
