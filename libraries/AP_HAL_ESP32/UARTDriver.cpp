@@ -160,13 +160,13 @@ uint32_t UARTDriver::_available()
         return 0;
     }
     
-    // Allow MAVLink processing from multiple threads
-    if (!_allow_multithread_access && _uart_owner_thd != xTaskGetCurrentTaskHandle()) {
+    // MAVLink processing requires access from multiple threads - remove restriction
+    
+    // Thread-safe access to buffer - use non-blocking to avoid deadlock
+    if (!_read_mutex.take_nonblocking()) {
+        // If mutex is held, return cached value or 0 to avoid blocking parameter processing
         return 0;
     }
-    
-    // Thread-safe access to buffer
-    _read_mutex.take_blocking();
     uint32_t result = _readbuf.available();
     _read_mutex.give();
     return result;
@@ -189,13 +189,13 @@ ssize_t IRAM_ATTR UARTDriver::_read(uint8_t *buffer, uint16_t count)
         return -1;
     }
     
-    // Allow MAVLink processing from multiple threads
-    if (!_allow_multithread_access && _uart_owner_thd != xTaskGetCurrentTaskHandle()) {
-        return -1;
-    }
+    // MAVLink processing requires access from multiple threads - remove restriction
 
-    // Thread-safe buffer read with mutex protection
-    _read_mutex.take_blocking();
+    // Thread-safe buffer read - use non-blocking to avoid deadlock with timer
+    if (!_read_mutex.take_nonblocking()) {
+        // If mutex is held by timer_tick, return 0 to avoid blocking
+        return 0;
+    }
     const uint32_t ret = _readbuf.read(buffer, count);
     _read_mutex.give();
     
