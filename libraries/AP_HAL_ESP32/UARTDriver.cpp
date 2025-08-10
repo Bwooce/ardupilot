@@ -24,7 +24,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
-#define HAL_ESP32_UART_MIN_TX_SIZE 512
+#define HAL_ESP32_UART_MIN_TX_SIZE 1024  // Increased for packet atomicity
 #define HAL_ESP32_UART_MIN_RX_SIZE 512
 
 extern const AP_HAL::HAL& hal;
@@ -32,14 +32,19 @@ extern const AP_HAL::HAL& hal;
 namespace ESP32
 {
 
-UARTDesc uart_desc[] = {HAL_ESP32_UART_DEVICES};
+// Simple GPIO pin mapping for UARTs (from hwdef)
+struct UARTDesc {
+    gpio_num_t rx;
+    gpio_num_t tx;
+};
+
+static const UARTDesc uart_pins[] = {HAL_ESP32_UART_DEVICES};
 
 void UARTDriver::vprintf(const char *fmt, va_list ap)
 {
-    uart_port_t p = uart_desc[uart_num].port;
-    if (p == 0) {
-        // Always use ESP32 logging system for USB-Serial/JTAG interface
-        // vprintf() only handles formatted text, never binary MAVLink data
+    if (uart_num == 0) {
+        // Always use ESP32 logging system for SERIAL0 (console)
+        // vprintf() only handles formatted text, never binary data
         esp_log_writev(ESP_LOG_INFO, "", fmt, ap);
     } else {
         AP_HAL::UARTDriver::vprintf(fmt, ap);
@@ -48,67 +53,66 @@ void UARTDriver::vprintf(const char *fmt, va_list ap)
 
 void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
 {
+    
     if (b == 0 && txS == 0 && rxS == 0 && _initialized) {
         // the thread owning this port has changed
         _uart_owner_thd = xTaskGetCurrentTaskHandle();
         return;
     }
 
-    if (uart_num < ARRAY_SIZE(uart_desc)) {
-        uart_port_t p = uart_desc[uart_num].port;
-        if (!_initialized) {
-            // Calculate optimal buffer sizes based on baud rate
-            calculate_buffer_sizes(b, rxS, txS);
-            
-            // Update instance buffer sizes
-            RX_BUF_SIZE = rxS;
-            TX_BUF_SIZE = txS;
-            
-            // Debug via MAVLink STATUSTEXT - safe from serial contamination
-            ESP32_DEBUG_VERBOSE("UART%d initialized: baud=%d, RX=%d, TX=%d", uart_num, (int)b, (int)rxS, (int)txS);
-            
-            if (p == 0) {
-                // Initialize USB-Serial/JTAG driver for port 0 (ESP32-S3)
-                _uart_event_queue = nullptr;  // USB doesn't use event queue
-                usb_serial_jtag_driver_config_t usb_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
-                usb_config.rx_buffer_size = RX_BUF_SIZE;
-                usb_config.tx_buffer_size = TX_BUF_SIZE;
-                usb_serial_jtag_driver_install(&usb_config);
-            } else {
-                // Initialize regular UART for other ports with DMA support
-                uart_config_t config = {
-                    .baud_rate = (int)b,
-                    .data_bits = UART_DATA_8_BITS,
-                    .parity = UART_PARITY_DISABLE,
-                    .stop_bits = UART_STOP_BITS_1,
-                    .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-                    .rx_flow_ctrl_thresh = 120,
-                    .source_clk = UART_SCLK_APB,
-                };
-                uart_param_config(p, &config);
-                uart_set_pin(p,
-                             uart_desc[uart_num].tx,
-                             uart_desc[uart_num].rx,
-                             UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-                
-                // Install UART driver with large buffers and DMA support
-                // Use event queue for interrupt-driven processing
-                uart_driver_install(p, rxS, txS, 100, &_uart_event_queue, ESP_INTR_FLAG_IRAM);
-            }
-            _readbuf.set_size(RX_BUF_SIZE);
-            _writebuf.set_size(TX_BUF_SIZE);
-            _uart_owner_thd = xTaskGetCurrentTaskHandle();
-            
-            // Enable multithread access for MAVLink processing
-            _allow_multithread_access = true;
-
-            _initialized = true;
+    // Direct mapping: SERIAL0->UART0, SERIAL1->UART1, etc.
+    uart_port_t p = (uart_port_t)uart_num;
+    if (!_initialized) {
+        // Calculate optimal buffer sizes based on baud rate
+        calculate_buffer_sizes(b, rxS, txS);
+        
+        // Update instance buffer sizes
+        RX_BUF_SIZE = rxS;
+        TX_BUF_SIZE = txS;
+        
+        // Debug via logging system - safe from serial contamination
+        
+        if (p == 0) {
+            // Initialize USB-Serial/JTAG driver for port 0 (ESP32-S3)
+            _uart_event_queue = nullptr;  // USB doesn't use event queue
+            usb_serial_jtag_driver_config_t usb_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+            usb_config.rx_buffer_size = RX_BUF_SIZE;
+            usb_config.tx_buffer_size = TX_BUF_SIZE;
+            usb_serial_jtag_driver_install(&usb_config);
         } else {
-            if (p != 0) {
-                // Only set baudrate for regular UARTs, not USB-Serial/JTAG
-                flush();
-                uart_set_baudrate(p, b);
-            }
+            // Initialize regular UART for other ports with DMA support
+            uart_config_t config = {
+                .baud_rate = (int)b,
+                .data_bits = UART_DATA_8_BITS,
+                .parity = UART_PARITY_DISABLE,
+                .stop_bits = UART_STOP_BITS_1,
+                .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+                .rx_flow_ctrl_thresh = 120,
+                .source_clk = UART_SCLK_APB,
+            };
+            uart_param_config(p, &config);
+            uart_set_pin(p,
+                         uart_pins[uart_num].tx,
+                         uart_pins[uart_num].rx,
+                         UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+            
+            // Install UART driver with large buffers and DMA support
+            // Use event queue for interrupt-driven processing
+            uart_driver_install(p, rxS, txS, 100, &_uart_event_queue, ESP_INTR_FLAG_IRAM);
+        }
+        _readbuf.set_size(RX_BUF_SIZE);
+        _writebuf.set_size(TX_BUF_SIZE);
+        _uart_owner_thd = xTaskGetCurrentTaskHandle();
+        
+        // Enable multithread access for protocol processing
+        _allow_multithread_access = true;
+
+        _initialized = true;
+    } else {
+        if (p != 0) {
+            // Only set baudrate for regular UARTs, not USB-Serial/JTAG
+            flush();
+            uart_set_baudrate(p, b);
         }
     }
     _baudrate = b;
@@ -117,7 +121,7 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
 void UARTDriver::_end()
 {
     if (_initialized) {
-        uart_port_t p = uart_desc[uart_num].port;
+        uart_port_t p = (uart_port_t)uart_num;
         if (p == 0) {
             // Uninstall USB-Serial/JTAG driver for port 0
             usb_serial_jtag_driver_uninstall();
@@ -133,7 +137,7 @@ void UARTDriver::_end()
 
 void UARTDriver::_flush()
 {
-    uart_port_t p = uart_desc[uart_num].port;
+    uart_port_t p = (uart_port_t)uart_num;
     if (p == 0) {
         // Flush USB-Serial/JTAG interface
         // Note: usb_serial_jtag driver auto-flushes, but we ensure it here
@@ -161,7 +165,7 @@ uint32_t UARTDriver::_available()
         return 0;
     }
     
-    // MAVLink processing requires access from multiple threads - remove restriction
+    // Allow access from multiple threads for protocol processing
     
     // Thread-safe buffer access - simple blocking
     _read_mutex.take_blocking();
@@ -187,9 +191,7 @@ ssize_t IRAM_ATTR UARTDriver::_read(uint8_t *buffer, uint16_t count)
         return -1;
     }
     
-    // MAVLink processing requires access from multiple threads - remove restriction
-
-    // Thread-safe buffer read with MAVLink packet awareness
+    // Thread-safe buffer read
     _read_mutex.take_blocking();
     
     uint32_t available = _readbuf.available();
@@ -198,51 +200,8 @@ ssize_t IRAM_ATTR UARTDriver::_read(uint8_t *buffer, uint16_t count)
         return 0;
     }
     
-    // Check if this looks like MAVLink data
-    uint8_t start_byte;
-    bool is_mavlink = false;
-    if (_readbuf.peekbytes(&start_byte, 1) == 1 && start_byte == 0xFD) {
-        is_mavlink = true;
-    }
-    
-    uint32_t ret = 0;
-    
-    if (is_mavlink && available >= 12) {
-        // MAVLink packet handling - ensure complete packets
-        uint8_t header[12];
-        if (_readbuf.peekbytes(header, 12) == 12) {
-            uint8_t payload_len = header[1];
-            uint32_t packet_size = 12 + payload_len + 2;
-            
-            // Only read complete MAVLink packets
-            if (available >= packet_size && count >= packet_size) {
-                ret = _readbuf.read(buffer, packet_size);
-            }
-            // If incomplete packet or buffer too small, wait (keep mutex held with timeout)
-            else {
-                // Brief wait for more data while holding mutex
-                _read_mutex.give();
-                hal.scheduler->delay_microseconds(100);
-                if (_read_mutex.take(10)) {
-                    // Try again after brief wait
-                    available = _readbuf.available();
-                    if (available >= packet_size && count >= packet_size) {
-                        ret = _readbuf.read(buffer, packet_size);
-                    }
-                    _read_mutex.give();
-                } 
-                if (ret > 0 && ret == packet_size) {
-                    _receive_timestamp_update();
-                }
-                return ret;
-            }
-        }
-    } 
-    
-    // Non-MAVLink protocols or fallback: normal atomic read
-    if (ret == 0) {
-        ret = _readbuf.read(buffer, MIN(count, available));
-    }
+    // Simple atomic read operation
+    uint32_t ret = _readbuf.read(buffer, MIN(count, available));
     
     _read_mutex.give();
     
@@ -263,7 +222,7 @@ void IRAM_ATTR UARTDriver::_timer_tick(void)
 
 void IRAM_ATTR UARTDriver::read_data()
 {
-    uart_port_t p = uart_desc[uart_num].port;
+    uart_port_t p = (uart_port_t)uart_num;
     
     // Critical section: protect buffer writes from race conditions
     _read_mutex.take_blocking();
@@ -335,20 +294,24 @@ void IRAM_ATTR UARTDriver::read_data()
 
 void IRAM_ATTR UARTDriver::write_data()
 {
-    uart_port_t p = uart_desc[uart_num].port;
+    uart_port_t p = (uart_port_t)uart_num;
     int count = 0;
     _write_mutex.take_blocking();
+    
+    
     do {
         count = _writebuf.peekbytes(_buffer, sizeof(_buffer));
         if (count > 0) {
+            int sent = 0;
             if (p == 0) {
                 // Use USB-Serial/JTAG interface for port 0 (ESP32-S3)
-                count = usb_serial_jtag_write_bytes(_buffer, count, 0);
+                sent = usb_serial_jtag_write_bytes(_buffer, count, 0);
             } else {
                 // Use regular UART for other ports
-                count = uart_tx_chars(p, (const char*) _buffer, count);
+                sent = uart_tx_chars(p, (const char*) _buffer, count);
             }
-            _writebuf.advance(count);
+            _writebuf.advance(sent);
+            count = sent;
         }
     } while (count > 0);
     _write_mutex.give();
@@ -360,13 +323,70 @@ size_t IRAM_ATTR UARTDriver::_write(const uint8_t *buffer, size_t size)
         return 0;
     }
 
+    // Regular write with per-write mutex (no protocol-specific logic)
     _write_mutex.take_blocking();
-
-
     size_t ret = _writebuf.write(buffer, size);
     _write_mutex.give();
     return ret;
 }
+
+size_t UARTDriver::write_packet(const uint8_t *buffer, size_t size)
+{
+    if (!_initialized || size == 0) {
+        return 0;
+    }
+    
+    // Use single write mutex for entire packet - ensures atomicity
+    _write_mutex.take_blocking();
+    
+    // Write packet data atomically
+    size_t written = 0;
+    size_t remaining = size;
+    
+    while (remaining > 0) {
+        size_t chunk_size = _writebuf.write(buffer + written, remaining);
+        if (chunk_size == 0) {
+            // Buffer full - break to avoid infinite loop
+            break;
+        }
+        written += chunk_size;
+        remaining -= chunk_size;
+    }
+    
+    _write_mutex.give();
+    return written;
+}
+
+size_t UARTDriver::write_packet_nonblocking(const uint8_t *buffer, size_t size)
+{
+    if (!_initialized || size == 0) {
+        return 0;
+    }
+    
+    // Try to take mutex - if already held, drop the packet  
+    if (!_write_mutex.take_nonblocking()) {
+        return 0; // Drop packet to prevent blocking/recursion
+    }
+    
+    // Write packet data atomically
+    size_t written = 0;
+    size_t remaining = size;
+    
+    while (remaining > 0) {
+        size_t chunk_size = _writebuf.write(buffer + written, remaining);
+        if (chunk_size == 0) {
+            // Buffer full - break to avoid infinite loop
+            break;
+        }
+        written += chunk_size;
+        remaining -= chunk_size;
+    }
+    
+    _write_mutex.give();
+    return written;
+}
+
+
 
 bool UARTDriver::_discard_input()
 {
@@ -376,6 +396,8 @@ bool UARTDriver::_discard_input()
     if (!_initialized) {
         return false;
     }
+
+    // Simple buffer clear - no stateful packet read cleanup needed
 
     _readbuf.clear();
 

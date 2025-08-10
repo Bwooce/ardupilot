@@ -547,6 +547,7 @@ void Scheduler::print_main_loop_rate(void)
 
 void IRAM_ATTR Scheduler::_main_thread(void *arg)
 {
+    printf("MAIN_THREAD: ESP32 main thread started - entry point reached\n");
 #ifdef SCHEDDEBUG
     printf("%s:%d start\n", __PRETTY_FUNCTION__, __LINE__);
 #endif

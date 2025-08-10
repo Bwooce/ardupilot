@@ -29,12 +29,6 @@
 namespace ESP32
 {
 
-struct UARTDesc {
-    uart_port_t port;
-    gpio_num_t rx;
-    gpio_num_t tx;
-};
-
 class UARTDriver : public AP_HAL::UARTDriver
 {
 public:
@@ -80,6 +74,13 @@ public:
     // Debug: Get buffer sizes for verification
     uint16_t get_rx_buffer_size() const { return RX_BUF_SIZE; }
     uint16_t get_tx_buffer_size() const { return TX_BUF_SIZE; }
+    
+    // Atomic packet writing to prevent interleaving (override base class)
+    size_t write_packet(const uint8_t *buffer, size_t size) override;
+    
+    // Non-blocking packet write for status messages
+    size_t write_packet_nonblocking(const uint8_t *buffer, size_t size);
+    
 
 private:
     bool _initialized;

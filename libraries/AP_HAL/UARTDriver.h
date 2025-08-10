@@ -48,6 +48,14 @@ public:
     size_t write(uint8_t c) override;
     size_t write(const uint8_t *buffer, size_t size) override;
     size_t write(const char *str) override;
+    
+    /*
+      atomic packet write - prevents interleaving with other writes
+      default implementation falls back to regular write()
+     */
+    virtual size_t write_packet(const uint8_t *buffer, size_t size) {
+        return write(buffer, size);
+    }
 
     /*
       single and multi-byte read methods

@@ -62,6 +62,10 @@ define AP_AHRS_DCM_ENABLED 1
 define HAL_DEFAULT_FRAME_CLASS 2  # Rover
 define HAL_DEFAULT_FRAME_TYPE 0   # Undefined/Generic rover
 
+# Serial protocol defaults
+define DEFAULT_SERIAL1_PROTOCOL SerialProtocol_MAVLink2
+define DEFAULT_SERIAL2_PROTOCOL SerialProtocol_GPS
+
 # Storage configuration - Use PSRAM for in-memory logging
 define HAL_LOGGING_DATAFLASH_ENABLED 0
 define HAL_LOGGING_FILESYSTEM_ENABLED 0
@@ -89,21 +93,23 @@ APA102_DATA_PIN=8
 APA102_CLOCK_PIN=3
 
 # RCOUT Configuration - Rover motor outputs
-RCOUT1_PIN 11  # Right motor
-RCOUT2_PIN 12  # Left motor
+RCOUT1_PIN 13  # Right motor
+RCOUT2_PIN 14  # Left motor
 
 # Serial interfaces
 # SERIAL0 is USB (built-in)
 UART_ORDER SERIAL0 SERIAL1 SERIAL2
 SERIAL0_TX_PIN 43  # USB-Serial/JTAG
-SERIAL0_RX_PIN 44  # USB-Serial/JTAG# SERIAL1 for CRSF/ELRS 
-SERIAL1_TX_PIN 1
-SERIAL1_RX_PIN 2
-SERIAL1_BAUD 115200
+SERIAL0_RX_PIN 44  # USB-Serial/JTAG
+
+# SERIAL1 for CRSF/ELRS 
+SERIAL1_TX_PIN 12
+SERIAL1_RX_PIN 46
+SERIAL1_BAUD 460
 
 # SERIAL2 for GPS
-SERIAL2_TX_PIN 17
-SERIAL2_RX_PIN 18  
+SERIAL2_TX_PIN 1
+SERIAL2_RX_PIN 2  
 SERIAL2_BAUD 38400
 
 # I2C bus configuration - for external sensors
@@ -174,10 +180,10 @@ define HAL_WITH_DSP 0
 # Enable ESP32 specific debug that doesn't break build
 define HAL_GPIO_LED_ON 1
 
-# Add custom debug printing for startup sequence
-define STARTUP_DEBUG 1
+# Disable startup debug to prevent MAVLink corruption
+define STARTUP_DEBUG 0
 
-# Enable console output for debugging
+# Enable console output for debugging MAVLink issues  
 define HAL_CONSOLE_ENABLED 1
 
 # CAN debug level (0=none, 1=errors, 2=warnings, 3=info, 4=verbose)
