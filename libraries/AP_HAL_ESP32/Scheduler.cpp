@@ -25,10 +25,12 @@
 #include "freertos/task.h"
 
 #include "esp_task_wdt.h"
+#include "esp_log.h"
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Scheduler/AP_Scheduler.h>
 #include <stdio.h>
+#include <inttypes.h>
 
 //#define SCHEDULERDEBUG 1
 
@@ -84,11 +86,15 @@ void Scheduler::init()
     #define SLOWCPU 1
 
     // pin main thread to Core 0, and we'll also pin other heavy-tasks to core 1, like wifi-related.
+    ESP_LOGI("SCHED", "Creating main thread: stack=%d prio=%d", Scheduler::MAIN_SS, Scheduler::MAIN_PRIO);
+    
     if (xTaskCreatePinnedToCore(_main_thread, "APM_MAIN", Scheduler::MAIN_SS, this, Scheduler::MAIN_PRIO, &_main_task_handle,FASTCPU) != pdPASS) {
     //if (xTaskCreate(_main_thread, "APM_MAIN", Scheduler::MAIN_SS, this, Scheduler::MAIN_PRIO, &_main_task_handle) != pdPASS) {
         hal.console->printf("FAILED to create task _main_thread on FASTCPU\n");
+        ESP_LOGE("SCHED", "FAILED to create main thread");
     } else {
     	hal.console->printf("OK created task _main_thread on FASTCPU\n");
+        ESP_LOGI("SCHED", "Main thread created successfully");
     }
 
     if (xTaskCreatePinnedToCore(_timer_thread, "APM_TIMER", TIMER_SS, this, TIMER_PRIO, &_timer_task_handle,FASTCPU) != pdPASS) {
@@ -498,9 +504,25 @@ void IRAM_ATTR Scheduler::_uart_thread(void *arg)
 #ifdef SCHEDDEBUG
     printf("%s:%d initialised\n", __PRETTY_FUNCTION__, __LINE__);
 #endif
+    // Debug APM_UART thread startup
+    ESP_LOGD("UART_THREAD", "APM_UART thread started - hal.num_serial=%d", hal.num_serial);
+    
+    // Reduce logging frequency to prevent flooding
+    uint32_t loop_count = 0;
+    
     while (true) {
         sched->delay_microseconds(1000);
+        loop_count++;
+        
+        // Debug serial port enumeration - only every 1000 loops
+        if (loop_count % 1000 == 1) {
+            ESP_LOGD("UART_THREAD", "APM_UART thread loop #%" PRIu32 " - checking %d serial ports", loop_count, hal.num_serial);
+        }
+        
         for (uint8_t i=0; i<hal.num_serial; i++) {
+            if (i == 1 && loop_count % 100 == 1) {  // Log SERIAL1 every 100 loops
+                ESP_LOGD("UART_THREAD", "APM_UART thread calling _timer_tick() on SERIAL%d (instance %p)", i, hal.serial(i));
+            }
             hal.serial(i)->_timer_tick();
         }
         hal.console->_timer_tick();
@@ -547,33 +569,36 @@ void Scheduler::print_main_loop_rate(void)
 
 void IRAM_ATTR Scheduler::_main_thread(void *arg)
 {
-    printf("MAIN_THREAD: ESP32 main thread started - entry point reached\n");
+    ESP_LOGI("MAIN", "ArduPilot main thread starting");
 #ifdef SCHEDDEBUG
     printf("%s:%d start\n", __PRETTY_FUNCTION__, __LINE__);
 #endif
-    printf("MAIN_THREAD: ESP32 main thread started\n");
     Scheduler *sched = (Scheduler *)arg;
 
-    printf("MAIN_THREAD: Initializing peripherals...\n");
+    if (sched->callbacks == nullptr) {
+        ESP_LOGE("MAIN", "CRITICAL: callbacks is NULL - cannot proceed");
+        vTaskDelete(NULL);
+        return;
+    }
+
 #ifndef HAL_DISABLE_ADC_DRIVER
-    printf("MAIN_THREAD: Initializing analogin...\n");
     hal.analogin->init();
 #endif
-    printf("MAIN_THREAD: Initializing rcout...\n");
     hal.rcout->init();
 
-    printf("MAIN_THREAD: Calling setup()...\n");
+    ESP_LOGI("MAIN", "Calling ArduPilot setup() - this may take a while...");
     sched->callbacks->setup();
+    ESP_LOGI("MAIN", "ArduPilot setup completed successfully");
 
     sched->set_system_initialized();
 
     //initialize WTD for current thread on FASTCPU, all cores will be (1 << CONFIG_FREERTOS_NUMBER_OF_CORES) - 1
     wdt_init( TWDT_TIMEOUT_MS, 1 << FASTCPU ); // 3 sec
 
-
 #ifdef SCHEDDEBUG
     printf("%s:%d initialised\n", __PRETTY_FUNCTION__, __LINE__);
 #endif
+    ESP_LOGI("MAIN", "ArduPilot main loop starting");
     while (true) {
         sched->callbacks->loop();
         sched->delay_microseconds(250);

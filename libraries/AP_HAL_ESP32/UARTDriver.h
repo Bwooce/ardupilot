@@ -33,12 +33,7 @@ class UARTDriver : public AP_HAL::UARTDriver
 {
 public:
 
-    UARTDriver(uint8_t serial_num)
-        : AP_HAL::UARTDriver()
-    {
-        _initialized = false;
-        uart_num = serial_num;
-    }
+    UARTDriver(uint8_t serial_num);  // Moved to .cpp file
 
     virtual ~UARTDriver() = default;
 
@@ -75,11 +70,7 @@ public:
     uint16_t get_rx_buffer_size() const { return RX_BUF_SIZE; }
     uint16_t get_tx_buffer_size() const { return TX_BUF_SIZE; }
     
-    // Atomic packet writing to prevent interleaving (override base class)
-    size_t write_packet(const uint8_t *buffer, size_t size) override;
-    
-    // Non-blocking packet write for status messages
-    size_t write_packet_nonblocking(const uint8_t *buffer, size_t size);
+    // write() now handles atomicity - no need for separate write_packet()
     
 
 private:

@@ -30,9 +30,6 @@ This provides some support code and variables for MAVLink enabled sketches
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-#include <AP_HAL_ESP32/UARTDriver.h>
-#endif
 
 extern const AP_HAL::HAL& hal;
 
@@ -153,37 +150,10 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
         return;
     }
     // Use atomic packet writing to prevent interleaving with debug output
-    // Use non-blocking writes for STATUSTEXT messages to prevent recursion
     size_t written = 0;
     
-    // Check if this is a STATUSTEXT message (debug/status output)
-    bool is_statustext = false;
-    if (len >= 6) { // Minimum MAVLink v2 header size
-        // MAVLink v2: byte 5 is message ID low byte
-        // STATUSTEXT message ID is 253 (0xFD)
-        if (buf[5] == 253) {
-            is_statustext = true;
-        }
-    }
-    
-    if (is_statustext) {
-        // Use non-blocking write for status messages to prevent recursion
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        // On ESP32, we know this is an ESP32::UARTDriver, so cast directly
-        ESP32::UARTDriver* esp32_uart = static_cast<ESP32::UARTDriver*>(mavlink_comm_port[chan]);
-        written = esp32_uart->write_packet_nonblocking(buf, len);
-#else
-        // On other platforms, just use regular write (no recursion issue)
-        written = mavlink_comm_port[chan]->write_packet(buf, len);
-#endif
-    } else {
-        // Normal blocking write for critical telemetry
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-#endif
-        written = mavlink_comm_port[chan]->write_packet(buf, len);
-    }
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-#endif
+    // Use standard write() - all platforms handle atomicity correctly
+    written = mavlink_comm_port[chan]->write(buf, len);
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     if (written < len && !mavlink_comm_port[chan]->is_write_locked()) {
         AP_HAL::panic("Short write on UART: %lu < %u", (unsigned long)written, len);

@@ -16,6 +16,7 @@
 #include <AP_HAL/AP_HAL.h>
 
 #include "Semaphores.h"
+#include "esp_log.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -25,14 +26,35 @@ extern const AP_HAL::HAL& hal;
 
 using namespace ESP32;
 
-Semaphore::Semaphore()
+Semaphore::Semaphore(bool recursive)
+    : _is_recursive(recursive)
 {
-    handle = xSemaphoreCreateRecursiveMutex();
+    if (_is_recursive) {
+        handle = xSemaphoreCreateRecursiveMutex();
+        ESP_LOGV("MUTEX", "Created RECURSIVE mutex %p", handle);
+    } else {
+        handle = xSemaphoreCreateMutex();
+        ESP_LOGV("MUTEX", "Created NON-RECURSIVE mutex %p", handle);
+    }
 }
 
 bool Semaphore::give()
 {
-    return xSemaphoreGiveRecursive((QueueHandle_t)handle);
+    BaseType_t result;
+    TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+    
+    if (_is_recursive) {
+        result = xSemaphoreGiveRecursive((QueueHandle_t)handle);
+    } else {
+        result = xSemaphoreGive((QueueHandle_t)handle);
+    }
+    
+    if (result != pdTRUE) {
+        ESP_LOGE("MUTEX", "Thread %p FAILED to give %s mutex %p", 
+                 current_task, _is_recursive ? "recursive" : "non-recursive", handle);
+    }
+    
+    return result == pdTRUE;
 }
 
 bool Semaphore::take(uint32_t timeout_ms)
@@ -56,17 +78,35 @@ bool Semaphore::take(uint32_t timeout_ms)
 
 void Semaphore::take_blocking()
 {
-    xSemaphoreTakeRecursive((QueueHandle_t)handle, portMAX_DELAY);
+    BaseType_t result;
+    TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+    
+    if (_is_recursive) {
+        result = xSemaphoreTakeRecursive((QueueHandle_t)handle, portMAX_DELAY);
+    } else {
+        // Check if we already own this mutex (would indicate recursion attempt)
+        if (xSemaphoreGetMutexHolder((QueueHandle_t)handle) == current_task) {
+            const char* task_name = pcTaskGetName(current_task);
+            ESP_LOGE("MUTEX", "RECURSION DETECTED! Thread %s (%p) already owns NON-RECURSIVE mutex %p", 
+                     task_name, current_task, handle);
+        }
+        
+        result = xSemaphoreTake((QueueHandle_t)handle, portMAX_DELAY);
+    }
+    
+    if (result != pdTRUE) {
+        ESP_LOGE("MUTEX", "Thread %p FAILED to take %s mutex %p - this should never happen with portMAX_DELAY", 
+                 current_task, _is_recursive ? "recursive" : "non-recursive", handle);
+    }
 }
 
 bool Semaphore::take_nonblocking()
 {
-    bool ok = xSemaphoreTakeRecursive((QueueHandle_t)handle, 0) == pdTRUE;
-    if (ok) {
-        give();
+    if (_is_recursive) {
+        return xSemaphoreTakeRecursive((QueueHandle_t)handle, 0) == pdTRUE;
+    } else {
+        return xSemaphoreTake((QueueHandle_t)handle, 0) == pdTRUE;
     }
-
-    return ok;
 }
 
 bool Semaphore::check_owner()

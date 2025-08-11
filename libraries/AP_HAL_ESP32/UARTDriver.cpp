@@ -23,14 +23,43 @@
 #include "hal/usb_serial_jtag_ll.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/task.h"
+#include <inttypes.h>
 
 #define HAL_ESP32_UART_MIN_TX_SIZE 1024  // Increased for packet atomicity
 #define HAL_ESP32_UART_MIN_RX_SIZE 512
 
 extern const AP_HAL::HAL& hal;
 
+// Global tracking for UART1 access
+static volatile uint32_t uart1_access_count = 0;
+#define TRACK_UART1_ACCESS() do { \
+    if (uart_num == 1) { \
+        uint32_t count = __sync_fetch_and_add(&uart1_access_count, 1); \
+        ESP_LOGD("UART_ACCESS", "UART1 hardware access #%" PRIu32 " from instance %p", count + 1, this); \
+    } \
+} while(0)
+
 namespace ESP32
 {
+
+UARTDriver::UARTDriver(uint8_t serial_num)
+    : AP_HAL::UARTDriver()
+    , _write_mutex(serial_num == 1 ? false : true)  // SERIAL1 (MAVLink) uses non-recursive mutex
+    , _read_mutex(serial_num == 1 ? false : true)   // SERIAL1 (MAVLink) uses non-recursive mutex
+{
+    _initialized = false;
+    uart_num = serial_num;
+    
+    // Log construction with intended use
+    const char* use_desc = "Unknown";
+    if (serial_num == 0) use_desc = "Console/SERIAL0";
+    else if (serial_num == 1) use_desc = "MAVLink/SERIAL1";
+    else if (serial_num == 2) use_desc = "Telem/SERIAL2";
+    
+    ESP_LOGD("UART_CONSTRUCT", "UARTDriver UART%d (%s) instance %p constructed - write_mutex %p, read_mutex %p", 
+             uart_num, use_desc, this, &_write_mutex, &_read_mutex);
+}
 
 // Simple GPIO pin mapping for UARTs (from hwdef)
 struct UARTDesc {
@@ -42,13 +71,9 @@ static const UARTDesc uart_pins[] = {HAL_ESP32_UART_DEVICES};
 
 void UARTDriver::vprintf(const char *fmt, va_list ap)
 {
-    if (uart_num == 0) {
-        // Always use ESP32 logging system for SERIAL0 (console)
-        // vprintf() only handles formatted text, never binary data
-        esp_log_writev(ESP_LOG_INFO, "", fmt, ap);
-    } else {
-        AP_HAL::UARTDriver::vprintf(fmt, ap);
-    }
+    // Use standard ArduPilot vprintf implementation for all UARTs
+    // ESP-IDF logging is now handled separately at the system level
+    AP_HAL::UARTDriver::vprintf(fmt, ap);
 }
 
 void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
@@ -62,6 +87,16 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
 
     // Direct mapping: SERIAL0->UART0, SERIAL1->UART1, etc.
     uart_port_t p = (uart_port_t)uart_num;
+    
+    // Log UARTDriver instance details for debugging mutex issues
+    const char* use_desc = "Unknown";
+    if (uart_num == 0) use_desc = "Console/SERIAL0";
+    else if (uart_num == 1) use_desc = "MAVLink/SERIAL1";
+    else if (uart_num == 2) use_desc = "Telem/SERIAL2";
+    
+    ESP_LOGD("UART_INIT", "UARTDriver::_begin UART%d (%s) instance %p - write_mutex addr %p, read_mutex addr %p", 
+             uart_num, use_desc, this, &_write_mutex, &_read_mutex);
+    
     if (!_initialized) {
         // Calculate optimal buffer sizes based on baud rate
         calculate_buffer_sizes(b, rxS, txS);
@@ -101,7 +136,11 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
             uart_driver_install(p, rxS, txS, 100, &_uart_event_queue, ESP_INTR_FLAG_IRAM);
         }
         _readbuf.set_size(RX_BUF_SIZE);
+        
+        // Protect writebuf resize with write mutex to prevent corruption during transmission
+        _write_mutex.take_blocking();
         _writebuf.set_size(TX_BUF_SIZE);
+        _write_mutex.give();
         _uart_owner_thd = xTaskGetCurrentTaskHandle();
         
         // Enable multithread access for protocol processing
@@ -130,7 +169,11 @@ void UARTDriver::_end()
             uart_driver_delete(p);
         }
         _readbuf.set_size(0);
+        
+        // Protect writebuf resize with write mutex to prevent corruption during transmission
+        _write_mutex.take_blocking();
         _writebuf.set_size(0);
+        _write_mutex.give();
     }
     _initialized = false;
 }
@@ -179,7 +222,7 @@ uint32_t UARTDriver::txspace()
     if (!_initialized) {
         return 0;
     }
-    int result =  _writebuf.space();
+    int result = _writebuf.space();
     result -= TX_BUF_SIZE / 4;
     return MAX(result, 0);
 
@@ -216,6 +259,16 @@ void IRAM_ATTR UARTDriver::_timer_tick(void)
     if (!_initialized) {
         return;
     }
+    
+    // Debug _timer_tick calls occasionally
+    static uint32_t tick_count = 0;
+    if ((tick_count++ % 100) == 0) {
+        TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+        const char* task_name = pcTaskGetName(current_task);
+        ESP_LOGD("UART_TICK", "_timer_tick: UART%d instance %p called by thread %s (%p) - tick #%" PRIu32, 
+                 uart_num, this, task_name, current_task, tick_count);
+    }
+    
     read_data();
     write_data();
 }
@@ -292,12 +345,20 @@ void IRAM_ATTR UARTDriver::read_data()
     _read_mutex.give();
 }
 
-void IRAM_ATTR UARTDriver::write_data()
+void UARTDriver::write_data()
 {
     uart_port_t p = (uart_port_t)uart_num;
     int count = 0;
-    _write_mutex.take_blocking();
     
+    // Debug write_data calls
+    TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+    const char* task_name = pcTaskGetName(current_task);
+    ESP_LOGD("UART_WRITE_DATA", "write_data: UART%d instance %p Thread %s (%p) called write_data", 
+             uart_num, this, task_name, current_task);
+    
+    // Use write_mutex to coordinate with buffer writes
+    // This ensures atomic peekbytes() -> uart_tx_chars() -> advance() sequence
+    _write_mutex.take_blocking();
     
     do {
         count = _writebuf.peekbytes(_buffer, sizeof(_buffer));
@@ -308,78 +369,49 @@ void IRAM_ATTR UARTDriver::write_data()
                 sent = usb_serial_jtag_write_bytes(_buffer, count, 0);
             } else {
                 // Use regular UART for other ports
+                ESP_LOGD("UART_HW", "write_data: UART%d instance %p about to call uart_tx_chars with %d bytes", 
+                         uart_num, this, count);
+                TRACK_UART1_ACCESS();
                 sent = uart_tx_chars(p, (const char*) _buffer, count);
+                ESP_LOGD("UART_HW", "write_data: UART%d instance %p uart_tx_chars returned %d", 
+                         uart_num, this, sent);
             }
             _writebuf.advance(sent);
             count = sent;
         }
     } while (count > 0);
     _write_mutex.give();
+    
+    // Log write_data completion
+    ESP_LOGD("UART_WRITE_DATA", "write_data: UART%d instance %p Thread %s completed write_data", 
+             uart_num, this, pcTaskGetName(xTaskGetCurrentTaskHandle()));
 }
 
-size_t IRAM_ATTR UARTDriver::_write(const uint8_t *buffer, size_t size)
+size_t UARTDriver::_write(const uint8_t *buffer, size_t size)
 {
     if (!_initialized) {
         return 0;
     }
 
-    // Regular write with per-write mutex (no protocol-specific logic)
-    _write_mutex.take_blocking();
-    size_t ret = _writebuf.write(buffer, size);
-    _write_mutex.give();
-    return ret;
-}
+    // Debug writes
+    TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+    const char* task_name = pcTaskGetName(current_task);
+    ESP_LOGD("UART_WRITE", "_write: UART%d (%p) Thread %s (%p) writing %d bytes", 
+             uart_num, this, task_name, current_task, size);
 
-size_t UARTDriver::write_packet(const uint8_t *buffer, size_t size)
-{
-    if (!_initialized || size == 0) {
-        return 0;
-    }
-    
-    // Use single write mutex for entire packet - ensures atomicity
+    // Write atomically - only write if full data fits
     _write_mutex.take_blocking();
     
-    // Write packet data atomically
     size_t written = 0;
-    size_t remaining = size;
-    
-    while (remaining > 0) {
-        size_t chunk_size = _writebuf.write(buffer + written, remaining);
-        if (chunk_size == 0) {
-            // Buffer full - break to avoid infinite loop
-            break;
+    if (_writebuf.space() >= size) {
+        written = _writebuf.write(buffer, size);
+    } else {
+        // Buffer full - drop entire write to maintain atomicity
+        static uint32_t drop_count = 0;
+        if ((++drop_count % 100) == 1) {
+            ESP_LOGW("UART_DROP", "UART%d dropped write #%" PRIu32 " (size %d, space %" PRIu32 ")", 
+                     uart_num, drop_count, size, _writebuf.space());
         }
-        written += chunk_size;
-        remaining -= chunk_size;
-    }
-    
-    _write_mutex.give();
-    return written;
-}
-
-size_t UARTDriver::write_packet_nonblocking(const uint8_t *buffer, size_t size)
-{
-    if (!_initialized || size == 0) {
-        return 0;
-    }
-    
-    // Try to take mutex - if already held, drop the packet  
-    if (!_write_mutex.take_nonblocking()) {
-        return 0; // Drop packet to prevent blocking/recursion
-    }
-    
-    // Write packet data atomically
-    size_t written = 0;
-    size_t remaining = size;
-    
-    while (remaining > 0) {
-        size_t chunk_size = _writebuf.write(buffer + written, remaining);
-        if (chunk_size == 0) {
-            // Buffer full - break to avoid infinite loop
-            break;
-        }
-        written += chunk_size;
-        remaining -= chunk_size;
     }
     
     _write_mutex.give();
