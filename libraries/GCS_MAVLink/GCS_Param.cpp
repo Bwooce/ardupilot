@@ -79,13 +79,22 @@ GCS_MAVLINK::queued_param_send()
         char param_name[AP_MAX_NAME_SIZE];
         _queued_parameter->copy_name_token(_queued_parameter_token, param_name, sizeof(param_name), true);
 
-        mavlink_msg_param_value_send(
-            chan,
+        
+        // Use atomic message construction to avoid struct padding issues
+        mavlink_message_t msg;
+        mavlink_msg_param_value_pack(
+            mavlink_system.sysid,
+            mavlink_system.compid,
+            &msg,
             param_name,
             _queued_parameter->cast_to_float(_queued_parameter_type),
             mav_param_type(_queued_parameter_type),
             _queued_parameter_count,
-            _queued_parameter_index);
+            _queued_parameter_index
+        );
+        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+        uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+        comm_send_buffer(chan, buf, len);
 
         _queued_parameter = AP_Param::next_scalar(&_queued_parameter_token, &_queued_parameter_type);
         _queued_parameter_index++;
@@ -326,13 +335,21 @@ void GCS_MAVLINK::send_parameter_value(const char *param_name, ap_var_type param
     if (!HAVE_PAYLOAD_SPACE(chan, PARAM_VALUE)) {
         return;
     }
-    mavlink_msg_param_value_send(
-        chan,
+    // Use atomic message construction to avoid struct padding issues
+    mavlink_message_t msg;
+    mavlink_msg_param_value_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &msg,
         param_name,
         param_value,
         mav_param_type(param_type),
         AP_Param::count_parameters(),
-        -1);
+        (uint16_t)-1
+    );
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+    comm_send_buffer(chan, buf, len);
 }
 
 /*
@@ -340,16 +357,29 @@ void GCS_MAVLINK::send_parameter_value(const char *param_name, ap_var_type param
  */
 void GCS::send_parameter_value(const char *param_name, ap_var_type param_type, float param_value)
 {
-    mavlink_param_value_t packet{};
-    const uint8_t to_copy = MIN(ARRAY_SIZE(packet.param_id), strlen(param_name));
-    memcpy(packet.param_id, param_name, to_copy);
-    packet.param_value = param_value;
-    packet.param_type = GCS_MAVLINK::mav_param_type(param_type);
-    packet.param_count = AP_Param::count_parameters();
-    packet.param_index = -1;
+    // Use atomic MAVLink message assembly and transmission
+    // This avoids both struct padding issues AND transmission fragmentation
+    mavlink_message_t msg;
+    mavlink_msg_param_value_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &msg,
+        param_name,
+        param_value,
+        GCS_MAVLINK::mav_param_type(param_type),
+        AP_Param::count_parameters(),
+        (uint16_t)-1  // param_index = -1
+    );
 
-    gcs().send_to_active_channels(MAVLINK_MSG_ID_PARAM_VALUE,
-                                  (const char *)&packet);
+    // Send atomically to all channels using our safe method
+    for (uint8_t i=0; i<num_gcs(); i++) {
+        GCS_MAVLINK *chan = gcs().chan(i);
+        if (chan != nullptr) {
+            uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+            uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+            comm_send_buffer(chan->get_chan(), buf, len);
+        }
+    }
 
 #if HAL_LOGGING_ENABLED
     // also log to AP_Logger
@@ -435,13 +465,20 @@ uint8_t GCS_MAVLINK::send_parameter_async_replies()
         }
         reserve_param_space_start_ms = saved_reserve_param_space_start_ms;
 
-        mavlink_msg_param_value_send(
-            reply.chan,
+        mavlink_message_t msg;
+        mavlink_msg_param_value_pack(
+            mavlink_system.sysid,
+            mavlink_system.compid,
+            &msg,
             reply.param_name,
             reply.value,
             mav_param_type(reply.p_type),
             reply.count,
-            reply.param_index);
+            reply.param_index
+        );
+        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+        uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+        comm_send_buffer(reply.chan, buf, len);
 
         _queued_parameter_send_time_ms = AP_HAL::millis();
         async_replies_sent_count++;

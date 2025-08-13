@@ -376,14 +376,32 @@ MAVLINK_HELPER void _mav_finalize_message_chan_send(mavlink_channel_t chan, uint
 	}
 #endif
 
-	MAVLINK_START_UART_SEND(chan, header_len + 3 + (uint16_t)length + (uint16_t)signature_len);
-	_mavlink_send_uart(chan, (const char *)buf, header_len+1);
-	_mavlink_send_uart(chan, packet, length);
-	_mavlink_send_uart(chan, (const char *)ck, 2);
+	// Assemble complete packet for atomic transmission
+	uint16_t total_len = header_len + 1 + length + 2 + signature_len;
+	uint8_t complete_packet[MAVLINK_MAX_PACKET_LEN];
+	uint16_t pos = 0;
+	
+	// Copy header
+	memcpy(&complete_packet[pos], buf, header_len + 1);
+	pos += header_len + 1;
+	
+	// Copy payload
+	memcpy(&complete_packet[pos], packet, length);
+	pos += length;
+	
+	// Copy checksum
+	memcpy(&complete_packet[pos], ck, 2);
+	pos += 2;
+	
+	// Copy signature if present
 	if (signature_len != 0) {
-		_mavlink_send_uart(chan, (const char *)signature, signature_len);
+		memcpy(&complete_packet[pos], signature, signature_len);
+		pos += signature_len;
 	}
-	MAVLINK_END_UART_SEND(chan, header_len + 3 + (uint16_t)length + (uint16_t)signature_len);
+	
+	MAVLINK_START_UART_SEND(chan, total_len);
+	_mavlink_send_uart(chan, (const char *)complete_packet, total_len);
+	MAVLINK_END_UART_SEND(chan, total_len);
 }
 
 /**

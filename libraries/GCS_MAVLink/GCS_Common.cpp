@@ -48,6 +48,9 @@
 #include <AP_Mount/AP_Mount.h>
 #include <AP_Common/AP_FWVersion.h>
 #include <AP_VisualOdom/AP_VisualOdom.h>
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include <AP_HAL_ESP32/Util.h>
+#endif
 #include <AP_Baro/AP_Baro.h>
 #include <AP_EFI/AP_EFI.h>
 #include <AP_Proximity/AP_Proximity.h>
@@ -239,9 +242,18 @@ bool GCS_MAVLINK::init(uint8_t instance)
 
 void GCS_MAVLINK::send_meminfo(void)
 {
-    unsigned __brkval = 0;
     uint32_t memory = hal.util->available_memory();
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32-specific: Report heap used size instead of meaningless __brkval
+    ESP32::Util* esp32_util = ESP32::Util::from(hal.util);
+    uint16_t heap_used = MIN(esp32_util->get_heap_used_size(), 0xFFFFU);
+    mavlink_msg_meminfo_send(chan, heap_used, MIN(memory, 0xFFFFU), memory);
+#else
+    // Traditional platforms: Use __brkval for heap top
+    unsigned __brkval = 0;
     mavlink_msg_meminfo_send(chan, __brkval, MIN(memory, 0xFFFFU), memory);
+#endif
 }
 
 // report power supply status
