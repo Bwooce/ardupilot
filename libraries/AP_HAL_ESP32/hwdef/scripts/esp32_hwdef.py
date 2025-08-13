@@ -26,6 +26,8 @@ class ESP32HWDef(hwdef.HWDef):
         self.pin_assignments = {}  # Track all pin assignments for conflict detection
         self.reserved_pins = set()  # Track reserved/system pins
         self.input_only_pins = set()  # Track input-only pins
+        self.partition_table_filename = None  # Store custom partition table filename
+        self.flash_size_mb = None  # Store custom flash size in MB
         # Note: init_hardware_constraints() called after MCU is determined
 
     def init_hardware_constraints(self):
@@ -191,6 +193,8 @@ class ESP32HWDef(hwdef.HWDef):
         # Board-specific headers removed - hwdef.h contains all necessary configuration
         # Generate ESP-IDF config if PSRAM is configured
         self.write_esp_idf_config()
+        # Copy board-specific partition table if specified
+        self.copy_partition_table()
         return 0
 
     def process_line(self, line, depth=0):
@@ -220,6 +224,16 @@ class ESP32HWDef(hwdef.HWDef):
             if len(parts) >= 2:
                 self.psram_config['reserve_internal'] = parts[1]
                 self.progress("Found PSRAM_RESERVE_INTERNAL: %s" % parts[1])
+        elif line.startswith("PARTITION_TABLE_CUSTOM_FILENAME"):
+            parts = line.split()
+            if len(parts) >= 2:
+                self.partition_table_filename = parts[1]
+                self.progress("Found PARTITION_TABLE_CUSTOM_FILENAME: %s" % parts[1])
+        elif line.startswith("FLASH_SIZE_MB"):
+            parts = line.split()
+            if len(parts) >= 2:
+                self.flash_size_mb = int(parts[1])
+                self.progress("Found FLASH_SIZE_MB: %sMB" % parts[1])
         # Parse pin assignments - handle both '=' and space-separated syntax
         elif ('=' in line and not line.startswith('define')) or self._is_pin_assignment_line(line):
             if '=' in line:
@@ -463,7 +477,7 @@ class ESP32HWDef(hwdef.HWDef):
                         # Map SERIAL numbers to UART numbers: SERIAL0->UART0, SERIAL1->UART1, etc.
                         uart_num = int(serial_num)
                         uart_entries.append(
-                            f'    {{ .port = UART_NUM_{uart_num}, .rx = GPIO_NUM_{rx_pin}, .tx = GPIO_NUM_{tx_pin} }}'
+                            f'    {{ .rx = GPIO_NUM_{rx_pin}, .tx = GPIO_NUM_{tx_pin} }}'
                         )
             
             if uart_entries:
@@ -711,6 +725,26 @@ class ESP32HWDef(hwdef.HWDef):
         '''Generate ESP-IDF configuration settings based on hwdef config'''
         config_lines = []
         
+        # Flash size configuration
+        if self.flash_size_mb:
+            self.progress(f"Configuring flash size: {self.flash_size_mb}MB")
+            # Disable common flash sizes
+            for size in [1, 2, 4, 8, 16, 32, 64, 128]:
+                if size == self.flash_size_mb:
+                    config_lines.append(f"CONFIG_ESPTOOLPY_FLASHSIZE_{size}MB=y")
+                else:
+                    config_lines.append(f"# CONFIG_ESPTOOLPY_FLASHSIZE_{size}MB is not set")
+        
+        # Partition table configuration
+        if self.partition_table_filename:
+            self.progress(f"Using board-specific partition table: {self.partition_table_filename}")
+            config_lines.append("CONFIG_PARTITION_TABLE_CUSTOM=y")
+            # Use the copied file in the build directory
+            config_lines.append(f'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="{self.partition_table_filename}"')
+            config_lines.append("CONFIG_PARTITION_TABLE_OFFSET=0x8000")
+        else:
+            self.progress("Using default partition table for chip type")
+        
         # WiFi configuration
         if not self.has_wifi():
             self.progress("WiFi disabled - configuring ESP-IDF for optimal dual-core usage")
@@ -799,6 +833,25 @@ class ESP32HWDef(hwdef.HWDef):
             f.write("# Auto-generated ESP-IDF configuration for %s\n\n" % self.board)
             for line in config_lines:
                 f.write(line + "\n")
+
+    def copy_partition_table(self):
+        '''Copy board-specific partition table to build directory if specified'''
+        if not self.partition_table_filename:
+            return
+            
+        # Find the source partition file in the board's hwdef directory
+        hwdef_dir = os.path.dirname(self.hwdef[0])  # Get directory of first hwdef file
+        src_partition_file = os.path.join(hwdef_dir, self.partition_table_filename)
+        
+        if not os.path.exists(src_partition_file):
+            self.error(f"Partition table file not found: {src_partition_file}")
+            return
+            
+        # Copy to build output directory
+        import shutil
+        dst_partition_file = os.path.join(self.outdir, self.partition_table_filename)
+        shutil.copy2(src_partition_file, dst_partition_file)
+        self.progress(f"Copied partition table: {src_partition_file} -> {dst_partition_file}")
 
     def process_line_define(self, line, depth, a):
         '''handle both numerical and string defines'''

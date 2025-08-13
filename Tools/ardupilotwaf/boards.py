@@ -1197,7 +1197,7 @@ class esp32(Board):
 
         # Use generated board headers instead of static ones
         env.INCLUDES += [
-                cfg.bldnode.find_dir('boards').abspath(),
+                cfg.bldnode.find_or_declare('boards').abspath(),
             ]
         
         # Include hwdef.h in compilation for ESP32 builds

@@ -5,6 +5,10 @@
 
 MCU ESP32S3
 
+# Flash and OTA Configuration - T-Connect has 16MB flash with OTA support
+FLASH_SIZE_MB 16
+PARTITION_TABLE_CUSTOM_FILENAME partitions.csv
+
 # Board identification
 define HAL_ESP32_BOARD_NAME "esp32lilygo_tconnect"
 
@@ -183,8 +187,8 @@ define HAL_GPIO_LED_ON 1
 # Disable startup debug to prevent MAVLink corruption
 define STARTUP_DEBUG 0
 
-# Enable console output for debugging MAVLink issues  
-define HAL_CONSOLE_ENABLED 1
+# Disable console output to prevent MAVLink corruption
+define HAL_CONSOLE_ENABLED 0
 
 # CAN debug level (0=none, 1=errors, 2=warnings, 3=info, 4=verbose)
 define CAN_LOGLEVEL 2

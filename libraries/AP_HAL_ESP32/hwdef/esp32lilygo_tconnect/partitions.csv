@@ -1,0 +1,11 @@
+# ESP32-S3 LilyGo T-Connect Partition Table (16MB Flash)
+# OTA-enabled configuration optimized for rover/DroneCAN applications
+# Name,   Type, SubType, Offset,  Size
+nvs,      data, nvs,     0x9000,  0x6000
+phy_init, data, phy,     0xf000,  0x1000
+factory,  app,  factory, 0x10000, 3M
+ota_0,    app,  ota_0,   ,        3M
+ota_1,    app,  ota_1,   ,        3M
+ota_data, data, ota,     ,        0x2000
+storage,  0x45, 0x0,     ,        256K
+spiffs,   data, spiffs,  ,        6500K
