@@ -6,6 +6,10 @@ MCU ESP32
 # Board identification
 define HAL_ESP32_BOARD_NAME "esp32-diy"
 
+# Serial protocol defaults
+define DEFAULT_SERIAL1_PROTOCOL SerialProtocol_MAVLink2
+define DEFAULT_SERIAL2_PROTOCOL SerialProtocol_GPS
+
 # Sensor probe helper macros for easier configuration
 define PROBE_IMU_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
 define PROBE_IMU_SPI(driver, devname, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))

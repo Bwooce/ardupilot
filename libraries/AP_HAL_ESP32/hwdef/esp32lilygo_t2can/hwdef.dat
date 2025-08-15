@@ -66,6 +66,10 @@ define AP_AHRS_DCM_ENABLED 1
 define HAL_DEFAULT_FRAME_CLASS 2  # Rover
 define HAL_DEFAULT_FRAME_TYPE 0   # Undefined/Generic rover
 
+# Serial protocol defaults  
+define DEFAULT_SERIAL1_PROTOCOL SerialProtocol_MAVLink2
+define DEFAULT_SERIAL2_PROTOCOL SerialProtocol_GPS
+
 # Storage configuration - Use PSRAM for in-memory logging
 define HAL_LOGGING_DATAFLASH_ENABLED 0
 define HAL_LOGGING_FILESYSTEM_ENABLED 0
@@ -159,7 +163,7 @@ define STARTUP_DEBUG 1
 define HAL_CONSOLE_ENABLED 1
 
 # CAN debug level (0=none, 1=errors, 2=warnings, 3=info, 4=verbose)
-define CAN_LOGLEVEL 2
+define CAN_LOGLEVEL 4
 
 # LCD1602 I2C Display Support
 define HAL_DISPLAY_ENABLED 1

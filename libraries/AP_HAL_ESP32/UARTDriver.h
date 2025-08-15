@@ -62,7 +62,10 @@ public:
       less accurate.
       A return value of zero means the HAL does not support this API */
      
-    uint64_t receive_time_constraint_us(uint16_t nbytes) override; 
+    uint64_t receive_time_constraint_us(uint16_t nbytes) override;
+
+    // Console connection detection
+    bool is_console_connected();  // Check if console interface is connected to host 
 
     uint32_t get_baud_rate() const override { return _baudrate; }
     
@@ -77,7 +80,7 @@ private:
     bool _initialized;
     size_t TX_BUF_SIZE = 1024;
     size_t RX_BUF_SIZE = 1024;
-    uint8_t _buffer[32];
+    uint8_t _buffer[280];  // Staging buffer - large enough for complete MAVLink packets (267 bytes + margin)
     ByteBuffer _readbuf{0};
     ByteBuffer _writebuf{0};
     Semaphore _write_mutex;
@@ -87,6 +90,7 @@ private:
     void calculate_buffer_sizes(uint32_t baudrate, uint16_t &rxS, uint16_t &txS);
 
     uint8_t uart_num;
+    bool _is_usb_console;  // True if this UART uses USB Serial/JTAG console interface
 
     // timestamp for receiving data on the UART, avoiding a lock
     uint64_t _receive_timestamp[2];

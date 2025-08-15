@@ -24,6 +24,10 @@ MCU ESP32
 # Board identification
 define HAL_ESP32_BOARD_NAME "esp32-icarus"
 
+# Serial protocol defaults
+define DEFAULT_SERIAL1_PROTOCOL SerialProtocol_MAVLink2
+define DEFAULT_SERIAL2_PROTOCOL SerialProtocol_GPS
+
 # IMU Configuration - MPU6000 with Board Auto-Detection
 # Uses AP_FEATURE_BOARD_DETECT to automatically detect and configure the MPU6000
 # This allows the same firmware to work with different IMU sensor configurations

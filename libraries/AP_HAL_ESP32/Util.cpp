@@ -47,8 +47,17 @@ using namespace ESP32;
 */
 uint32_t Util::available_memory(void)
 {
-    return heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+    return heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+}
 
+/**
+   ESP32-specific memory information for MEMINFO
+*/
+uint32_t Util::get_heap_used_size(void) const
+{
+    uint32_t total_heap = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
+    uint32_t free_heap = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+    return total_heap - free_heap;
 }
 
 /*

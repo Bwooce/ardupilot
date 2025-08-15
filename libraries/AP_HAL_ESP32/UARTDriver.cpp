@@ -17,49 +17,31 @@
 #include "ESP32_Debug.h"
 #include <AP_Math/AP_Math.h>
 #include <AP_SerialManager/AP_SerialManager.h>
-
+#include "esp_debug_helpers.h"
 #include "esp_log.h"
 #include "driver/usb_serial_jtag.h"
 #include "hal/usb_serial_jtag_ll.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "esp_rom_sys.h"
 #include <inttypes.h>
+
+// MAVLink validation removed - packets should be transmitted atomically
+
+// ESP-IDF Console configuration detection
+#ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    #include "esp_vfs_dev.h"
+    #include "esp_vfs_usb_serial_jtag.h"
+#endif
 
 #define HAL_ESP32_UART_MIN_TX_SIZE 1024  // Increased for packet atomicity
 #define HAL_ESP32_UART_MIN_RX_SIZE 512
 
 extern const AP_HAL::HAL& hal;
 
-// Global tracking for UART1 access
-static volatile uint32_t uart1_access_count = 0;
-#define TRACK_UART1_ACCESS() do { \
-    if (uart_num == 1) { \
-        uint32_t count = __sync_fetch_and_add(&uart1_access_count, 1); \
-        ESP_LOGD("UART_ACCESS", "UART1 hardware access #%" PRIu32 " from instance %p", count + 1, this); \
-    } \
-} while(0)
-
 namespace ESP32
 {
-
-UARTDriver::UARTDriver(uint8_t serial_num)
-    : AP_HAL::UARTDriver()
-    , _write_mutex(serial_num == 1 ? false : true)  // SERIAL1 (MAVLink) uses non-recursive mutex
-    , _read_mutex(serial_num == 1 ? false : true)   // SERIAL1 (MAVLink) uses non-recursive mutex
-{
-    _initialized = false;
-    uart_num = serial_num;
-    
-    // Log construction with intended use
-    const char* use_desc = "Unknown";
-    if (serial_num == 0) use_desc = "Console/SERIAL0";
-    else if (serial_num == 1) use_desc = "MAVLink/SERIAL1";
-    else if (serial_num == 2) use_desc = "Telem/SERIAL2";
-    
-    ESP_LOGD("UART_CONSTRUCT", "UARTDriver UART%d (%s) instance %p constructed - write_mutex %p, read_mutex %p", 
-             uart_num, use_desc, this, &_write_mutex, &_read_mutex);
-}
 
 // Simple GPIO pin mapping for UARTs (from hwdef)
 struct UARTDesc {
@@ -68,6 +50,69 @@ struct UARTDesc {
 };
 
 static const UARTDesc uart_pins[] = {HAL_ESP32_UART_DEVICES};
+
+// Console detection function - determines if a UART uses USB Serial/JTAG console interface
+// Uses ESP-IDF build configuration instead of hardcoded port numbers
+// 
+// This replaces the previous hardcoded 'uart_num == 0' logic with proper detection:
+// - CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG: Console uses USB Serial/JTAG (CDC device)
+// - CONFIG_ESP_CONSOLE_UART: Console uses traditional UART with external USB-UART bridge
+// - CONFIG_ESP_CONSOLE_UART_NUM: Specifies which UART number is used for console
+//
+static bool is_console_uart(uint8_t uart_num) {
+#ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    // Console is configured to use USB Serial/JTAG CDC interface
+    // Check if this UART corresponds to the console UART
+    #ifdef CONFIG_ESP_CONSOLE_UART_NUM
+        return (uart_num == CONFIG_ESP_CONSOLE_UART_NUM);
+    #else
+        // Default console UART is typically UART0 on ESP32-S3
+        return (uart_num == 0);
+    #endif
+#elif defined(CONFIG_ESP_CONSOLE_UART) || defined(CONFIG_ESP_CONSOLE_UART_DEFAULT)
+    // Console is configured for regular UART - no USB Serial/JTAG usage
+    // All UARTs use standard hardware UART interfaces
+    return false;
+#else
+    // Fallback - assume UART0 might be console (for older ESP-IDF versions)
+    return (uart_num == 0);
+#endif
+}
+
+// Protocol-based mutex type selection - determines if a UART needs non-recursive mutexes
+// Non-recursive mutexes prevent deadlock during atomic packet transmission
+// for protocols that require strict serialization (MAVLink, CRSF)
+//
+// This replaces the previous hardcoded 'serial_num == 1' logic with proper protocol detection
+static bool needs_non_recursive_mutex(uint8_t serial_num) {
+    // During early initialization, SerialManager may not be ready yet
+    // Use conservative fallback to avoid crashes during startup
+    
+    // TODO: Implement deferred protocol detection after SerialManager initialization
+    // For now, fall back to the original logic that worked to prevent startup crashes
+    
+    // TEMPORARY: Use hardcoded logic as fallback until we can safely query SerialManager
+    // This matches the original working behavior
+    return (serial_num == 1);  // SERIAL1 typically used for MAVLink
+    
+    // The full protocol-based detection will be enabled once we resolve the
+    // initialization order dependency between UARTDriver and SerialManager
+}
+
+UARTDriver::UARTDriver(uint8_t serial_num)
+    : AP_HAL::UARTDriver()
+    , _write_mutex(needs_non_recursive_mutex(serial_num) ? false : true)  // Non-recursive for MAVLink/CRSF
+    , _read_mutex(needs_non_recursive_mutex(serial_num) ? false : true)   // Non-recursive for MAVLink/CRSF
+{
+    _initialized = false;
+    uart_num = serial_num;
+    _is_usb_console = is_console_uart(serial_num);
+    
+    // ESP log level will be controlled by ESP32_DEBUG_LEVEL parameter
+    // Default to warning level for UART drops and flow control until parameter is loaded
+    esp_log_level_set("UART_DROP", ESP_LOG_WARN);
+    esp_log_level_set("UART_FLOW", ESP_LOG_WARN);
+}
 
 void UARTDriver::vprintf(const char *fmt, va_list ap)
 {
@@ -88,15 +133,6 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
     // Direct mapping: SERIAL0->UART0, SERIAL1->UART1, etc.
     uart_port_t p = (uart_port_t)uart_num;
     
-    // Log UARTDriver instance details for debugging mutex issues
-    const char* use_desc = "Unknown";
-    if (uart_num == 0) use_desc = "Console/SERIAL0";
-    else if (uart_num == 1) use_desc = "MAVLink/SERIAL1";
-    else if (uart_num == 2) use_desc = "Telem/SERIAL2";
-    
-    ESP_LOGD("UART_INIT", "UARTDriver::_begin UART%d (%s) instance %p - write_mutex addr %p, read_mutex addr %p", 
-             uart_num, use_desc, this, &_write_mutex, &_read_mutex);
-    
     if (!_initialized) {
         // Calculate optimal buffer sizes based on baud rate
         calculate_buffer_sizes(b, rxS, txS);
@@ -107,8 +143,9 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
         
         // Debug via logging system - safe from serial contamination
         
-        if (p == 0) {
-            // Initialize USB-Serial/JTAG driver for port 0 (ESP32-S3)
+        if (_is_usb_console) {
+            // Initialize USB-Serial/JTAG driver for console port
+            // This is determined by ESP-IDF configuration, not hardcoded to port 0
             _uart_event_queue = nullptr;  // USB doesn't use event queue
             usb_serial_jtag_driver_config_t usb_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
             usb_config.rx_buffer_size = RX_BUF_SIZE;
@@ -148,7 +185,7 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
 
         _initialized = true;
     } else {
-        if (p != 0) {
+        if (!_is_usb_console) {
             // Only set baudrate for regular UARTs, not USB-Serial/JTAG
             flush();
             uart_set_baudrate(p, b);
@@ -161,8 +198,8 @@ void UARTDriver::_end()
 {
     if (_initialized) {
         uart_port_t p = (uart_port_t)uart_num;
-        if (p == 0) {
-            // Uninstall USB-Serial/JTAG driver for port 0
+        if (_is_usb_console) {
+            // Uninstall USB-Serial/JTAG driver for console port
             usb_serial_jtag_driver_uninstall();
         } else {
             // Uninstall regular UART driver for other ports
@@ -181,7 +218,7 @@ void UARTDriver::_end()
 void UARTDriver::_flush()
 {
     uart_port_t p = (uart_port_t)uart_num;
-    if (p == 0) {
+    if (_is_usb_console) {
         // Flush USB-Serial/JTAG interface
         // Note: usb_serial_jtag driver auto-flushes, but we ensure it here
         usb_serial_jtag_ll_txfifo_flush();
@@ -222,10 +259,17 @@ uint32_t UARTDriver::txspace()
     if (!_initialized) {
         return 0;
     }
+    
+    // Report available TX buffer space with 25% safety margin
+    // This implements software flow control by triggering back-pressure
+    // before the buffer is completely full, ensuring:
+    // - Space remains for high-priority/urgent data
+    // - Atomic writes don't get dropped due to insufficient space
+    // - Burst tolerance for sudden data spikes
+    // - Early warning to calling code to reduce transmission rate
     int result = _writebuf.space();
-    result -= TX_BUF_SIZE / 4;
+    result -= TX_BUF_SIZE / 4;  // Reserve 25% of buffer as safety margin
     return MAX(result, 0);
-
 }
 
 ssize_t IRAM_ATTR UARTDriver::_read(uint8_t *buffer, uint16_t count)
@@ -262,11 +306,8 @@ void IRAM_ATTR UARTDriver::_timer_tick(void)
     
     // Debug _timer_tick calls occasionally
     static uint32_t tick_count = 0;
-    if ((tick_count++ % 100) == 0) {
-        TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
-        const char* task_name = pcTaskGetName(current_task);
-        ESP_LOGD("UART_TICK", "_timer_tick: UART%d instance %p called by thread %s (%p) - tick #%" PRIu32, 
-                 uart_num, this, task_name, current_task, tick_count);
+    if ((tick_count++ % 1000) == 0) {
+        ESP_LOGD("UART_TICK", "_timer_tick: UART%d tick #%" PRIu32, uart_num, tick_count);
     }
     
     read_data();
@@ -280,7 +321,7 @@ void IRAM_ATTR UARTDriver::read_data()
     // Critical section: protect buffer writes from race conditions
     _read_mutex.take_blocking();
     
-    if (p == 0) {
+    if (_is_usb_console) {
         // USB-Serial/JTAG interface uses polling (no events)
         int count = usb_serial_jtag_read_bytes(_buffer, sizeof(_buffer), 0);
         if (count > 0) {
@@ -350,11 +391,12 @@ void UARTDriver::write_data()
     uart_port_t p = (uart_port_t)uart_num;
     int count = 0;
     
-    // Debug write_data calls
-    TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
-    const char* task_name = pcTaskGetName(current_task);
-    ESP_LOGD("UART_WRITE_DATA", "write_data: UART%d instance %p Thread %s (%p) called write_data", 
-             uart_num, this, task_name, current_task);
+    // Debug write_data calls occasionally for debugging if needed
+    static uint32_t debug_count = 0;
+    if ((debug_count++ % 1000) == 0) {
+        ESP_LOGD("UART_WRITE_DATA", "UART%d write_data - buffer_available=%" PRIu32, 
+                 uart_num, _writebuf.available());
+    }
     
     // Use write_mutex to coordinate with buffer writes
     // This ensures atomic peekbytes() -> uart_tx_chars() -> advance() sequence
@@ -364,17 +406,16 @@ void UARTDriver::write_data()
         count = _writebuf.peekbytes(_buffer, sizeof(_buffer));
         if (count > 0) {
             int sent = 0;
-            if (p == 0) {
-                // Use USB-Serial/JTAG interface for port 0 (ESP32-S3)
+            if (_is_usb_console) {
+                // Use USB-Serial/JTAG interface for console port
                 sent = usb_serial_jtag_write_bytes(_buffer, count, 0);
             } else {
                 // Use regular UART for other ports
-                ESP_LOGD("UART_HW", "write_data: UART%d instance %p about to call uart_tx_chars with %d bytes", 
-                         uart_num, this, count);
-                TRACK_UART1_ACCESS();
+                
+                // Simple approach: uart_tx_chars() handles FIFO limitations
+                // _writebuf.advance(sent) ensures we only advance by bytes actually sent
+                // Remaining bytes will be sent on next timer tick - no corruption should occur
                 sent = uart_tx_chars(p, (const char*) _buffer, count);
-                ESP_LOGD("UART_HW", "write_data: UART%d instance %p uart_tx_chars returned %d", 
-                         uart_num, this, sent);
             }
             _writebuf.advance(sent);
             count = sent;
@@ -393,11 +434,6 @@ size_t UARTDriver::_write(const uint8_t *buffer, size_t size)
         return 0;
     }
 
-    // Debug writes
-    TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
-    const char* task_name = pcTaskGetName(current_task);
-    ESP_LOGD("UART_WRITE", "_write: UART%d (%p) Thread %s (%p) writing %d bytes", 
-             uart_num, this, task_name, current_task, size);
 
     // Write atomically - only write if full data fits
     _write_mutex.take_blocking();
@@ -464,6 +500,27 @@ uint64_t UARTDriver::receive_time_constraint_us(uint16_t nbytes)
         last_receive_us -= transport_time_us;
     }
     return last_receive_us;
+}
+
+bool UARTDriver::is_console_connected()
+{
+    if (_is_usb_console) {
+#ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+        // Use ESP-IDF API to check USB Serial/JTAG connection status
+        // This function checks for SOF (Start of Frame) packets from USB host
+        // Returns true if connected to a real USB host (not just a power bank)
+        // Note: This adds overhead to FreeRTOS tick processing when enabled
+        return usb_serial_jtag_is_connected();
+#else
+        // USB Serial/JTAG console not supported in current ESP-IDF configuration
+        return false;
+#endif
+    } else {
+        // Regular UART with external USB-UART bridge chip
+        // Physical connection detection not possible without hardware flow control
+        // Could potentially monitor for recent RX/TX activity as connection indicator
+        return true;
+    }
 }
 
 void UARTDriver::calculate_buffer_sizes(uint32_t baudrate, uint16_t &rxS, uint16_t &txS)

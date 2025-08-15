@@ -768,7 +768,7 @@ class ESP32HWDef(hwdef.HWDef):
                 config_lines.append("CONFIG_SPIRAM_CACHE_WORKAROUND=y")  # ESP32-specific optimization
                 config_lines.append("CONFIG_SPIRAM_OCCUPY_SPI_HOST=VSPI_HOST")  # Default to VSPI
             elif self.mcu.lower() in ['esp32s2', 'esp32s3', 'esp32c61']:
-                # All ESP32 variants use SPIRAM symbols in ESP-IDF v5.4
+                # ESP32-S2/S3/C61 use SPIRAM symbols in ESP-IDF v5.3/v5.4
                 config_lines.append("CONFIG_SPIRAM=y")
                 config_lines.append("CONFIG_SPIRAM_TYPE_AUTO=y")
             else:
@@ -813,12 +813,37 @@ class ESP32HWDef(hwdef.HWDef):
             
         else:
             self.progress("No PSRAM configured - SPIRAM disabled")
-            # Disable PSRAM for all chip variants
+            # Disable SPIRAM for all chip variants
             if self.mcu.lower() == 'esp32':
                 config_lines.append("# CONFIG_ESP32_SPIRAM_SUPPORT is not set")
             else:
                 config_lines.append("# CONFIG_SPIRAM is not set")
-            
+        
+        # ESP32 Memory Protection and Debugging Configuration
+        self.progress("Adding ESP32 memory protection and debugging options")
+        
+        # Enable comprehensive heap corruption detection
+        config_lines.append("CONFIG_HEAP_POISONING_COMPREHENSIVE=y")
+        config_lines.append("# CONFIG_HEAP_POISONING_LIGHT is not set")
+        config_lines.append("# CONFIG_HEAP_POISONING_DISABLED is not set")
+        
+        # Enable heap tracing for memory leak detection
+        config_lines.append("CONFIG_HEAP_TRACING=y")
+        config_lines.append("CONFIG_HEAP_TRACING_STACK_DEPTH=10")
+        
+        # Enable memory corruption detection
+        config_lines.append("CONFIG_HEAP_ABORT_WHEN_ALLOCATION_FAILS=y")
+        
+        # Enable stack overflow detection
+        config_lines.append("CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y")
+        
+        # Enable task watchdog to catch infinite loops/hangs  
+        config_lines.append("CONFIG_ESP_TASK_WDT=y")
+        config_lines.append("CONFIG_ESP_TASK_WDT_TIMEOUT_S=5")
+        
+        # Enable assertions for debugging
+        config_lines.append("CONFIG_COMPILER_OPTIMIZATION_ASSERTION_LEVEL=2")
+        
         return config_lines
 
     def write_esp_idf_config(self, filename="sdkconfig.board"):

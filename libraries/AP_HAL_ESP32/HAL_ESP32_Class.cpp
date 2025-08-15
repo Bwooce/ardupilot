@@ -17,7 +17,11 @@
 #include <AP_HAL_Empty/AP_HAL_Empty_Private.h>
 
 #include "HAL_ESP32_Class.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_log.h"
 #include "ESP32_Debug.h"
+#include "ESP32_Params.h"
 #include "Scheduler.h"
 #include "I2CDevice.h"
 #include "SPIDevice.h"
@@ -189,6 +193,9 @@ HAL_ESP32::HAL_ESP32() :
 
 void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
 {
+    // Initialize ESP32 parameters before any ESP-IDF logging
+    ESP32::esp32_params()->init();
+    
     // Debug via MAVLink STATUSTEXT - safe from serial contamination
     ESP32_DEBUG_INFO("HAL run starting with callbacks");
     ((ESP32::Scheduler *)hal.scheduler)->set_callbacks(callbacks);
@@ -196,6 +203,16 @@ void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
     hal.scheduler->init();
     ESP32_DEBUG_INFO("Scheduler init completed - ESP32 tasks created");
     ESP32_DEBUG_VERBOSE("ESP32 scheduler uses FreeRTOS tasks, main loop in _main_thread");
+    
+    ESP32_DEBUG_INFO("ArduPilot HAL setup complete - entering infinite loop");
+    ESP32_DEBUG_INFO("Main ArduPilot logic now running in FreeRTOS tasks");
+    
+    // ESP32 HAL: Keep the main ESP-IDF task alive
+    // The actual ArduPilot main loop runs in the _main_thread FreeRTOS task
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        // Main task just sleeps - all real work is in FreeRTOS tasks
+    }
 }
 
 void AP_HAL::init()

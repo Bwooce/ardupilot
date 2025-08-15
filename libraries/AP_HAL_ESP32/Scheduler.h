@@ -74,7 +74,7 @@ public:
 
 
     static const int SPI_PRIORITY = 24; //      if your primary imu is spi, this should be above the i2c value, spi is better.
-    static const int MAIN_PRIO    = 15; //	Reduced from 24 to 15 for debugging
+    static const int MAIN_PRIO    = 24; //	cpu0: we want scheduler running at full tilt.
     static const int I2C_PRIORITY = 5;  //      if your primary imu is i2c, this should be above the spi value, i2c is not preferred.
     static const int TIMER_PRIO   = 23; //dont make 24. a low priority mere might cause wifi thruput to suffer
     static const int RCIN_PRIO    = 5;
@@ -86,7 +86,7 @@ public:
     static const int STORAGE_PRIO = 4;
 
     static const int TIMER_SS     = 1024*3;
-    static const int MAIN_SS      = 1024*8;  // Increased from 5KB to 8KB for debugging
+    static const int MAIN_SS      = 1024*5;
     static const int RCIN_SS      = 1024*3;
     static const int RCOUT_SS     = 1024*1.5;
     static const int WIFI_SS1     = 1024*2.25;

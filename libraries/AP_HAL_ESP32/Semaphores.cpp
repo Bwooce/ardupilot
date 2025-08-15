@@ -16,7 +16,7 @@
 #include <AP_HAL/AP_HAL.h>
 
 #include "Semaphores.h"
-#include "esp_log.h"
+#include "ESP32_Debug.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -31,10 +31,10 @@ Semaphore::Semaphore(bool recursive)
 {
     if (_is_recursive) {
         handle = xSemaphoreCreateRecursiveMutex();
-        ESP_LOGV("MUTEX", "Created RECURSIVE mutex %p", handle);
+        ESP32_DEBUG_DEBUG("Created RECURSIVE mutex %p", handle);
     } else {
         handle = xSemaphoreCreateMutex();
-        ESP_LOGV("MUTEX", "Created NON-RECURSIVE mutex %p", handle);
+        ESP32_DEBUG_DEBUG("Created NON-RECURSIVE mutex %p", handle);
     }
 }
 
@@ -50,7 +50,7 @@ bool Semaphore::give()
     }
     
     if (result != pdTRUE) {
-        ESP_LOGE("MUTEX", "Thread %p FAILED to give %s mutex %p", 
+        ESP32_DEBUG_ERROR("Thread %p FAILED to give %s mutex %p", 
                  current_task, _is_recursive ? "recursive" : "non-recursive", handle);
     }
     
@@ -87,7 +87,7 @@ void Semaphore::take_blocking()
         // Check if we already own this mutex (would indicate recursion attempt)
         if (xSemaphoreGetMutexHolder((QueueHandle_t)handle) == current_task) {
             const char* task_name = pcTaskGetName(current_task);
-            ESP_LOGE("MUTEX", "RECURSION DETECTED! Thread %s (%p) already owns NON-RECURSIVE mutex %p", 
+            ESP32_DEBUG_ERROR("RECURSION DETECTED! Thread %s (%p) already owns NON-RECURSIVE mutex %p", 
                      task_name, current_task, handle);
         }
         
@@ -95,7 +95,7 @@ void Semaphore::take_blocking()
     }
     
     if (result != pdTRUE) {
-        ESP_LOGE("MUTEX", "Thread %p FAILED to take %s mutex %p - this should never happen with portMAX_DELAY", 
+        ESP32_DEBUG_ERROR("Thread %p FAILED to take %s mutex %p - this should never happen with portMAX_DELAY", 
                  current_task, _is_recursive ? "recursive" : "non-recursive", handle);
     }
 }

@@ -24,7 +24,7 @@
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
-#include "esp_log.h"
+#include "ESP32_Debug.h"
 #include "nvs_flash.h"
 
 #include "lwip/err.h"
@@ -218,7 +218,6 @@ bool WiFiDriver::write_data()
 #define ESP_STATION_MAXIMUM_RETRY 10
 #endif
 
-static const char *TAG = "wifi station";
 static int s_retry_num = 0;
 static EventGroupHandle_t s_wifi_event_group;
 
@@ -231,11 +230,11 @@ static void _sta_event_handler(void* arg, esp_event_base_t event_base,
         if (s_retry_num < ESP_STATION_MAXIMUM_RETRY) {
             esp_wifi_connect();
             s_retry_num++;
-            ESP_LOGI(TAG, "retry to connect to the AP");
+            ESP32_DEBUG_INFO("retry to connect to the AP");
         } else {
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
-        ESP_LOGI(TAG,"connect to the AP fail");
+        ESP32_DEBUG_INFO("connect to the AP fail");
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
@@ -347,13 +346,13 @@ void WiFiDriver::initialize_wifi()
     /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
      * happened. */
     if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "connected to ap SSID: %s password: %s",
+        ESP32_DEBUG_INFO("connected to ap SSID: %s password: %s",
                  wifi_config.sta.ssid, wifi_config.sta.password);
     } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGI(TAG, "Failed to connect to SSID: %s, password: %s",
+        ESP32_DEBUG_INFO("Failed to connect to SSID: %s, password: %s",
                  wifi_config.sta.ssid, wifi_config.sta.password);
     } else {
-        ESP_LOGE(TAG, "UNEXPECTED EVENT");
+        ESP32_DEBUG_ERROR("UNEXPECTED EVENT");
     }
 
     /* The event will not be processed after unregister */

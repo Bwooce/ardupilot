@@ -42,6 +42,12 @@ public:
     // Initialize parameters and apply settings
     void init();
     
+    // Re-apply log levels (for calling after parameter loading)
+    void update_log_levels();
+    
+    // Apply ESP-IDF logging level from parameter
+    void apply_log_level();
+    
 private:
     ESP32Params() = default;
     ESP32Params(const ESP32Params&) = delete;
