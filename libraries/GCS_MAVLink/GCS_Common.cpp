@@ -1444,15 +1444,21 @@ bool GCS_MAVLINK_InProgress::send_ack(MAV_RESULT result)
         return false;
     }
 
-    mavlink_msg_command_ack_send(
-        chan,
+    mavlink_message_t ack_msg;
+    mavlink_msg_command_ack_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &ack_msg,
         mav_cmd,
         result,
-        0,
-        0,
+        0,  // progress
+        0,  // result_param2
         requesting_sysid,
         requesting_compid
-        );
+    );
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    uint16_t len = mavlink_msg_to_send_buffer(buf, &ack_msg);
+    comm_send_buffer(chan, buf, len);
 
     return true;
 }
@@ -3636,10 +3642,21 @@ MAV_RESULT GCS_MAVLINK::handle_preflight_reboot(const mavlink_command_int_t &pac
 #endif
 
     // send ack before we reboot
-    mavlink_msg_command_ack_send(chan, packet.command, MAV_RESULT_ACCEPTED,
-                                 0, 0,
-                                 msg.sysid,
-                                 msg.compid);
+    mavlink_message_t ack_msg;
+    mavlink_msg_command_ack_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &ack_msg,
+        packet.command,
+        MAV_RESULT_ACCEPTED,
+        0,  // progress
+        0,  // result_param2
+        msg.sysid,
+        msg.compid
+    );
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    uint16_t len = mavlink_msg_to_send_buffer(buf, &ack_msg);
+    comm_send_buffer(chan, buf, len);
 
     // when packet.param1 == 3 we reboot to hold in bootloader
     const bool hold_in_bootloader = is_equal(packet.param1, 3.0f);
@@ -5336,10 +5353,21 @@ void GCS_MAVLINK::handle_command_long(const mavlink_message_t &msg)
     const MAV_RESULT result = try_command_long_as_command_int(packet, msg);
 
     // send ACK or NAK
-    mavlink_msg_command_ack_send(chan, packet.command, result,
-                                 0, 0,
-                                 msg.sysid,
-                                 msg.compid);
+    mavlink_message_t ack_msg;
+    mavlink_msg_command_ack_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &ack_msg,
+        packet.command,
+        result,
+        0,  // progress
+        0,  // result_param2
+        msg.sysid,
+        msg.compid
+    );
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    uint16_t len = mavlink_msg_to_send_buffer(buf, &ack_msg);
+    comm_send_buffer(chan, buf, len);
 
 #if HAL_LOGGING_ENABLED
     // log the packet:
@@ -5359,15 +5387,21 @@ void GCS_MAVLINK::handle_command_long(const mavlink_message_t &msg)
     mavlink_msg_command_long_decode(&msg, &packet);
 
     // send ACK or NAK
-    mavlink_msg_command_ack_send(
-        chan,
+    mavlink_message_t ack_msg;
+    mavlink_msg_command_ack_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &ack_msg,
         packet.command,
         MAV_RESULT_COMMAND_INT_ONLY,
-        0,
-        0,
+        0,  // progress
+        0,  // result_param2
         msg.sysid,
         msg.compid
-   );
+    );
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    uint16_t len = mavlink_msg_to_send_buffer(buf, &ack_msg);
+    comm_send_buffer(chan, buf, len);
 
 }
 #endif  // AP_MAVLINK_COMMAND_LONG_ENABLED
@@ -5828,10 +5862,21 @@ void GCS_MAVLINK::handle_command_int(const mavlink_message_t &msg)
     const MAV_RESULT result = handle_command_int_packet(packet, msg);
 
     // send ACK or NAK
-    mavlink_msg_command_ack_send(chan, packet.command, result,
-                                 0, 0,
-                                 msg.sysid,
-                                 msg.compid);
+    mavlink_message_t ack_msg;
+    mavlink_msg_command_ack_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &ack_msg,
+        packet.command,
+        result,
+        0,  // progress
+        0,  // result_param2
+        msg.sysid,
+        msg.compid
+    );
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    uint16_t len = mavlink_msg_to_send_buffer(buf, &ack_msg);
+    comm_send_buffer(chan, buf, len);
 
 #if HAL_LOGGING_ENABLED
     AP::logger().Write_Command(packet, msg.sysid, msg.compid, result);

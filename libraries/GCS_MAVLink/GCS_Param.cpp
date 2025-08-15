@@ -328,6 +328,9 @@ void GCS_MAVLINK::handle_param_set(const mavlink_message_t &msg)
         logger->Write_Parameter(key, vp->cast_to_float(var_type));
     }
 #endif
+
+    // send confirmation back to GCS with the new value
+    send_parameter_value(key, var_type, vp->cast_to_float(var_type));
 }
 
 void GCS_MAVLINK::send_parameter_value(const char *param_name, ap_var_type param_type, float param_value)

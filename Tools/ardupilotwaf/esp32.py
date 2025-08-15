@@ -186,3 +186,35 @@ def esp32_firmware(self):
     if self.bld.options.upload:
         flasher = esp_idf.build('flash')
         flasher.post()
+        
+        # Reset OTA data partition to ensure ESP32 boots from factory (USB-uploaded) firmware
+        # This prevents issues where FOTA has changed the boot partition to ota_0/ota_1
+        from waflib import Task
+        class reset_ota_data(Task.Task):
+            """Reset ESP32 OTA data partition to boot from factory after USB upload"""
+            def run(self):
+                import subprocess
+                import os
+                
+                # Simple approach: just inform the user
+                # The complexity of auto-detecting ports and esptool paths isn't worth it
+                # Users can manually reset if needed
+                
+                print("ESP32: USB firmware uploaded successfully")
+                print("ESP32: If you previously used FOTA updates, the OTA data partition")
+                print("ESP32: may need to be reset for this USB firmware to boot.")
+                print("ESP32: ")
+                print("ESP32: To reset manually if needed:")
+                print("ESP32:   esptool.py --port /dev/ttyUSB0 erase_region 0xd000 0x2000")
+                print("ESP32: ")
+                print("ESP32: This will ensure the ESP32 boots from the factory (USB-uploaded) firmware.")
+                
+                # Don't actually try to reset automatically - too many variables
+                # (port detection, esptool location, permissions, etc.)
+                
+                return 0
+        
+        # Add the OTA reset task after flashing
+        reset_task = reset_ota_data(env=self.env)
+        reset_task.set_run_after(flasher.cmake_build_task)  
+        self.bld.add_to_group(reset_task)

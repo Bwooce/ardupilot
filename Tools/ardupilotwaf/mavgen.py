@@ -54,11 +54,18 @@ class mavgen(Task.Task):
     def run(self):
         sys.path.insert(0,self.env.get_flat('MAVLINK_DIR'))
         from pymavlink.generator import mavgen
+        
+        # Check if building for ESP32
+        is_esp32 = hasattr(self.env, 'BOARD_CLASS') and self.env.BOARD_CLASS == 'ESP32'
+        
         class mavgen_options:
             language = 'C'
             wire_protocol = '2.0'
             validate = False
             output = self.env.get_flat('OUTPUT_DIR')
+            # ESP32: Force all messages to use struct packing due to alignment differences
+            force_pack = is_esp32
+            
         xml = self.inputs[0].abspath()
         if mavgen.mavgen(mavgen_options(), [xml]):
             return 0
