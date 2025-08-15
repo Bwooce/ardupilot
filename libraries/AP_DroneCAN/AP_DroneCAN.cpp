@@ -1518,6 +1518,15 @@ void AP_DroneCAN::handle_ESC_status(const CanardRxTransfer& transfer, const uavc
     const uint8_t esc_offset = constrain_int16(_esc_offset.get(), 0, DRONECAN_SRV_NUMBER);
     const uint8_t esc_index = msg.esc_index + esc_offset;
 
+    // Debug: Log ESC message reception
+    static uint32_t last_debug_ms = 0;
+    uint32_t now_ms = AP_HAL::millis();
+    if (now_ms - last_debug_ms > 5000) {
+        last_debug_ms = now_ms;
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN ESC%d: rpm=%d V=%.1f I=%.1f T=%.1f", 
+                      esc_index, (int)msg.rpm, msg.voltage, msg.current, msg.temperature);
+    }
+
     if (!is_esc_data_index_valid(esc_index)) {
         return;
     }

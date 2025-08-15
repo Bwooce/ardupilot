@@ -160,6 +160,12 @@ public:
 
     //Run through the list of seen node ids for verification
     void verify_nodes();
+
+private:
+    // MAVLink reporting functions
+    void send_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg);
+    void report_node_health_change(uint8_t node_id, uint8_t health, uint8_t mode, bool recovered);
+    void send_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg);
 };
 
 #endif

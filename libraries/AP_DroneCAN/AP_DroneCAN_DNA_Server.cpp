@@ -27,6 +27,9 @@
 #include <AP_Logger/AP_Logger.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
 #include <stdio.h>
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include <AP_HAL_ESP32/ESP32_Debug.h>
+#endif
 extern const AP_HAL::HAL& hal;
 
 // FORMAT REVISION DREAMS (things to address if the NodeRecord needs to be changed substantially)
@@ -134,8 +137,19 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
         }
 
         if (resp_node_id != 0) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            ESP32_DEBUG_INFO("DNA: Assigning new node ID %d to device", resp_node_id);
+#endif
             create_registration(resp_node_id, unique_id, 16);
+        } else {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            ESP32_DEBUG_ERROR("DNA: No free node IDs available in database");
+#endif
         }
+    } else {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        ESP32_DEBUG_INFO("DNA: Device found in database with existing node ID %d", resp_node_id);
+#endif
     }
     return resp_node_id; // will be 0 if not found and not created
 }
@@ -307,11 +321,16 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
     }
 
     if (!nodeInfo_resp_rcvd) {
-        /* Also notify GCS about this
-        Reason for this could be either the node was disconnected
-        Or a node with conflicting ID appeared and is sending response
-        at the same time. */
+        /* Node failed to respond - could be disconnected or conflicting ID */
         node_verified.clear(curr_verifying_node);
+        
+        // Report node as potentially offline if it was previously healthy
+        if (node_healthy.get(curr_verifying_node)) {
+            node_healthy.clear(curr_verifying_node);
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, 
+                          "DroneCAN Node %d: No response - possibly OFFLINE", 
+                          curr_verifying_node);
+        }
     }
 
     last_verification_request = now;
@@ -340,14 +359,32 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     if (transfer.source_node_id > MAX_NODE_ID || transfer.source_node_id == 0) {
         return;
     }
-    if ((msg.health != UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK ||
-        msg.mode != UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL) &&
+    
+    // Send UAVCAN_NODE_STATUS MAVLink message for proper GCS reporting
+    send_node_status_mavlink(transfer.source_node_id, msg);
+    
+    // Handle health state changes with severity-based reporting
+    const bool was_healthy = node_healthy.get(transfer.source_node_id);
+    const bool is_operational = (msg.mode == UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL);
+    const bool is_healthy = (msg.health == UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK);
+    
+    if ((!is_healthy || !is_operational) &&
         !_ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_UNHEALTHY_NODE)) {
-        //if node is not healthy or operational, clear resp health mask, and set fault_node_id
+        
+        // Report health status changes with appropriate severity
+        if (was_healthy) {
+            report_node_health_change(transfer.source_node_id, msg.health, msg.mode, false);
+        }
+        
         fault_node_id = transfer.source_node_id;
         server_state = NODE_STATUS_UNHEALTHY;
         node_healthy.clear(transfer.source_node_id);
     } else {
+        // Node is now healthy
+        if (!was_healthy && is_healthy && is_operational) {
+            report_node_health_change(transfer.source_node_id, msg.health, msg.mode, true);
+        }
+        
         node_healthy.set(transfer.source_node_id);
         if (node_healthy == node_verified) {
             server_state = HEALTHY;
@@ -362,6 +399,120 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     node_seen.set(transfer.source_node_id);
 }
 
+void AP_DroneCAN_DNA_Server::send_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg)
+{
+#if AP_HAVE_GCS_SEND_MAVLINK
+    // Send UAVCAN_NODE_STATUS MAVLink message (ID 310)
+    mavlink_message_t mavlink_msg;
+    mavlink_msg_uavcan_node_status_pack(
+        mavlink_system.sysid,
+        node_id,  // Use node_id as component_id per MAVLink-UAVCAN bridge spec
+        &mavlink_msg,
+        AP_HAL::micros64(),  // time_usec
+        msg.uptime_sec,      // uptime_sec  
+        msg.health,          // health
+        msg.mode,            // mode
+        msg.sub_mode,        // sub_mode
+        msg.vendor_specific_status_code  // vendor_specific_status_code
+    );
+    
+    // Send to all active MAVLink channels
+    GCS_MAVLINK::send_to_active_channels(&mavlink_msg);
+#endif
+}
+
+void AP_DroneCAN_DNA_Server::report_node_health_change(uint8_t node_id, uint8_t health, uint8_t mode, bool recovered)
+{
+#if AP_HAVE_GCS_SEND_TEXT
+    const char* health_str;
+    MAV_SEVERITY severity;
+    
+    // Map DroneCAN health states to MAVLink severity and text
+    switch (health) {
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK:
+            health_str = "OK";
+            severity = MAV_SEVERITY_INFO;
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_WARNING:
+            health_str = "WARNING";
+            severity = MAV_SEVERITY_WARNING;
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_ERROR:
+            health_str = "ERROR";
+            severity = MAV_SEVERITY_ERROR;
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_CRITICAL:
+            health_str = "CRITICAL";
+            severity = MAV_SEVERITY_CRITICAL;
+            break;
+        default:
+            health_str = "UNKNOWN";
+            severity = MAV_SEVERITY_WARNING;
+            break;
+    }
+    
+    const char* mode_str;
+    switch (mode) {
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL:
+            mode_str = "OPERATIONAL";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_INITIALIZATION:
+            mode_str = "INITIALIZING";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_MAINTENANCE:
+            mode_str = "MAINTENANCE";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_SOFTWARE_UPDATE:
+            mode_str = "UPDATING";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_OFFLINE:
+            mode_str = "OFFLINE";
+            break;
+        default:
+            mode_str = "UNKNOWN";
+            break;
+    }
+    
+    if (recovered) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN Node %d: %s (%s) - RECOVERED", 
+                      node_id, health_str, mode_str);
+    } else {
+        GCS_SEND_TEXT(severity, "DroneCAN Node %d: %s (%s)", 
+                      node_id, health_str, mode_str);
+    }
+#endif
+}
+
+void AP_DroneCAN_DNA_Server::send_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg)
+{
+#if AP_HAVE_GCS_SEND_MAVLINK
+    // Send UAVCAN_NODE_INFO MAVLink message (ID 311) 
+    mavlink_message_t mavlink_msg;
+    mavlink_msg_uavcan_node_info_pack(
+        mavlink_system.sysid,
+        node_id,  // Use node_id as component_id per MAVLink-UAVCAN bridge spec
+        &mavlink_msg,
+        AP_HAL::micros64(),           // time_usec
+        msg.node_status.uptime_sec,   // uptime_sec
+        (char*)msg.name.data,         // name
+        msg.hardware_version.major,   // hw_version_major
+        msg.hardware_version.minor,   // hw_version_minor  
+        msg.hardware_version.unique_id, // hw_unique_id (first 16 bytes)
+        msg.software_version.major,   // sw_version_major
+        msg.software_version.minor,   // sw_version_minor
+        msg.software_version.vcs_commit  // sw_vcs_commit
+    );
+    
+    // Send to all active MAVLink channels
+    GCS_MAVLINK::send_to_active_channels(&mavlink_msg);
+    
+    // Also send a text message for human-readable notification
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN Node %d: %s v%d.%d online", 
+                  node_id, msg.name.data, 
+                  msg.software_version.major, msg.software_version.minor);
+#endif
+}
+
 /* Node Info message handler
 Handle responses from GetNodeInfo Request. We verify the node info
 against our records. Marks Verification mask if already recorded,
@@ -372,6 +523,9 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
     if (transfer.source_node_id > MAX_NODE_ID || transfer.source_node_id == 0) {
         return;
     }
+    
+    // Send UAVCAN_NODE_INFO MAVLink message for node discovery
+    send_node_info_mavlink(transfer.source_node_id, rsp);
     /*
       if we haven't logged this node then log it now
      */
@@ -425,13 +579,30 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
 // process node ID allocation messages for DNA
 void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer, const uavcan_protocol_dynamic_node_id_Allocation& msg)
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP32_DEBUG_INFO("DNA: Received allocation request from node %d, first_part=%d, uid_len=%d", 
+                     transfer.source_node_id, msg.first_part_of_unique_id, msg.unique_id.len);
+#endif
+    hal.console->printf("DNA: Received allocation request from node %d, first_part=%d, uid_len=%d\n", 
+                       transfer.source_node_id, msg.first_part_of_unique_id, msg.unique_id.len);
+    
     if (transfer.source_node_id != 0) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        ESP32_DEBUG_WARNING("DNA: Ignoring allocation - not from anonymous node (source=%d)", transfer.source_node_id);
+#endif
+        hal.console->printf("DNA: Ignoring allocation - not from anonymous node (source=%d)\n", transfer.source_node_id);
         return; // ignore allocation messages that are not DNA requests
     }
     uint32_t now = AP_HAL::millis();
 
     if ((now - last_alloc_msg_ms) > UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_FOLLOWUP_TIMEOUT_MS) {
         rcvd_unique_id_offset = 0; // reset state, timed out
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        if (rcvd_unique_id_offset > 0) {
+            ESP32_DEBUG_WARNING("DNA: Allocation timeout - resetting state after %ums", 
+                            (unsigned)(now - last_alloc_msg_ms));
+        }
+#endif
     }
 
     if (msg.first_part_of_unique_id) {
@@ -477,15 +648,36 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
         // with a particular ID once then switch back to no preference for DNA
         rsp.node_id = db.handle_allocation(rcvd_unique_id);
         rcvd_unique_id_offset = 0; // reset state for next allocation
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        ESP32_DEBUG_INFO("DNA: Full UID received, allocated node ID %d", rsp.node_id);
+#endif
+        hal.console->printf("DNA: Full UID received, allocated node ID %d\n", rsp.node_id);
         if (rsp.node_id == 0) { // allocation failed
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            ESP32_DEBUG_ERROR("DNA: Allocation failed - database full");
+#endif
+            hal.console->printf("DNA: Allocation failed - database full\n");
             GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "DroneCAN DNA allocation failed; database full");
             // don't send reply with a failed ID in case the allocatee does
             // silly things, though it is technically legal. the allocatee will
             // then time out and try again (though we still won't have an ID!)
             return;
         }
+    } else {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        ESP32_DEBUG_DEBUG("DNA: Partial UID received (%d/%d bytes), sending echo", 
+                         rcvd_unique_id_offset, (int)sizeof(rcvd_unique_id));
+#endif
+        hal.console->printf("DNA: Partial UID received (%d/%d bytes), sending echo\n", 
+                           rcvd_unique_id_offset, (int)sizeof(rcvd_unique_id));
     }
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP32_DEBUG_INFO("DNA: Broadcasting allocation response, node_id=%d, uid_len=%d", 
+                     rsp.node_id, rsp.unique_id.len);
+#endif
+    hal.console->printf("DNA: Broadcasting allocation response, node_id=%d, uid_len=%d\n", 
+                       rsp.node_id, rsp.unique_id.len);
     allocation_pub.broadcast(rsp, false); // never publish allocation message with CAN FD
 }
 
