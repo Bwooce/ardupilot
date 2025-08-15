@@ -181,7 +181,12 @@ void AP_MAVLinkCAN::handle_can_filter_modify(const mavlink_message_t &msg)
 
     // sort the list, so we can bisection search and the array
     // operations below are efficient
-    insertion_sort_uint16(p.ids, p.num_ids);
+    // Use a local copy to avoid packed member address issues
+    uint16_t ids_local[p.num_ids > 0 ? p.num_ids : 1]; // VLA needs at least size 1
+    if (p.num_ids > 0) {
+        memmove(ids_local, p.ids, p.num_ids * sizeof(uint16_t));
+        insertion_sort_uint16(ids_local, p.num_ids);
+    }
     
     switch (p.operation) {
     case CAN_FILTER_REPLACE: {
@@ -192,20 +197,20 @@ void AP_MAVLinkCAN::handle_can_filter_modify(const mavlink_message_t &msg)
             return;
         }
         if (p.num_ids == can_forward.num_filter_ids &&
-            memcmp(p.ids, can_forward.filter_ids, p.num_ids*sizeof(uint16_t)) == 0) {
+            memcmp(ids_local, can_forward.filter_ids, p.num_ids*sizeof(uint16_t)) == 0) {
             // common case of replacing with identical list
             return;
         }
         new_ids = NEW_NOTHROW uint16_t[p.num_ids];
         if (new_ids != nullptr) {
             num_new_ids = p.num_ids;
-            memmove(new_ids, p.ids, p.num_ids*sizeof(uint16_t));
+            memmove(new_ids, ids_local, p.num_ids*sizeof(uint16_t));
         }
         break;
     }
     case CAN_FILTER_ADD: {
         if (common_list_uint16(can_forward.filter_ids, can_forward.num_filter_ids,
-                               p.ids, p.num_ids) == p.num_ids) {
+                               ids_local, p.num_ids) == p.num_ids) {
             // nothing changing
             return;
         }
@@ -216,19 +221,19 @@ void AP_MAVLinkCAN::handle_can_filter_modify(const mavlink_message_t &msg)
         if (can_forward.num_filter_ids != 0) {
             memcpy(new_ids, can_forward.filter_ids, can_forward.num_filter_ids*sizeof(uint16_t));
         }
-        memmove(&new_ids[can_forward.num_filter_ids], p.ids, p.num_ids*sizeof(uint16_t));
+        memmove(&new_ids[can_forward.num_filter_ids], ids_local, p.num_ids*sizeof(uint16_t));
         insertion_sort_uint16(new_ids, can_forward.num_filter_ids+p.num_ids);
         num_new_ids = remove_duplicates_uint16(new_ids, can_forward.num_filter_ids+p.num_ids);
         break;
     }
     case CAN_FILTER_REMOVE: {
         if (common_list_uint16(can_forward.filter_ids, can_forward.num_filter_ids,
-                               p.ids, p.num_ids) == 0) {
+                               ids_local, p.num_ids) == 0) {
             // nothing changing
             return;
         }
         can_forward.num_filter_ids = remove_list_uint16(can_forward.filter_ids, can_forward.num_filter_ids,
-                                                        p.ids, p.num_ids);
+                                                        ids_local, p.num_ids);
         if (can_forward.num_filter_ids == 0) {
             delete[] can_forward.filter_ids;
             can_forward.filter_ids = nullptr;

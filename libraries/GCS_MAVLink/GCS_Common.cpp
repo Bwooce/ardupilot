@@ -3992,11 +3992,11 @@ void GCS_MAVLINK::handle_vision_position_estimate(const mavlink_message_t &msg)
     mavlink_vision_position_estimate_t m;
     mavlink_msg_vision_position_estimate_decode(&msg, &m);
 
-    // Copy covariance array to avoid packed member address issue
-    float covariance_copy[21];
-    memcpy(covariance_copy, m.covariance, sizeof(covariance_copy));
+    // Use local array to avoid packed member address issue
+    float covariance_local[21];
+    memcpy(covariance_local, m.covariance, sizeof(covariance_local));
     
-    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, covariance_copy, m.reset_counter,
+    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, covariance_local, m.reset_counter,
                                                 PAYLOAD_SIZE(chan, VISION_POSITION_ESTIMATE));
 }
 
@@ -4005,11 +4005,11 @@ void GCS_MAVLINK::handle_global_vision_position_estimate(const mavlink_message_t
     mavlink_global_vision_position_estimate_t m;
     mavlink_msg_global_vision_position_estimate_decode(&msg, &m);
 
-    // Copy covariance array to avoid packed member address issue
-    float covariance_copy[21];
-    memcpy(covariance_copy, m.covariance, sizeof(covariance_copy));
+    // Use local array to avoid packed member address issue
+    float covariance_local[21];
+    memcpy(covariance_local, m.covariance, sizeof(covariance_local));
 
-    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, covariance_copy, m.reset_counter,
+    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, covariance_local, m.reset_counter,
                                                 PAYLOAD_SIZE(chan, GLOBAL_VISION_POSITION_ESTIMATE));
 }
 
@@ -4018,12 +4018,12 @@ void GCS_MAVLINK::handle_vicon_position_estimate(const mavlink_message_t &msg)
     mavlink_vicon_position_estimate_t m;
     mavlink_msg_vicon_position_estimate_decode(&msg, &m);
 
-    // Copy covariance array to avoid packed member address issue
-    float covariance_copy[21];
-    memcpy(covariance_copy, m.covariance, sizeof(covariance_copy));
+    // Use local array to avoid packed member address issue
+    float covariance_local[21];
+    memcpy(covariance_local, m.covariance, sizeof(covariance_local));
 
     // vicon position estimate does not include reset counter
-    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, covariance_copy, 0,
+    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, covariance_local, 0,
                                                 PAYLOAD_SIZE(chan, VICON_POSITION_ESTIMATE));
 }
 
