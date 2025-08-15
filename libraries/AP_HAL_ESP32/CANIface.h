@@ -5,11 +5,13 @@
 
 #if HAL_NUM_CAN_IFACES > 0
 
-#include <AP_HAL/CANIface.h>
+#include "ESP32_CANBase.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
-class ESP32::CANIface : public AP_HAL::CANIface {
+namespace ESP32 {
+
+class CANIface : public ESP32_CANBase {
 public:
     CANIface(uint8_t instance);
 
@@ -18,9 +20,20 @@ public:
     int16_t receive(AP_HAL::CANFrame &frame, uint64_t &timestamp_us, AP_HAL::CANIface::CanIOFlags &flags) override;
     bool is_initialized() const override { return initialized; }
 
+    // Periodic status reporting (call from main loop)
+    void update_status();
+    
+    // Enhanced bus health monitoring
+    void check_bus_health();
+
 protected:
     int8_t get_iface_num() const override { return instance; };
     bool add_to_rx_queue(const CanRxItem &rx_item) override;
+
+    // ESP32_CANBase pure virtual implementations
+    bool configure_hw_filters(const CanFilterConfig* filter_configs, uint16_t num_configs) override;
+    void collect_hw_stats() override;
+    const char* get_controller_name() const override { return "TWAI"; }
 
 private:
     struct CanTxItem {
@@ -33,10 +46,13 @@ private:
     static void tx_task(void *arg);
 
     bool initialized;
-    uint8_t instance;
+    uint32_t current_bitrate;
+    // instance moved to ESP32_CANBase
 
     QueueHandle_t rx_queue;
     QueueHandle_t tx_queue;
 };
+
+} // namespace ESP32
 
 #endif // HAL_NUM_CAN_IFACES > 0

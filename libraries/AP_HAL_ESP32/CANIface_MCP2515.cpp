@@ -19,11 +19,9 @@
 
 #include <AP_HAL/AP_HAL.h>
 #include "driver/gpio.h"
-#include "esp_log.h"
+#include "ESP32_Debug.h"
 
 using namespace ESP32;
-
-static const char* TAG = "MCP2515";
 
 CANIface_MCP2515::CANIface_MCP2515(uint8_t instance) :
     initialized(false),
@@ -66,13 +64,13 @@ bool CANIface_MCP2515::init(const uint32_t bitrate, const OperatingMode mode)
 #ifdef MCP2515_CS_PIN
         cs_pin = (gpio_num_t)MCP2515_CS_PIN;
 #else
-        ESP_LOGE(TAG, "MCP2515_CS_PIN not defined for instance %d", instance);
+        ESP32_DEBUG_ERROR("MCP2515_CS_PIN not defined for instance %d", instance);
         return false;
 #endif
 #ifdef MCP2515_RST_PIN
         rst_pin = (gpio_num_t)MCP2515_RST_PIN;
 #else
-        ESP_LOGE(TAG, "MCP2515_RST_PIN not defined for instance %d", instance);
+        ESP32_DEBUG_ERROR("MCP2515_RST_PIN not defined for instance %d", instance);
         return false;
 #endif
     } else if (instance == 2) {
@@ -80,13 +78,13 @@ bool CANIface_MCP2515::init(const uint32_t bitrate, const OperatingMode mode)
 #ifdef MCP2515_2_CS_PIN
         cs_pin = (gpio_num_t)MCP2515_2_CS_PIN;
 #else
-        ESP_LOGE(TAG, "MCP2515_2_CS_PIN not defined for instance %d", instance);
+        ESP32_DEBUG_ERROR("MCP2515_2_CS_PIN not defined for instance %d", instance);
         return false;
 #endif
 #ifdef MCP2515_2_RST_PIN
         rst_pin = (gpio_num_t)MCP2515_2_RST_PIN;
 #else
-        ESP_LOGE(TAG, "MCP2515_2_RST_PIN not defined for instance %d", instance);
+        ESP32_DEBUG_ERROR("MCP2515_2_RST_PIN not defined for instance %d", instance);
         return false;
 #endif
     } else if (instance == 3) {
@@ -94,17 +92,17 @@ bool CANIface_MCP2515::init(const uint32_t bitrate, const OperatingMode mode)
 #ifdef MCP2515_3_CS_PIN
         cs_pin = (gpio_num_t)MCP2515_3_CS_PIN;
 #else
-        ESP_LOGE(TAG, "MCP2515_3_CS_PIN not defined for instance %d", instance);
+        ESP32_DEBUG_ERROR("MCP2515_3_CS_PIN not defined for instance %d", instance);
         return false;
 #endif
 #ifdef MCP2515_3_RST_PIN
         rst_pin = (gpio_num_t)MCP2515_3_RST_PIN;
 #else
-        ESP_LOGE(TAG, "MCP2515_3_RST_PIN not defined for instance %d", instance);
+        ESP32_DEBUG_ERROR("MCP2515_3_RST_PIN not defined for instance %d", instance);
         return false;
 #endif
     } else {
-        ESP_LOGE(TAG, "Unsupported MCP2515 instance %d", instance);
+        ESP32_DEBUG_ERROR("Unsupported MCP2515 instance %d", instance);
         return false;
     }
 
@@ -120,7 +118,7 @@ bool CANIface_MCP2515::init(const uint32_t bitrate, const OperatingMode mode)
         miso_pin = (gpio_num_t)MCP2515_2_MISO_PIN;
         sclk_pin = (gpio_num_t)MCP2515_2_SCLK_PIN;
 #else
-        ESP_LOGE(TAG, "MCP2515_2 SPI pins not defined");
+        ESP32_DEBUG_ERROR("MCP2515_2 SPI pins not defined");
         return false;
 #endif
     } else if (instance == 3) {
@@ -129,11 +127,11 @@ bool CANIface_MCP2515::init(const uint32_t bitrate, const OperatingMode mode)
         miso_pin = (gpio_num_t)MCP2515_3_MISO_PIN;
         sclk_pin = (gpio_num_t)MCP2515_3_SCLK_PIN;
 #else
-        ESP_LOGE(TAG, "MCP2515_3 SPI pins not defined");
+        ESP32_DEBUG_ERROR("MCP2515_3 SPI pins not defined");
         return false;
 #endif
     } else {
-        ESP_LOGE(TAG, "Unsupported MCP2515 instance %d for SPI", instance);
+        ESP32_DEBUG_ERROR("Unsupported MCP2515 instance %d for SPI", instance);
         return false;
     }
 
@@ -168,14 +166,14 @@ bool CANIface_MCP2515::init(const uint32_t bitrate, const OperatingMode mode)
     // Initialize SPI bus (only if not already initialized)
     esp_err_t ret = spi_bus_initialize(SPI2_HOST, &bus_config, SPI_DMA_CH_AUTO);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
+        ESP32_DEBUG_ERROR("Failed to initialize SPI bus: %s", esp_err_to_name(ret));
         return false;
     }
 
     // Add device to SPI bus
     ret = spi_bus_add_device(SPI2_HOST, &dev_config, &spi_device);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to add SPI device: %s", esp_err_to_name(ret));
+        ESP32_DEBUG_ERROR("Failed to add SPI device: %s", esp_err_to_name(ret));
         return false;
     }
 
@@ -191,7 +189,7 @@ bool CANIface_MCP2515::init(const uint32_t bitrate, const OperatingMode mode)
 
     // Initialize MCP2515
     if (!mcp2515_init(bitrate)) {
-        ESP_LOGE(TAG, "Failed to initialize MCP2515");
+        ESP32_DEBUG_ERROR("Failed to initialize MCP2515");
         return false;
     }
 
@@ -199,23 +197,23 @@ bool CANIface_MCP2515::init(const uint32_t bitrate, const OperatingMode mode)
     rx_queue = xQueueCreate(64, sizeof(CanRxItem));
     tx_queue = xQueueCreate(64, sizeof(CanTxItem));
     if (!rx_queue || !tx_queue) {
-        ESP_LOGE(TAG, "Failed to create queues");
+        ESP32_DEBUG_ERROR("Failed to create queues");
         return false;
     }
 
     // Create tasks
     if (xTaskCreate(rx_task, "mcp2515_rx", 4096, this, 5, &rx_task_handle) != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create RX task");
+        ESP32_DEBUG_ERROR("Failed to create RX task");
         return false;
     }
 
     if (xTaskCreate(tx_task, "mcp2515_tx", 4096, this, 5, &tx_task_handle) != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create TX task");
+        ESP32_DEBUG_ERROR("Failed to create TX task");
         return false;
     }
 
     initialized = true;
-    ESP_LOGI(TAG, "MCP2515 CAN interface %d initialized at %lu bps", instance, bitrate);
+    ESP32_DEBUG_INFO("MCP2515 CAN interface %d initialized at %lu bps", instance, bitrate);
     return true;
 }
 

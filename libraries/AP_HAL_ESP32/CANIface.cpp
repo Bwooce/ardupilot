@@ -11,19 +11,18 @@ extern const AP_HAL::HAL& hal;
 
 using namespace ESP32;
 
-// CAN debug output using packet-level locking to prevent MAVLink corruption
-#define CAN_DEBUG 1
-#if CAN_DEBUG
-  #define CAN_DEBUG_PRINTF(fmt, ...) do { \
-    char debug_buf[256]; \
-    int len = snprintf(debug_buf, sizeof(debug_buf), fmt, ##__VA_ARGS__); \
-    if (len > 0 && len < (int)sizeof(debug_buf)) { \
-      hal.console->write_packet((const uint8_t*)debug_buf, len); \
-    } \
-  } while(0)
-#else
-  #define CAN_DEBUG_PRINTF(fmt, ...) do {} while(0)
-#endif
+// Use consistent ESP32 debug system controlled by ESP32_DEBUG_LEVEL parameter
+#include "ESP32_Debug.h"
+
+// CAN logging macros using ESP32 debug system
+#define CAN_DEBUG_ERROR(fmt, ...)   ESP_LOGE("CAN", fmt, ##__VA_ARGS__)
+#define CAN_DEBUG_WARN(fmt, ...)    ESP_LOGW("CAN", fmt, ##__VA_ARGS__)  
+#define CAN_DEBUG_INFO(fmt, ...)    ESP_LOGI("CAN", fmt, ##__VA_ARGS__)
+#define CAN_DEBUG_VERBOSE(fmt, ...) ESP_LOGD("CAN", fmt, ##__VA_ARGS__)
+#define CAN_DEBUG_DEBUG(fmt, ...)   ESP_LOGV("CAN", fmt, ##__VA_ARGS__)
+
+// Legacy compatibility
+#define CAN_DEBUG_PRINTF(fmt, ...) CAN_DEBUG_INFO(fmt, ##__VA_ARGS__)
 
 CANIface::CANIface(uint8_t instance) :
     ESP32_CANBase(instance),
@@ -34,7 +33,10 @@ CANIface::CANIface(uint8_t instance) :
 
 bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
 {
+    CAN_DEBUG_INFO("CAN interface %d init() called - bitrate=%u", instance, (unsigned)bitrate);
+    
     if (initialized) {
+        CAN_DEBUG_INFO("CAN interface %d already initialized", instance);
         return true;
     }
     
@@ -46,16 +48,16 @@ bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
 #if HAL_NUM_CAN_IFACES > 0
         tx_pin = (gpio_num_t)HAL_CAN1_TX_PIN;
         rx_pin = (gpio_num_t)HAL_CAN1_RX_PIN;
-        CAN_DEBUG_PRINTF("CAN: Initializing CAN interface %d with TX pin %d, RX pin %d, bitrate %u\n", 
+        CAN_DEBUG_INFO("Initializing CAN interface %d with TX pin %d, RX pin %d, bitrate %u", 
                instance, (int)tx_pin, (int)rx_pin, (unsigned)bitrate);
 #else
-        CAN_DEBUG_PRINTF("CAN: HAL_NUM_CAN_IFACES is 0, CAN disabled\n");
+        CAN_DEBUG_ERROR("HAL_NUM_CAN_IFACES is 0, CAN disabled");
         return false;
 #endif
     } else {
         // Only support CAN interface 0 with native TWAI
         // CAN interface 1+ should use MCP2515 or other external controllers
-        CAN_DEBUG_PRINTF("CAN: Instance %d not supported (only instance 0 supported)\n", instance);
+        CAN_DEBUG_ERROR("Instance %d not supported (only instance 0 supported)", instance);
         return false;
     }
 
@@ -80,42 +82,42 @@ bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
 
     twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 
-    CAN_DEBUG_PRINTF("CAN: Installing TWAI driver...\n");
+    CAN_DEBUG_INFO("Installing TWAI driver...");
     esp_err_t install_result = twai_driver_install(&g_config, &t_config, &f_config);
     if (install_result != ESP_OK) {
-        CAN_DEBUG_PRINTF("CAN: TWAI driver install failed with error %d\n", install_result);
+        CAN_DEBUG_ERROR("TWAI driver install failed with error %d", install_result);
         return false;
     }
-    CAN_DEBUG_PRINTF("CAN: TWAI driver installed successfully\n");
+    CAN_DEBUG_INFO("TWAI driver installed successfully");
 
-    CAN_DEBUG_PRINTF("CAN: Starting TWAI...\n");
+    CAN_DEBUG_INFO("Starting TWAI...");
     esp_err_t start_result = twai_start();
     if (start_result != ESP_OK) {
-        CAN_DEBUG_PRINTF("CAN: TWAI start failed with error %d\n", start_result);
+        CAN_DEBUG_ERROR("TWAI start failed with error %d", start_result);
         return false;
     }
-    CAN_DEBUG_PRINTF("CAN: TWAI started successfully\n");
+    CAN_DEBUG_INFO("TWAI started successfully");
 
-    CAN_DEBUG_PRINTF("CAN: Creating RX queue...\n");
+    CAN_DEBUG_INFO("Creating RX queue...");
     rx_queue = xQueueCreate(128, sizeof(CanRxItem));
     if (rx_queue == NULL) {
-        CAN_DEBUG_PRINTF("CAN: Failed to create RX queue\n");
+        CAN_DEBUG_ERROR("Failed to create RX queue");
         return false;
     }
 
-    CAN_DEBUG_PRINTF("CAN: Creating TX queue...\n");
+    CAN_DEBUG_INFO("Creating TX queue...");
     tx_queue = xQueueCreate(128, sizeof(CanTxItem));
     if (tx_queue == NULL) {
-        CAN_DEBUG_PRINTF("CAN: Failed to create TX queue\n");
+        CAN_DEBUG_ERROR("Failed to create TX queue");
         return false;
     }
 
-    CAN_DEBUG_PRINTF("CAN: Creating RX and TX tasks...\n");
+    CAN_DEBUG_INFO("Creating RX and TX tasks...");
     xTaskCreate(rx_task, "can_rx", 4096, this, 5, NULL);
     xTaskCreate(tx_task, "can_tx", 4096, this, 5, NULL);
 
     initialized = true;
-    CAN_DEBUG_PRINTF("CAN: Interface %d initialization complete!\n", instance);
+    CAN_DEBUG_INFO("Interface %d initialization complete!", instance);
 
     return true;
 }
@@ -179,10 +181,10 @@ void CANIface::rx_task(void *arg)
                 twai_status_info_t twai_status;
                 if (twai_get_status_info(&twai_status) == ESP_OK) {
                     if (twai_status.state == TWAI_STATE_BUS_OFF) {
-                        CAN_DEBUG_PRINTF("CAN RX: Bus-off detected during receive\n");
+                        CAN_DEBUG_ERROR("Bus-off detected during receive");
                         iface->update_error_stats(0x01); // Bus-off error
                     } else if (twai_status.state == TWAI_STATE_STOPPED) {
-                        CAN_DEBUG_PRINTF("CAN RX: TWAI stopped unexpectedly\n");
+                        CAN_DEBUG_ERROR("TWAI stopped unexpectedly");
                         iface->update_error_stats(0x02); // Stopped error
                     }
                 }
@@ -194,12 +196,33 @@ void CANIface::rx_task(void *arg)
         }
 
 #if CAN_LOGLEVEL >= 4
-        CAN_DEBUG_PRINTF("CAN RX: ID=0x%08X DLC=%d DATA=[", (unsigned)message.identifier, message.data_length_code);
-        for (int i = 0; i < message.data_length_code; i++) {
-            CAN_DEBUG_PRINTF("%02X", message.data[i]);
-            if (i < message.data_length_code - 1) CAN_DEBUG_PRINTF(" ");
+        // Verbose frame-by-frame logging - use ESP-IDF VERBOSE level
+        static uint32_t rx_count = 0;
+        rx_count++;
+        
+        char data_str[32] = {0};
+        for (int i = 0; i < message.data_length_code && i < 8; i++) {
+            snprintf(data_str + (i * 3), sizeof(data_str) - (i * 3), "%02X ", message.data[i]);
         }
-        CAN_DEBUG_PRINTF("]\n");
+        
+        CAN_DEBUG_VERBOSE("RX #%lu: ID=0x%08X DLC=%d DATA=[%s]", 
+                         (unsigned long)rx_count, (unsigned)message.identifier, 
+                         message.data_length_code, data_str);
+#elif CAN_LOGLEVEL >= 3
+        // INFO level - summary every 100 frames
+        static uint32_t rx_count_summary = 0;
+        rx_count_summary++;
+        if ((rx_count_summary % 100) == 0) {
+            CAN_DEBUG_INFO("Received %lu frames, latest ID=0x%08X", 
+                           (unsigned long)rx_count_summary, (unsigned)message.identifier);
+        }
+#elif CAN_LOGLEVEL >= 2
+        // WARN level - summary every 1000 frames (less verbose)
+        static uint32_t rx_count_warn = 0;
+        rx_count_warn++;
+        if ((rx_count_warn % 1000) == 0) {
+            CAN_DEBUG_WARN("CAN traffic detected: %lu frames received", (unsigned long)rx_count_warn);
+        }
 #endif
 
         CanRxItem rx_item;
@@ -233,13 +256,11 @@ void CANIface::tx_task(void *arg)
             // Check if this frame has expired
             if (tx_item.deadline_us != 0 && now_us > tx_item.deadline_us) {
                 expired_count++;
-#if CAN_LOGLEVEL >= 3
                 // Only log first few expired frames to avoid spam
                 if (expired_count <= 5 || expired_count % 10 == 0) {
-                    CAN_DEBUG_PRINTF("CAN TX: Dropped expired frame ID=0x%08X (deadline=%llu, now=%llu) [count=%lu]\n", 
+                    CAN_DEBUG_VERBOSE("Dropped expired frame ID=0x%08X (deadline=%llu, now=%llu) [count=%lu]", 
                            (unsigned)tx_item.frame.id, tx_item.deadline_us, now_us, (unsigned long)expired_count);
                 }
-#endif
                 continue; // Get next frame
             }
             
@@ -248,14 +269,12 @@ void CANIface::tx_task(void *arg)
             
         } while (true);
 
-#if CAN_LOGLEVEL >= 4
-        CAN_DEBUG_PRINTF("CAN TX: ID=0x%08X DLC=%d DATA=[", (unsigned)tx_item.frame.id, tx_item.frame.dlc);
-        for (int i = 0; i < tx_item.frame.dlc; i++) {
-            CAN_DEBUG_PRINTF("%02X", tx_item.frame.data[i]);
-            if (i < tx_item.frame.dlc - 1) CAN_DEBUG_PRINTF(" ");
+        // Verbose frame-by-frame TX logging
+        char data_str[32] = {0};
+        for (int i = 0; i < tx_item.frame.dlc && i < 8; i++) {
+            snprintf(data_str + (i * 3), sizeof(data_str) - (i * 3), "%02X ", tx_item.frame.data[i]);
         }
-        CAN_DEBUG_PRINTF("]\n");
-#endif
+        CAN_DEBUG_VERBOSE("TX: ID=0x%08X DLC=%d DATA=[%s]", (unsigned)tx_item.frame.id, tx_item.frame.dlc, data_str);
 
         twai_message_t message;
         message.identifier = tx_item.frame.id;
@@ -277,17 +296,14 @@ void CANIface::tx_task(void *arg)
             // Handle specific TWAI error conditions
             if (result == ESP_ERR_TIMEOUT) {
                 // TX timeout - bus may be congested or disconnected
-#if CAN_LOGLEVEL >= 3
-                CAN_DEBUG_PRINTF("CAN TX: Timeout on message ID=0x%08X\n", 
-                       (unsigned)tx_item.frame.id);
-#endif
+                CAN_DEBUG_WARN("TX timeout on message ID=0x%08X", (unsigned)tx_item.frame.id);
             } else if (result == ESP_FAIL) {
                 // TX failed - check bus state
                 twai_status_info_t twai_status;
                 if (twai_get_status_info(&twai_status) == ESP_OK) {
                     if (twai_status.state == TWAI_STATE_BUS_OFF) {
                         // Bus-off condition detected - attempt recovery
-                        CAN_DEBUG_PRINTF("CAN TX: Bus-off detected, attempting recovery\n");
+                        CAN_DEBUG_ERROR("Bus-off detected, attempting recovery");
                         iface->update_error_stats(0x01); // Bus-off error code
                         
                         // Attempt bus recovery
@@ -295,17 +311,11 @@ void CANIface::tx_task(void *arg)
                         // Note: Recovery is automatic in TWAI driver
                     }
                 }
-#if CAN_LOGLEVEL >= 3
-                CAN_DEBUG_PRINTF("CAN TX: Failed to transmit message ID=0x%08X, error=%d\n", 
-                       (unsigned)tx_item.frame.id, result);
-#endif
+                CAN_DEBUG_ERROR("Failed to transmit message ID=0x%08X, error=%d", (unsigned)tx_item.frame.id, result);
             } else {
                 // Other errors
                 iface->update_error_stats(result);
-#if CAN_LOGLEVEL >= 3
-                CAN_DEBUG_PRINTF("CAN TX: Error %d on message ID=0x%08X\n", 
-                       result, (unsigned)tx_item.frame.id);
-#endif
+                CAN_DEBUG_ERROR("Error %d on message ID=0x%08X", result, (unsigned)tx_item.frame.id);
             }
         }
     }
@@ -320,32 +330,47 @@ bool CANIface::configure_hw_filters(const CanFilterConfig* filter_configs, uint1
     }
     
     // ESP32 TWAI has single filter with acceptance code and mask
-    // We need to calculate best-fit filter for all requested filters
+    // We need to calculate least-common-denominator filter for all requested filters
     uint32_t combined_acceptance = 0x00000000;
-    uint32_t combined_mask = 0x1FFFFFFF;  // Start with most restrictive mask
+    uint32_t combined_mask = 0x00000000;  // Start permissive, will restrict based on filters
     
     if (num_configs > 0) {
+        // Find the common mask bits across all filters
+        uint32_t common_mask_bits = 0x1FFFFFFF;  // Start with all bits
+        
         for (uint16_t i = 0; i < num_configs; i++) {
             const auto& filter = filter_configs[i];
-            
-            // Convert ArduPilot filter to TWAI acceptance/mask format
-            uint32_t filter_id = filter.id & 0x1FFFFFFF;  // 29-bit CAN ID
-            uint32_t filter_mask = (~filter.mask) & 0x1FFFFFFF;  // Invert for TWAI format
-            
-            // Combine filters using OR logic for acceptance, AND for masks
-            combined_acceptance |= filter_id;
-            combined_mask &= filter_mask;
+            // Only keep mask bits that are common across ALL filters
+            common_mask_bits &= filter.mask;
         }
+        
+        // Use the first filter's ID with the common mask
+        if (num_configs == 1) {
+            // Single filter - use exact match
+            combined_acceptance = filter_configs[0].id & 0x1FFFFFFF;
+            combined_mask = (~filter_configs[0].mask) & 0x1FFFFFFF;  // Invert for TWAI
+        } else {
+            // Multiple filters - use most permissive approach
+            // Accept any message that matches at least one filter's pattern
+            combined_acceptance = 0x00000000;  // Don't care about specific ID
+            combined_mask = (~common_mask_bits) & 0x1FFFFFFF;  // Only filter on common bits
+        }
+        
+        hal.console->printf("CAN%d: filters=%d, accept=0x%08lx, mask=0x%08lx\n",
+                           instance, num_configs, 
+                           (unsigned long)combined_acceptance, 
+                           (unsigned long)combined_mask);
     } else {
         // No specific filters - accept all
         combined_acceptance = 0x00000000;
         combined_mask = 0x00000000;
+        hal.console->printf("CAN%d: no filters - accepting all messages\n", instance);
     }
     
     // Apply the new filter configuration
     // Note: TWAI driver must be stopped before reconfiguring filters
     if (twai_stop() != ESP_OK) {
-        CAN_DEBUG_PRINTF("CAN: Failed to stop TWAI for filter reconfiguration\n");
+        CAN_DEBUG_ERROR("Failed to stop TWAI for filter reconfiguration");
         return false;
     }
     
@@ -356,7 +381,7 @@ bool CANIface::configure_hw_filters(const CanFilterConfig* filter_configs, uint1
     
     // Reconfigure the driver with new filter
     if (twai_driver_uninstall() != ESP_OK) {
-        CAN_DEBUG_PRINTF("CAN: Failed to uninstall TWAI driver for filter reconfiguration\n");
+        CAN_DEBUG_ERROR("Failed to uninstall TWAI driver for filter reconfiguration");
         return false;
     }
     
@@ -387,18 +412,18 @@ bool CANIface::configure_hw_filters(const CanFilterConfig* filter_configs, uint1
     }
     
     if (twai_driver_install(&g_config, &t_config, &new_filter) != ESP_OK) {
-        CAN_DEBUG_PRINTF("CAN: Failed to reinstall TWAI driver with new filters\n");
+        CAN_DEBUG_ERROR("Failed to reinstall TWAI driver with new filters");
         // Fall back to accept-all configuration
         twai_filter_config_t fallback = TWAI_FILTER_CONFIG_ACCEPT_ALL();
         twai_driver_install(&g_config, &t_config, &fallback);
     }
     
     if (twai_start() != ESP_OK) {
-        CAN_DEBUG_PRINTF("CAN: Failed to restart TWAI after filter reconfiguration\n");
+        CAN_DEBUG_ERROR("Failed to restart TWAI after filter reconfiguration");
         return false;
     }
     
-    CAN_DEBUG_PRINTF("CAN: Hardware filters updated - acceptance=0x%08X mask=0x%08X\n", 
+    CAN_DEBUG_INFO("Hardware filters updated - acceptance=0x%08X mask=0x%08X", 
                        (unsigned)combined_acceptance, (unsigned)combined_mask);
     
     return true;
@@ -409,6 +434,19 @@ void CANIface::collect_hw_stats()
     if (!initialized) {
         stats.current_health = 2; // ERROR - not initialized
         return;
+    }
+    
+    static uint32_t last_stats_print_ms = 0;
+    uint32_t now_ms = AP_HAL::millis();
+    
+    // Print periodic stats every 10 seconds if there's any activity
+    if (now_ms - last_stats_print_ms > 10000) {
+        if (stats.tx_success > 0 || stats.rx_received > 0) {
+            CAN_DEBUG_INFO("CAN%d Stats: TX_OK=%u TX_FAIL=%u RX=%u Errors=%u Health=%d", 
+                          instance, (unsigned)stats.tx_success, (unsigned)stats.tx_failed,
+                          (unsigned)stats.rx_received, (unsigned)stats.bus_errors, stats.current_health);
+        }
+        last_stats_print_ms = now_ms;
     }
     
     // Collect ESP-IDF TWAI hardware statistics
@@ -469,7 +507,7 @@ void CANIface::check_bus_health()
     
     twai_status_info_t twai_status;
     if (twai_get_status_info(&twai_status) != ESP_OK) {
-        CAN_DEBUG_PRINTF("CAN: Failed to get TWAI status\n");
+        CAN_DEBUG_ERROR("Failed to get TWAI status");
         update_error_stats(0xFF); // Status read error
         return;
     }
@@ -481,7 +519,7 @@ void CANIface::check_bus_health()
         
         // Attempt recovery every 5 seconds
         if (now_ms - last_recovery_attempt_ms > 5000) {
-            CAN_DEBUG_PRINTF("CAN: Bus-off detected, attempting recovery\n");
+            CAN_DEBUG_ERROR("Bus-off detected, attempting recovery");
             update_error_stats(0x01); // Bus-off error
             
             twai_initiate_recovery();
@@ -491,7 +529,7 @@ void CANIface::check_bus_health()
     
     // Check for excessive TX queue backlog
     if (tx_queue && uxQueueMessagesWaiting(tx_queue) > 100) {
-        CAN_DEBUG_PRINTF("CAN: TX queue backlog detected (%u messages)\n", 
+        CAN_DEBUG_WARN("TX queue backlog detected (%u messages)", 
                            (unsigned)uxQueueMessagesWaiting(tx_queue));
         update_error_stats(0x10); // Queue backlog error
     }
@@ -500,7 +538,7 @@ void CANIface::check_bus_health()
     if (twai_status.rx_missed_count > 0) {
         static uint32_t last_rx_missed = 0;
         if (twai_status.rx_missed_count > last_rx_missed) {
-            CAN_DEBUG_PRINTF("CAN: RX overrun detected (missed %u messages)\n", 
+            CAN_DEBUG_WARN("RX overrun detected (missed %u messages)", 
                                (unsigned)(twai_status.rx_missed_count - last_rx_missed));
             update_error_stats(0x20); // RX overrun error
         }
