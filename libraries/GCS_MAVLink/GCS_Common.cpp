@@ -4110,7 +4110,11 @@ void GCS_MAVLINK::handle_att_pos_mocap(const mavlink_message_t &msg)
         return;
     }
     // note: att_pos_mocap does not include reset counter
-    visual_odom->handle_pose_estimate(m.time_usec, timestamp_ms, m.x, m.y, m.z, m.q, 0, 0, 0, 0);
+    // Use local array to avoid packed member address issue
+    float q_local[4];
+    memcpy(q_local, m.q, sizeof(q_local));
+    Quaternion attitude(q_local[0], q_local[1], q_local[2], q_local[3]);
+    visual_odom->handle_pose_estimate(m.time_usec, timestamp_ms, m.x, m.y, m.z, attitude, 0, 0, 0, 0);
 }
 
 void GCS_MAVLINK::handle_vision_speed_estimate(const mavlink_message_t &msg)
