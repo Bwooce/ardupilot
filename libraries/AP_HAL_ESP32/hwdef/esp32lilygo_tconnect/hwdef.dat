@@ -191,6 +191,6 @@ define STARTUP_DEBUG 0
 define HAL_CONSOLE_ENABLED 1
 
 # CAN debug level (0=none, 1=errors, 2=warnings, 3=info, 4=verbose)
-define CAN_LOGLEVEL 4
+define CAN_LOGLEVEL 3
 # LCD1602 I2C Display Support
 define HAL_DISPLAY_ENABLED 1

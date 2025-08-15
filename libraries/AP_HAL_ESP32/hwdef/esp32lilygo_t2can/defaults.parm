@@ -36,7 +36,7 @@ CAN_D2_UC_SRV_BM 240 # Enable servo control on CAN2 channels 4-7
 
 # CAN Debug Configuration - Comprehensive debugging for development/troubleshooting
 # Enable maximum CAN logging for debugging (0=None, 1=Error, 2=Warning, 3=Info, 4=Debug)
-CAN_LOGLEVEL 4
+CAN_LOGLEVEL 3
 
 # Log all CAN frames to dataflash for both CAN interfaces (bit 0 = LogAllFrames)
 CAN_P1_OPTIONS 1

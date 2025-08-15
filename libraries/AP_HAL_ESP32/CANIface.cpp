@@ -33,7 +33,7 @@ CANIface::CANIface(uint8_t instance) :
 
 bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
 {
-    CAN_DEBUG_INFO("CAN interface %d init() called - bitrate=%u", instance, (unsigned)bitrate);
+    CAN_DEBUG_INFO("CAN interface %d initialized - bitrate=%u", instance, (unsigned)bitrate);
     
     if (initialized) {
         CAN_DEBUG_INFO("CAN interface %d already initialized", instance);

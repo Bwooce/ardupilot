@@ -677,9 +677,13 @@ void AP_DroneCAN::send_node_status(void)
     _node_status_last_send_ms = now;
     node_status_msg.uptime_sec = now / 1000;
     
-#if CAN_LOGLEVEL >= 4  
-    printf("DroneCAN: Sending NodeStatus (uptime=%lu, now=%lu, last=%lu)\n", 
-           node_status_msg.uptime_sec, now, _node_status_last_send_ms);
+#if CAN_LOGLEVEL >= 5  
+    // Only log NodeStatus occasionally to reduce spam
+    static uint32_t node_status_log_counter = 0;
+    if (++node_status_log_counter % 50 == 0) {  // Log every 50th status message
+        printf("DroneCAN: Sending NodeStatus #%lu (uptime=%lu)\n", 
+               (unsigned long)node_status_log_counter, node_status_msg.uptime_sec);
+    }
 #endif
     
     node_status.broadcast(node_status_msg);
@@ -841,13 +845,13 @@ void AP_DroneCAN::SRV_send_himark(void)
 
 void AP_DroneCAN::SRV_send_esc(void)
 {
-#if CAN_LOGLEVEL >= 3
+#if CAN_LOGLEVEL >= 5
     static uint32_t esc_send_call_count = 0;
     static uint32_t last_esc_log_ms = 0;
     esc_send_call_count++;
     uint32_t now_ms = AP_HAL::millis();
-    if (now_ms - last_esc_log_ms >= 1000) {  // Log every second
-        printf("DroneCAN: SRV_send_esc() called %lu times in last second\n", (unsigned long)esc_send_call_count);
+    if (now_ms - last_esc_log_ms >= 10000) {  // Log every 10 seconds instead of every second
+        printf("DroneCAN: SRV_send_esc() called %lu times in last 10s\n", (unsigned long)esc_send_call_count);
         esc_send_call_count = 0;
         last_esc_log_ms = now_ms;
     }
@@ -888,9 +892,13 @@ void AP_DroneCAN::SRV_send_esc(void)
 
         if (esc_raw.broadcast(esc_msg)) {
             _esc_send_count++;
-#if CAN_LOGLEVEL >= 4
-            printf("DroneCAN: Sent ESC RawCommand (count=%lu, esc_num=%u, active=%u)\n", 
-                   (unsigned long)_esc_send_count, max_esc_num, active_esc_num);
+#if CAN_LOGLEVEL >= 5
+            // Only log every 100th ESC command to avoid spam
+            static uint32_t esc_log_counter = 0;
+            if (++esc_log_counter % 100 == 0) {
+                printf("DroneCAN: Sent ESC RawCommand #%lu (esc_num=%u, active=%u)\n", 
+                       (unsigned long)_esc_send_count, max_esc_num, active_esc_num);
+            }
 #endif
         } else {
             _fail_send_count++;
