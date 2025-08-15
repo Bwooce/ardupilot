@@ -27,6 +27,10 @@
 #include <AP_HAL/utility/sparse-endian.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include <AP_HAL_ESP32/ESP32_OTA.h>
+#endif
+
 extern const AP_HAL::HAL& hal;
 
 struct GCS_MAVLINK::ftp_state GCS_MAVLINK::ftp;
@@ -244,7 +248,19 @@ void GCS_MAVLINK::ftp_worker(void) {
                     break;
                 case FTP_OP::TerminateSession:
                 case FTP_OP::ResetSessions:
-                    // we already handled this, just listed for completeness
+                    // Handle session termination for different file modes
+                    #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+                    if (ftp.mode == FTP_FILE_MODE::OTA_Write) {
+                        // Complete ESP32 OTA update and reboot
+                        if (!esp32_ota_end()) {
+                            ftp_error(reply, FTP_ERROR::Fail);
+                            break;
+                        }
+                        // esp32_ota_end() reboots the system, so this won't be reached
+                        // but handle it gracefully anyway
+                        ftp.mode = FTP_FILE_MODE::Write;  // reset mode
+                    } else
+                    #endif
                     if (ftp.fd != -1) {
                         AP::FS().close(ftp.fd);
                         ftp.fd = -1;
@@ -364,7 +380,28 @@ void GCS_MAVLINK::ftp_worker(void) {
 
                         request.data[sizeof(request.data) - 1] = 0; // ensure the path is null terminated
 
-                        // actually open the file
+                        // Check if this is a firmware file for ESP32 OTA routing
+                        #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+                        if (is_firmware_file((char*)request.data)) {
+                            if (!validate_update_conditions()) {
+                                ftp_error(reply, FTP_ERROR::Fail);
+                                break;
+                            }
+                            
+                            // Route to ESP32 OTA instead of filesystem
+                            if (!esp32_ota_begin((char*)request.data)) {
+                                ftp_error(reply, FTP_ERROR::Fail);
+                                break;
+                            }
+                            ftp.mode = FTP_FILE_MODE::OTA_Write;  // ArduPilot-internal routing
+                            ftp.current_session = request.session;
+                            
+                            reply.opcode = FTP_OP::Ack;
+                            break;
+                        }
+                        #endif
+
+                        // Normal filesystem path
                         ftp.fd = AP::FS().open((char *)request.data,
                                                (request.opcode == FTP_OP::CreateFile) ? O_WRONLY|O_CREAT|O_TRUNC : O_WRONLY);
                         if (ftp.fd == -1) {
@@ -379,6 +416,20 @@ void GCS_MAVLINK::ftp_worker(void) {
                     }
                 case FTP_OP::WriteFile:
                     {
+                        #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+                        if (ftp.mode == FTP_FILE_MODE::OTA_Write) {
+                            // Write to ESP32 OTA partition instead of filesystem
+                            if (!esp32_ota_write(request.data, request.size, request.offset)) {
+                                ftp_error(reply, FTP_ERROR::Fail);
+                                break;
+                            }
+                            reply.opcode = FTP_OP::Ack;
+                            reply.size = request.size; // Success - report bytes written
+                            break;
+                        }
+                        #endif
+
+                        // Normal filesystem write path
                         // must actually be working on a file
                         if (ftp.fd == -1) {
                             ftp_error(reply, FTP_ERROR::FileNotFound);

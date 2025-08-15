@@ -1027,6 +1027,7 @@ private:
     enum class FTP_FILE_MODE {
         Read,
         Write,
+        OTA_Write,    // ESP32 firmware update routing (ArduPilot-internal, not MAVLink)
     };
 
     struct ftp_state {

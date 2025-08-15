@@ -30,6 +30,12 @@ This provides some support code and variables for MAVLink enabled sketches
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include "esp_debug_helpers.h"
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#endif
+
 extern const AP_HAL::HAL& hal;
 
 #ifdef MAVLINK_SEPARATE_HELPERS
@@ -137,6 +143,92 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
 #endif
         return;
     }
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32: Debug first messages and track the mysterious len=10 message
+    static uint32_t msg_count = 0;
+    msg_count++;
+    if (msg_count <= 15) {  // Track more messages to catch the mystery one
+        hal.console->printf("ESP32 TX: #%lu len=%d chan=%d - Raw: ", (unsigned long)msg_count, len, chan);
+        
+        // ALWAYS print ALL bytes regardless of message type
+        for (int i = 0; i < len; i++) {
+            hal.console->printf("%02x ", buf[i]);
+        }
+        
+        // Add message type analysis
+        if (len >= 10 && buf[0] == 0xfd) {
+            uint32_t msgid = buf[7] | (buf[8] << 8) | (buf[9] << 16);
+            hal.console->printf("(MAVLink v2, msgid=%lu)", (unsigned long)msgid);
+        }
+        else if (len >= 6 && buf[0] == 0xfe) {
+            hal.console->printf("(MAVLink v1, msgid=%d)", buf[5]);
+        }
+        else if (len == 10) {
+            hal.console->printf("*** MYSTERY 10-BYTE MESSAGE ***");
+        }
+        else {
+            hal.console->printf("(Unknown protocol)");
+        }
+        
+        hal.console->printf("\n");
+    }
+    
+    // ESP32: Check heap integrity before processing MAVLink messages
+    // Check heap integrity to catch memory corruption early
+    if (!heap_caps_check_integrity_all(true)) {
+        ESP_LOGE("MAVLINK", "HEAP CORRUPTION DETECTED before MAVLink send!");
+        hal.console->printf("ESP32: HEAP CORRUPTION DETECTED before MAVLink send!\n");
+        esp_backtrace_print(10);
+    }
+    
+    // ESP32: Validate MAVLink message structure before sending
+    if (len >= 10 && buf[0] == 0xfd) { // MAVLink v2 message
+        uint32_t msgid = buf[7] | (buf[8] << 8) | (buf[9] << 16);
+        
+        // Only log first few messages for debugging, skip normal heartbeats
+        if (msg_count <= 5 && msgid != 0) {
+            ESP_LOGE("MAVLINK", "Checking message: len=%d, msgid=%lu", len, (unsigned long)msgid);
+        }
+        
+        // Check for obviously invalid message IDs that indicate corruption  
+        if (msgid > 50000) { // Most valid MAVLink message IDs are < 50000
+            static bool first_corruption = true;
+            
+            // Use both ESP-IDF logging AND hal.console to ensure visibility
+            ESP_LOGE("MAVLINK", "=== CORRUPTED MAVLink MESSAGE DETECTED ===");
+            ESP_LOGE("MAVLINK", "Channel: %d, Length: %d, Message ID: %lu", chan, len, (unsigned long)msgid);
+            ESP_LOGE("MAVLINK", "Raw header: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+                     buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9]);
+            
+            hal.console->printf("\n=== ESP32: CORRUPTED MAVLink MESSAGE DETECTED ===\n");
+            hal.console->printf("Channel: %d, Length: %d, Message ID: %lu\n", chan, len, (unsigned long)msgid);
+            hal.console->printf("Raw header bytes: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                               buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9]);
+            
+            // Check heap integrity when corruption is detected
+            if (!heap_caps_check_integrity_all(true)) {
+                ESP_LOGE("MAVLINK", "HEAP CORRUPTION also detected!");
+                hal.console->printf("ESP32: HEAP CORRUPTION also detected!\n");
+            }
+            
+            if (first_corruption) {
+                ESP_LOGE("MAVLINK", "Call stack trace (first occurrence only):");
+                hal.console->printf("Call stack trace (first occurrence only):\n");
+                first_corruption = false;
+                
+                // Print stack trace without crashing
+                esp_backtrace_print(20); // Print up to 20 stack frames
+            } else {
+                ESP_LOGE("MAVLINK", "(Subsequent corruption - not printing stack trace again)");
+                hal.console->printf("(Subsequent corruption - not printing stack trace again)\n");
+            }
+            
+            // Don't send corrupted messages
+            return;
+        }
+    }
+#endif
 #if HAL_HIGH_LATENCY2_ENABLED
     // if it's a disabled high latency channel, don't send
     GCS_MAVLINK *link = gcs().chan(chan);

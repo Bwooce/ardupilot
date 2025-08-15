@@ -1,32 +1,22 @@
 #pragma once
 
-#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_DIY
-#include "esp32diy.h" // Charles
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_BUZZ
-#include "esp32buzz.h" //Buzz
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_ICARUS
-#include "esp32icarus.h" //Alex
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_EMPTY
-#include "esp32empty.h" //wiktor-m
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_TOMTE76
-#include "esp32tomte76.h" //tomte76 on discord
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_NICK
-#include "esp32nick.h" //Nick K. on discord
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_S3DEVKIT
-#include "esp32s3devkit.h" //Nick K. on discord
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_S3EMPTY
-#include "esp32s3empty.h"
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_S3M5STAMPFLY
-#include "esp32s3m5stampfly.h" // https://shop.m5stack.com/products/m5stamp-fly-with-m5stamps3
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_IMU_MODULE_V11
-#include "esp32imu_module_v11.h" //makerfabs esp32 imu module v1.1
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_LILYGO_TCONNECT
-#include "esp32lilygo_tconnect.h" //Lilygo T-Connect
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_ESP32_LILYGO_T2CAN
-#include "esp32lilygo_t2can.h" //Lilygo T-2CAN
-#else
-#error "Invalid CONFIG_HAL_BOARD_SUBTYPE for esp32"
+// ESP32 has different struct alignment than other platforms
+// Force MAVLink to use safe byte-by-byte packing instead of direct struct access
+// This must be set BEFORE any MAVLink headers are included
+#ifdef MAVLINK_ALIGNED_FIELDS
+#undef MAVLINK_ALIGNED_FIELDS
 #endif
+#define MAVLINK_ALIGNED_FIELDS 0
+
+// ESP32: Force byte-wise field access for all MAVLink operations
+// The MAVLink generator determines packing needs based on standard alignment,
+// but ESP32 has different alignment requirements causing corruption in messages
+// like HIGH_LATENCY2. Setting MAVLINK_ALIGNED_FIELDS=0 forces safe byte-wise
+// access instead of direct struct field access, avoiding alignment issues.
+#define ESP32_MAVLINK_OVERRIDE_APPLIED 1
+
+// Board-specific configuration now handled automatically by hwdef.h
+// Generated during build process by esp32_hwdef.py
 #define HAL_BOARD_NAME "ESP32"
 #define HAL_CPU_CLASS HAL_CPU_CLASS_150
 #ifndef HAL_WITH_DRONECAN

@@ -27,6 +27,11 @@
 #include <AP_AdvancedFailsafe/AP_AdvancedFailsafe.h>
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_HAL/AP_HAL.h>
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include "esp_debug_helpers.h"
+#include "esp_log.h"
+#endif
 #include <AP_Arming/AP_Arming.h>
 #include <AP_InternalError/AP_InternalError.h>
 #include <AP_Logger/AP_Logger.h>
@@ -4306,6 +4311,43 @@ void GCS_MAVLINK::handle_heartbeat(const mavlink_message_t &msg)
  */
 void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32: Validate incoming MAVLink message for corruption
+    if (msg.msgid > 300000) { // Check for obviously invalid message IDs
+        static bool first_rx_corruption = true;
+        
+        // Use both ESP-IDF logging AND hal.console to ensure visibility
+        ESP_LOGE("MAVLINK_RX", "=== CORRUPTED INCOMING MAVLink MESSAGE ===");
+        ESP_LOGE("MAVLINK_RX", "Channel: %d, Message ID: %lu, sysid: %d, compid: %d", 
+                 chan, (unsigned long)msg.msgid, msg.sysid, msg.compid);
+        ESP_LOGE("MAVLINK_RX", "Payload length: %d", msg.len);
+        
+        hal.console->printf("\n=== ESP32: CORRUPTED INCOMING MAVLink MESSAGE ===\n");
+        hal.console->printf("Channel: %d, Message ID: %lu, sysid: %d, compid: %d\n", 
+                           chan, (unsigned long)msg.msgid, msg.sysid, msg.compid);
+        hal.console->printf("Payload length: %d\n", msg.len);
+        
+        if (first_rx_corruption) {
+            ESP_LOGE("MAVLINK_RX", "Call stack trace (first RX corruption only):");
+            hal.console->printf("Call stack trace (first RX corruption only):\n");
+            first_rx_corruption = false;
+            esp_backtrace_print(20);
+        }
+        
+        // Don't process corrupted messages - just return
+        return;
+    }
+    
+    // Debug: Log message IDs for first few received messages
+    static uint32_t rx_msg_count = 0;
+    rx_msg_count++;
+    if (rx_msg_count <= 10) {
+        // Use console output for persistent logging after ArduPilot init
+        hal.console->printf("ESP32 RX: msgid=%lu, sysid=%d, compid=%d\n", 
+                           (unsigned long)msg.msgid, msg.sysid, msg.compid);
+    }
+#endif
+
     switch (msg.msgid) {
 
     case MAVLINK_MSG_ID_HEARTBEAT: {

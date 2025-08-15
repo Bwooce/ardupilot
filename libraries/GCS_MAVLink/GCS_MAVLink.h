@@ -72,6 +72,13 @@ uint16_t comm_get_txspace(mavlink_channel_t chan);
 #define MAVLINK_USE_CONVENIENCE_FUNCTIONS
 #include "include/mavlink/v2.0/all/mavlink.h"
 
+// Verify ESP32 MAVLink override was applied
+#ifdef ESP32_MAVLINK_OVERRIDE_APPLIED
+#if MAVLINK_ALIGNED_FIELDS != 0
+#pragma message("ESP32: MAVLink override FAILED - still using unsafe packing!")
+#endif
+#endif
+
 // lock and unlock a channel, for multi-threaded mavlink send
 void comm_send_lock(mavlink_channel_t chan, uint16_t size);
 void comm_send_unlock(mavlink_channel_t chan);
