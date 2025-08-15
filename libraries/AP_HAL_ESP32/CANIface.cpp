@@ -513,18 +513,52 @@ void CANIface::check_bus_health()
     }
     
     // Check for bus-off condition and attempt recovery
+    static uint32_t last_recovery_attempt_ms = 0;
+    static uint32_t consecutive_bus_off_count = 0;
+    static uint32_t last_full_restart_ms = 0;
+    uint32_t now_ms = AP_HAL::millis();
+    
     if (twai_status.state == TWAI_STATE_BUS_OFF) {
-        static uint32_t last_recovery_attempt_ms = 0;
-        uint32_t now_ms = AP_HAL::millis();
-        
-        // Attempt recovery every 5 seconds
+        // Attempt basic recovery every 5 seconds
         if (now_ms - last_recovery_attempt_ms > 5000) {
-            CAN_DEBUG_ERROR("Bus-off detected, attempting recovery");
+            consecutive_bus_off_count++;
+            CAN_DEBUG_ERROR("Bus-off detected (attempt #%u), attempting recovery", 
+                           (unsigned)consecutive_bus_off_count);
             update_error_stats(0x01); // Bus-off error
             
-            twai_initiate_recovery();
+            // If we've had persistent bus-off conditions, try full driver restart
+            if (consecutive_bus_off_count > 5 && (now_ms - last_full_restart_ms > 30000)) {
+                CAN_DEBUG_ERROR("Persistent bus-off condition, attempting full TWAI restart");
+                
+                // Store current configuration for restart
+                uint32_t saved_bitrate = current_bitrate;
+                
+                // Perform full TWAI restart
+                twai_stop();
+                twai_driver_uninstall();
+                
+                // Brief delay to allow hardware to settle
+                hal.scheduler->delay_microseconds(1000);
+                
+                // Reinitialize with same configuration (use NormalMode as default)
+                if (init(saved_bitrate, NormalMode)) {
+                    CAN_DEBUG_INFO("Full TWAI restart successful");
+                    consecutive_bus_off_count = 0; // Reset counter on successful restart
+                    last_full_restart_ms = now_ms;
+                } else {
+                    CAN_DEBUG_ERROR("Full TWAI restart failed");
+                    // Continue with basic recovery attempts
+                }
+            } else {
+                // Standard recovery attempt
+                twai_initiate_recovery();
+            }
+            
             last_recovery_attempt_ms = now_ms;
         }
+    } else {
+        // Bus is healthy, reset consecutive bus-off counter
+        consecutive_bus_off_count = 0;
     }
     
     // Check for excessive TX queue backlog
