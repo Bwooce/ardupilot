@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # if you have modules/esp_idf setup as a submodule, then leave it as a submodule and switch branches
 
-COMMIT="cc3203dc4f087ab41b434afff1ed7520c6d90993"
+COMMIT="f5c3654a1c2d2a01f7f67def7a0dc48e691f63c0"
 
 if [ ! -d modules ]; then
 echo "this script needs to be run from the root of your repo, sorry, giving up."
