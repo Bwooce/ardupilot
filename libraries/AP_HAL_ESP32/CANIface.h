@@ -25,6 +25,9 @@ public:
     
     // Enhanced bus health monitoring
     void check_bus_health();
+    
+    // Recovery methods for severe bus errors
+    void attempt_driver_restart();
 
 protected:
     int8_t get_iface_num() const override { return instance; };

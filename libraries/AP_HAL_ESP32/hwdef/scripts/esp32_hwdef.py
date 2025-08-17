@@ -422,6 +422,9 @@ class ESP32HWDef(hwdef.HWDef):
         f.write("/* Auto-generated hwdef.h for %s */\n\n" % self.board)
         f.write("#pragma once\n\n")
         
+        # Include board-specific HAL configuration (CRITICAL for MAVLink alignment fixes)
+        f.write("#include <AP_HAL/board/esp32.h>\n\n")
+        
         # Write numerical defines (hwdef.h should override defaults)
         for d in sorted(self.intdefines.keys()):
             f.write("#undef %s\n" % d)  # Undefine any previous definition
@@ -761,88 +764,75 @@ class ESP32HWDef(hwdef.HWDef):
         if self.has_psram():
             self.progress("Generating ESP-IDF PSRAM configuration")
             
-            # Enable PSRAM - chip-specific symbols for ESP-IDF compatibility
-            if self.mcu.lower() == 'esp32':
-                # Original ESP32 uses legacy symbols
-                config_lines.append("CONFIG_ESP32_SPIRAM_SUPPORT=y")
-                config_lines.append("CONFIG_SPIRAM_CACHE_WORKAROUND=y")  # ESP32-specific optimization
-                config_lines.append("CONFIG_SPIRAM_OCCUPY_SPI_HOST=VSPI_HOST")  # Default to VSPI
-            elif self.mcu.lower() in ['esp32s2', 'esp32s3', 'esp32c61']:
-                # ESP32-S2/S3/C61 use SPIRAM symbols in ESP-IDF v5.3/v5.4
-                config_lines.append("CONFIG_SPIRAM=y")
-                config_lines.append("CONFIG_SPIRAM_TYPE_AUTO=y")
-            else:
-                self.progress(f"Warning: PSRAM support for {self.mcu} is not verified")
-                config_lines.append("CONFIG_SPIRAM=y")
-                config_lines.append("CONFIG_SPIRAM_TYPE_AUTO=y")
+            # Enable PSRAM - ESP-IDF 5.5+ uses automatic detection
+            # Note: ESP-IDF 5.5+ automatically detects and configures SPIRAM
+            config_lines.append("# SPIRAM configuration handled automatically by ESP-IDF 5.5+")
             
-            # Common SPIRAM configuration across all variants
-            config_lines.append("CONFIG_SPIRAM_BOOT_INIT=y")  # Required base symbol
-            config_lines.append("CONFIG_SPIRAM_USE_MALLOC=y")
-            
-            # Set SPIRAM mode based on hwdef and chip capabilities
-            mode = self.psram_config.get('mode', 'QUAD').upper()
-            if self.mcu.lower() == 'esp32s3' and mode == 'OPI':
-                # ESP32-S3 supports both QUAD and OCTAL modes
-                config_lines.append("CONFIG_SPIRAM_MODE_OCT=y")
-                config_lines.append("# CONFIG_SPIRAM_MODE_QUAD is not set")
-            elif self.mcu.lower() == 'esp32':
-                # ESP32 only supports QUAD mode
-                config_lines.append("CONFIG_SPIRAM_MODE_QUAD=y")
-            else:
-                # ESP32-S2/S3 and fallback: QUAD mode
-                config_lines.append("CONFIG_SPIRAM_MODE_QUAD=y")
-                if self.mcu.lower() == 'esp32s3':
-                    config_lines.append("# CONFIG_SPIRAM_MODE_OCT is not set")
-            
-            # Set SPIRAM speed (chipset dependent defaults)
-            if self.mcu.lower() == 'esp32':
-                # ESP32 has different speed options and limitations
-                config_lines.append("CONFIG_SPIRAM_SPEED_40M=y")  # Conservative for ESP32
-            else:
-                # ESP32-S2/S3 can handle higher speeds
-                config_lines.append("CONFIG_SPIRAM_SPEED_80M=y")
-            
-            # Set malloc thresholds (common across all variants - uses SPIRAM symbols)
-            threshold = self.psram_config.get('malloc_threshold', '16384')
-            reserve = self.psram_config.get('reserve_internal', '16384')
-            
-            config_lines.append(f"CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL={threshold}")
-            config_lines.append(f"CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL={reserve}")
-            config_lines.append("CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y")
             
         else:
-            self.progress("No PSRAM configured - SPIRAM disabled")
-            # Disable SPIRAM for all chip variants
-            if self.mcu.lower() == 'esp32':
-                config_lines.append("# CONFIG_ESP32_SPIRAM_SUPPORT is not set")
-            else:
-                config_lines.append("# CONFIG_SPIRAM is not set")
+            self.progress("No PSRAM configured - using ESP-IDF 5.5+ defaults")
         
         # ESP32 Memory Protection and Debugging Configuration
-        self.progress("Adding ESP32 memory protection and debugging options")
+        # Check ESP32_DEBUG_MODE define to determine debug vs performance mode
+        debug_mode = self.intdefines.get('ESP32_DEBUG_MODE', '1')  # Default to debug mode for safety
         
-        # Enable comprehensive heap corruption detection
-        config_lines.append("CONFIG_HEAP_POISONING_COMPREHENSIVE=y")
-        config_lines.append("# CONFIG_HEAP_POISONING_LIGHT is not set")
-        config_lines.append("# CONFIG_HEAP_POISONING_DISABLED is not set")
+        if debug_mode == '1':
+            self.progress("Adding ESP32 memory protection and debugging options (DEBUG MODE)")
+            
+            # Enable comprehensive heap corruption detection - ESP-IDF 5.5+ compatible
+            config_lines.append("CONFIG_HEAP_POISONING_COMPREHENSIVE=y")
+            config_lines.append("# CONFIG_HEAP_POISONING_LIGHT is not set")
+            
+            # Enable heap tracing for memory leak detection
+            config_lines.append("CONFIG_HEAP_TRACING=y")
+            config_lines.append("CONFIG_HEAP_TRACING_STACK_DEPTH=10")
+            
+            # Enable memory corruption detection
+            config_lines.append("CONFIG_HEAP_ABORT_WHEN_ALLOCATION_FAILS=y")
+            
+            # Enable stack overflow detection
+            config_lines.append("CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y")
+            
+            # Enable task watchdog to catch infinite loops/hangs  
+            config_lines.append("CONFIG_ESP_TASK_WDT=y")
+            config_lines.append("CONFIG_ESP_TASK_WDT_TIMEOUT_S=5")
+            
+            # Enable assertions for debugging
+            config_lines.append("CONFIG_COMPILER_OPTIMIZATION_ASSERTION_LEVEL=2")
+            
+        else:
+            self.progress("Using ESP32 performance mode (PRODUCTION) - debugging disabled")
+            
+            # Disable expensive debugging features for production performance - ESP-IDF 5.5+ compatible
+            config_lines.append("# CONFIG_HEAP_POISONING_COMPREHENSIVE is not set")
+            config_lines.append("# CONFIG_HEAP_POISONING_LIGHT is not set")
+            
+            # Disable heap tracing to avoid __wrap_malloc linker errors
+            config_lines.append("# CONFIG_HEAP_TRACING is not set")
+            
+            # Disable stack overflow checking for performance
+            config_lines.append("# CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY is not set")
+            config_lines.append("CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE=y")
+            
+            # Disable task watchdog for performance
+            config_lines.append("CONFIG_ESP_TASK_WDT_INIT=n")
+            config_lines.append("CONFIG_ESP_INT_WDT=n")
+            
+            # Disable assertions for performance
+            config_lines.append("CONFIG_COMPILER_OPTIMIZATION_ASSERTION_LEVEL=0")
         
-        # Enable heap tracing for memory leak detection
-        config_lines.append("CONFIG_HEAP_TRACING=y")
-        config_lines.append("CONFIG_HEAP_TRACING_STACK_DEPTH=10")
-        
-        # Enable memory corruption detection
-        config_lines.append("CONFIG_HEAP_ABORT_WHEN_ALLOCATION_FAILS=y")
-        
-        # Enable stack overflow detection
-        config_lines.append("CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y")
-        
-        # Enable task watchdog to catch infinite loops/hangs  
-        config_lines.append("CONFIG_ESP_TASK_WDT=y")
-        config_lines.append("CONFIG_ESP_TASK_WDT_TIMEOUT_S=5")
-        
-        # Enable assertions for debugging
-        config_lines.append("CONFIG_COMPILER_OPTIMIZATION_ASSERTION_LEVEL=2")
+        # CAN/TWAI configuration for ESP-IDF 5.5+ reliability and performance
+        if self.can_pins:
+            config_lines.append("# CAN/TWAI reliability and performance optimization")
+            config_lines.append("CONFIG_TWAI_ISR_IN_IRAM=y")
+            
+            # Enable critical errata fixes for data integrity
+            config_lines.append("CONFIG_TWAI_ERRATA_FIX_RX_FRAME_INVALID=y")
+            config_lines.append("CONFIG_TWAI_ERRATA_FIX_RX_FIFO_CORRUPT=y")
+            config_lines.append("CONFIG_TWAI_ERRATA_FIX_TX_INTR_LOST=y")
+            
+            # Keep listen-only DOM fix disabled for performance (already in target config)
+            # CONFIG_TWAI_ERRATA_FIX_LISTEN_ONLY_DOM=n
         
         return config_lines
 

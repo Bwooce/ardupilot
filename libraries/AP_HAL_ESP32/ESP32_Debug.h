@@ -24,20 +24,35 @@
   Uses ESP-IDF native logging for reliable output even during early boot
   and when ArduPilot console system is not functional.
   
+  Performance: Debug macros can be completely disabled for production builds
+  by setting ESP32_DEBUG_DISABLED=1 in hwdef.dat to eliminate runtime overhead.
+  
   Usage:
     ESP32_DEBUG_INFO("Scheduler initialized");  
     ESP32_DEBUG_WARNING("Failed to create task");
     ESP32_DEBUG_ERROR("Critical initialization failure");
 */
 
-// Macro definitions using ESP-IDF logging system
-// These work even when ArduPilot console is broken
+// Configurable debug system - can be disabled for performance
+#ifndef ESP32_DEBUG_DISABLED
+#define ESP32_DEBUG_DISABLED 0
+#endif
 
+#if ESP32_DEBUG_DISABLED
+// Disabled debug - zero runtime overhead
+#define ESP32_DEBUG_ERROR(fmt, args...)   do {} while(0)
+#define ESP32_DEBUG_WARNING(fmt, args...) do {} while(0)
+#define ESP32_DEBUG_INFO(fmt, args...)    do {} while(0)
+#define ESP32_DEBUG_VERBOSE(fmt, args...) do {} while(0)  
+#define ESP32_DEBUG_DEBUG(fmt, args...)   do {} while(0)
+#else
+// Enabled debug - uses ESP-IDF logging system
 #define ESP32_DEBUG_ERROR(fmt, args...)   ESP_LOGE("ESP32", fmt, ##args)  
 #define ESP32_DEBUG_WARNING(fmt, args...) ESP_LOGW("ESP32", fmt, ##args)
 #define ESP32_DEBUG_INFO(fmt, args...)    ESP_LOGI("ESP32", fmt, ##args)
 #define ESP32_DEBUG_VERBOSE(fmt, args...) ESP_LOGD("ESP32", fmt, ##args)  
 #define ESP32_DEBUG_DEBUG(fmt, args...)   ESP_LOGV("ESP32", fmt, ##args)
+#endif
 
 // TEMPORARY: Disable DEV_PRINTF to prevent console contamination
 #ifdef DEV_PRINTF

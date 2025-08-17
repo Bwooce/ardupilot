@@ -53,6 +53,14 @@ def configure(cfg):
     except:
         env.IDF = cfg.srcnode.abspath()+"/modules/esp_idf"
     print("USING EXPRESSIF IDF:"+str(env.IDF))
+    
+    # Report ESP32 debug mode status
+    try:
+        # Check if this is a debug build variant
+        is_debug = 'debug' in cfg.variant or cfg.options.debug
+        print(f"ESP32 Debug build     : {'enabled' if is_debug else 'disabled'}")
+    except:
+        print("ESP32 Debug build     : disabled (default)")
 
     # setup cmake
     cfg.env['IDF_TARGET'] = mcu

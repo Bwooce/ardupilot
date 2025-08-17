@@ -6,9 +6,9 @@
   macros to allow code to build on multiple platforms more easily
  */
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_SITL || CONFIG_HAL_BOARD == HAL_BOARD_LINUX || HAL_WITH_EKF_DOUBLE || AP_SIM_ENABLED
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL || CONFIG_HAL_BOARD == HAL_BOARD_LINUX || CONFIG_HAL_BOARD == HAL_BOARD_ESP32 || HAL_WITH_EKF_DOUBLE || AP_SIM_ENABLED
 /*
-  allow double maths on Linux and SITL to avoid problems with system headers
+  allow double maths on Linux, SITL, and ESP32 to avoid problems with system headers
  */
   #if !defined(ALLOW_DOUBLE_MATH_FUNCTIONS)
     #define ALLOW_DOUBLE_MATH_FUNCTIONS

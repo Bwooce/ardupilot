@@ -268,10 +268,23 @@ void GCS_MAVLINK::send_power_status(void)
         // avoid unnecessary errors being reported to user
         return;
     }
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 workaround: use manual buffer to avoid MAVPACKED alignment issues
+    char buf[MAVLINK_MSG_ID_POWER_STATUS_LEN];
+    uint16_t vcc = hal.analogin->board_voltage() * 1000;
+    uint16_t vservo = hal.analogin->servorail_voltage() * 1000;
+    uint16_t flags = hal.analogin->power_status_flags();
+    _mav_put_uint16_t(buf, 0, vcc);
+    _mav_put_uint16_t(buf, 2, vservo);
+    _mav_put_uint16_t(buf, 4, flags);
+    _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_POWER_STATUS, buf, 
+                                   MAVLINK_MSG_ID_POWER_STATUS_MIN_LEN, MAVLINK_MSG_ID_POWER_STATUS_LEN, MAVLINK_MSG_ID_POWER_STATUS_CRC);
+#else
     mavlink_msg_power_status_send(chan,
                                   hal.analogin->board_voltage() * 1000,
                                   hal.analogin->servorail_voltage() * 1000,
                                   hal.analogin->power_status_flags());
+#endif
 }
 
 #if AP_SCHEDULER_ENABLED
@@ -633,6 +646,24 @@ void GCS_MAVLINK::send_ahrs2()
     // we want one or both of these, use | to avoid short-circuiting:
     if (uint8_t(ahrs.get_secondary_attitude(euler)) |
         uint8_t(ahrs.get_secondary_position(loc))) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // ESP32 workaround: use manual buffer to avoid MAVPACKED alignment issues
+        char buf[MAVLINK_MSG_ID_AHRS2_LEN];
+        float roll = euler.x;
+        float pitch = euler.y;
+        float yaw = euler.z;
+        float altitude = loc.alt*1.0e-2f;
+        int32_t lat = loc.lat;
+        int32_t lng = loc.lng;
+        _mav_put_float(buf, 0, roll);
+        _mav_put_float(buf, 4, pitch);
+        _mav_put_float(buf, 8, yaw);
+        _mav_put_float(buf, 12, altitude);
+        _mav_put_int32_t(buf, 16, lat);
+        _mav_put_int32_t(buf, 20, lng);
+        _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_AHRS2, buf, 
+                                       MAVLINK_MSG_ID_AHRS2_MIN_LEN, MAVLINK_MSG_ID_AHRS2_LEN, MAVLINK_MSG_ID_AHRS2_CRC);
+#else
         mavlink_msg_ahrs2_send(chan,
                                euler.x,
                                euler.y,
@@ -640,6 +671,7 @@ void GCS_MAVLINK::send_ahrs2()
                                loc.alt*1.0e-2f,
                                loc.lat,
                                loc.lng);
+#endif
     }
 }
 #endif  // AP_AHRS_ENABLED
@@ -2501,6 +2533,26 @@ void GCS_MAVLINK::send_ahrs()
 {
     const AP_AHRS &ahrs = AP::ahrs();
     const Vector3f &omega_I = ahrs.get_gyro_drift();
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 workaround: use manual buffer to avoid MAVPACKED alignment issues
+    char buf[MAVLINK_MSG_ID_AHRS_LEN];
+    float omega_x = omega_I.x;
+    float omega_y = omega_I.y;
+    float omega_z = omega_I.z;
+    float accel_weight = 0.0f;
+    float renorm_val = 0.0f;
+    float error_rp = ahrs.get_error_rp();
+    float error_yaw = ahrs.get_error_yaw();
+    _mav_put_float(buf, 0, omega_x);
+    _mav_put_float(buf, 4, omega_y);
+    _mav_put_float(buf, 8, omega_z);
+    _mav_put_float(buf, 12, accel_weight);
+    _mav_put_float(buf, 16, renorm_val);
+    _mav_put_float(buf, 20, error_rp);
+    _mav_put_float(buf, 24, error_yaw);
+    _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_AHRS, buf, MAVLINK_MSG_ID_AHRS_MIN_LEN, MAVLINK_MSG_ID_AHRS_LEN, MAVLINK_MSG_ID_AHRS_CRC);
+#else
     mavlink_msg_ahrs_send(
         chan,
         omega_I.x,
@@ -2510,6 +2562,7 @@ void GCS_MAVLINK::send_ahrs()
         0,
         ahrs.get_error_rp(),
         ahrs.get_error_yaw());
+#endif
 }
 #endif  // AP_AHRS_ENABLED
 
@@ -3065,6 +3118,25 @@ void GCS_MAVLINK::send_vibration() const
 
     Vector3f vibration = ins.get_vibration_levels();
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 workaround: use manual buffer to avoid MAVPACKED alignment issues
+    char buf[MAVLINK_MSG_ID_VIBRATION_LEN];
+    uint64_t time_us = AP_HAL::micros64();
+    float vib_x = vibration.x;
+    float vib_y = vibration.y;
+    float vib_z = vibration.z;
+    uint32_t clip_0 = ins.get_accel_clip_count(0);
+    uint32_t clip_1 = ins.get_accel_clip_count(1);
+    uint32_t clip_2 = ins.get_accel_clip_count(2);
+    _mav_put_uint64_t(buf, 0, time_us);
+    _mav_put_float(buf, 8, vib_x);
+    _mav_put_float(buf, 12, vib_y);
+    _mav_put_float(buf, 16, vib_z);
+    _mav_put_uint32_t(buf, 20, clip_0);
+    _mav_put_uint32_t(buf, 24, clip_1);
+    _mav_put_uint32_t(buf, 28, clip_2);
+    _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_VIBRATION, buf, MAVLINK_MSG_ID_VIBRATION_MIN_LEN, MAVLINK_MSG_ID_VIBRATION_LEN, MAVLINK_MSG_ID_VIBRATION_CRC);
+#else
     mavlink_msg_vibration_send(
         chan,
         AP_HAL::micros64(),
@@ -3074,6 +3146,7 @@ void GCS_MAVLINK::send_vibration() const
         ins.get_accel_clip_count(0),
         ins.get_accel_clip_count(1),
         ins.get_accel_clip_count(2));
+#endif
 #endif
 }
 
@@ -5397,6 +5470,15 @@ void GCS_MAVLINK::handle_command_long(const mavlink_message_t &msg)
     // decode packet
     mavlink_command_long_t packet;
     mavlink_msg_command_long_decode(&msg, &packet);
+
+    // ESP32 Debug: Log all incoming MAVLink commands for reliability debugging
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    static uint32_t cmd_count = 0;
+    cmd_count++;
+    hal.console->printf("MCMD #%lu: SysID=%d CompID=%d Cmd=%d P1=%.2f P2=%.2f\n", 
+                       (unsigned long)cmd_count, msg.sysid, msg.compid, 
+                       packet.command, packet.param1, packet.param2);
+#endif
 
 #if AP_SCRIPTING_ENABLED
     AP_Scripting *scripting = AP_Scripting::get_singleton();

@@ -1,5 +1,11 @@
 #pragma once
 
+// ESP32 needs _GNU_SOURCE for asprintf/vasprintf before any stdio.h includes
+// Use same value as WAF ap_config.h to avoid redefinition warning
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+
 // ESP32 has different struct alignment than other platforms
 // Force MAVLink to use safe byte-by-byte packing instead of direct struct access
 // This must be set BEFORE any MAVLink headers are included
@@ -73,32 +79,76 @@
 #define __BYTE_ORDER     __LITTLE_ENDIAN
 
 // ArduPilot uses __RAMFUNC__ to place functions in fast instruction RAM
+#ifndef __RAMFUNC__
 #define __RAMFUNC__ IRAM_ATTR
+#endif
 
 
-// whenver u get ... error: "xxxxxxx" is not defined, evaluates to 0 [-Werror=undef]  just define it below as 0
+// whenever u get ... error: "xxxxxxx" is not defined, evaluates to 0 [-Werror=undef]  just define it below as 0
+// Only define if not already defined by ESP-IDF to avoid redefinition warnings
+#ifndef CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
 #define CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY 0
+#endif
+#ifndef XCHAL_ERRATUM_453
 #define XCHAL_ERRATUM_453 0
+#endif
 //#define CONFIG_FREERTOS_CORETIMER_0 0
-#define CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE 0
+// Stack overflow checking: Enable in debug mode, disable for performance
+#ifndef CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE
+#ifdef ESP32_DEBUG_MODE
+#if ESP32_DEBUG_MODE
+#define CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE 0  // Enable stack checking (NONE=0 means checking is ON)
+#else
+#define CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE 1  // Disable for performance
+#endif
+#else
+#define CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE 1  // Default: performance mode
+#endif
+#endif
+#ifndef CONFIG_FREERTOS_CHECK_STACKOVERFLOW_PTRVAL
 #define CONFIG_FREERTOS_CHECK_STACKOVERFLOW_PTRVAL 0
+#endif
+#ifndef CONFIG_FREERTOS_ENABLE_STATIC_TASK_CLEAN_UP
 #define CONFIG_FREERTOS_ENABLE_STATIC_TASK_CLEAN_UP 0
+#endif
+#ifndef CONFIG_FREERTOS_USE_TICKLESS_IDLE
 #define CONFIG_FREERTOS_USE_TICKLESS_IDLE 0
+#endif
+#ifndef CONFIG_SYSVIEW_ENABLE
 #define CONFIG_SYSVIEW_ENABLE 0
+#endif
+#ifndef CONFIG_SPI_FLASH_DANGEROUS_WRITE_ALLOWED
 #define CONFIG_SPI_FLASH_DANGEROUS_WRITE_ALLOWED 0
+#endif
+#ifndef CONFIG_SPI_FLASH_ENABLE_COUNTERS
 #define CONFIG_SPI_FLASH_ENABLE_COUNTERS 0
+#endif
+#ifndef CONFIG_LWIP_DHCP_RESTORE_LAST_IP
 #define CONFIG_LWIP_DHCP_RESTORE_LAST_IP 0
+#endif
+#ifndef CONFIG_LWIP_STATS
 #define CONFIG_LWIP_STATS 0
+#endif
+#ifndef CONFIG_LWIP_PPP_SUPPORT
 #define CONFIG_LWIP_PPP_SUPPORT 0
-#define CONFIG_LWIP_STATS 0
+#endif
 //#define CONFIG_ESP32_WIFI_CSI_ENABLED 0
 //#define CONFIG_ESP32_WIFI_NVS_ENABLED 0
+#ifndef CONFIG_NEWLIB_NANO_FORMAT
 #define CONFIG_NEWLIB_NANO_FORMAT 0
+#endif
+#ifndef CONFIG_LWIP_IP4_REASSEMBLY
 #define CONFIG_LWIP_IP4_REASSEMBLY 0
+#endif
+#ifndef CONFIG_LWIP_IP6_REASSEMBLY
 #define CONFIG_LWIP_IP6_REASSEMBLY 0
-#define CONFIG_LWIP_STATS 0
+#endif
+#ifndef LWIP_COMPAT_SOCKET_INET
 #define LWIP_COMPAT_SOCKET_INET 0
+#endif
+#ifndef LWIP_COMPAT_SOCKET_ADDR
 #define LWIP_COMPAT_SOCKET_ADDR 0
+#endif
 //#define CONFIG_ESP32_WIFI_TX_BA_WIN 0
 //#define CONFIG_ESP32_WIFI_RX_BA_WIN 0
 
@@ -144,11 +194,24 @@
 
 // other big things..
 #define HAL_QUADPLANE_ENABLED 0
+#ifndef HAL_GYROFFT_ENABLED
 #define HAL_GYROFFT_ENABLED 0
+#endif
 
 // remove once ESP32 isn't so chronically slow
 #define AP_SCHEDULER_OVERTIME_MARGIN_US 50000UL
 
 #ifndef AP_NOTIFY_BUZZER_ENABLED
 #define AP_NOTIFY_BUZZER_ENABLED 1
+#endif
+
+// ESP32 asprintf/vasprintf support - add at end to avoid include order issues
+#ifdef __cplusplus
+extern "C" {
+#endif
+// ESP-IDF provides asprintf/vasprintf but may need feature macros enabled
+#include <stdio.h>
+#include <stdarg.h>
+#ifdef __cplusplus
+}
 #endif

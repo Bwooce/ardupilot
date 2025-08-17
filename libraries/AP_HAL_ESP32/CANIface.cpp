@@ -33,7 +33,20 @@ CANIface::CANIface(uint8_t instance) :
 
 bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
 {
+    // Set ESP-IDF log level for CAN tag based on CAN_LOGLEVEL
+#if CAN_LOGLEVEL >= 4
+    esp_log_level_set("CAN", ESP_LOG_VERBOSE);
+#elif CAN_LOGLEVEL >= 3  
+    esp_log_level_set("CAN", ESP_LOG_INFO);
+#elif CAN_LOGLEVEL >= 2
+    esp_log_level_set("CAN", ESP_LOG_WARN);
+#else
+    esp_log_level_set("CAN", ESP_LOG_ERROR);
+#endif
+    
     CAN_DEBUG_INFO("CAN interface %d initialized - bitrate=%u", instance, (unsigned)bitrate);
+    CAN_DEBUG_INFO("CAN debug test - you should see this message!");
+    CAN_DEBUG_VERBOSE("CAN_LOGLEVEL=%d, ESP-IDF log level set appropriately", CAN_LOGLEVEL);
     
     if (initialized) {
         CAN_DEBUG_INFO("CAN interface %d already initialized", instance);
@@ -166,6 +179,7 @@ bool CANIface::add_to_rx_queue(const CanRxItem &rx_item)
 void CANIface::rx_task(void *arg)
 {
     CANIface *iface = (CANIface *)arg;
+    CAN_DEBUG_INFO("CAN RX task started for interface %d", iface->instance);
 
     while (true) {
         twai_message_t message;
@@ -312,6 +326,16 @@ void CANIface::tx_task(void *arg)
                     }
                 }
                 CAN_DEBUG_ERROR("Failed to transmit message ID=0x%08X, error=%d", (unsigned)tx_item.frame.id, result);
+            } else if (result == ESP_ERR_INVALID_STATE) {
+                // TWAI driver in invalid state - likely electrical disconnection
+                // This requires full driver restart to recover
+                CAN_DEBUG_ERROR("TWAI invalid state (disconnection?) - attempting full restart");
+                iface->update_error_stats(0x08); // Invalid state error
+                iface->attempt_driver_restart();
+            } else if (result == ESP_ERR_INVALID_ARG) {
+                // Invalid argument - possibly corrupted message data
+                CAN_DEBUG_ERROR("TWAI invalid argument error on message ID=0x%08X", (unsigned)tx_item.frame.id);
+                iface->update_error_stats(0x09); // Invalid argument error
             } else {
                 // Other errors
                 iface->update_error_stats(result);
@@ -578,6 +602,68 @@ void CANIface::check_bus_health()
         }
         last_rx_missed = twai_status.rx_missed_count;
     }
+}
+
+void CANIface::attempt_driver_restart()
+{
+    static uint32_t last_restart_ms = 0;
+    static uint32_t restart_count = 0;
+    uint32_t now_ms = AP_HAL::millis();
+    
+    // Rate limit restarts to prevent restart loops
+    if (now_ms - last_restart_ms < 5000) {  // Minimum 5 seconds between restarts
+        CAN_DEBUG_INFO("Driver restart rate-limited (last restart %lu ms ago)", (unsigned long)(now_ms - last_restart_ms));
+        return;
+    }
+    
+    // Prevent multiple simultaneous restart attempts
+    static bool restart_in_progress = false;
+    if (restart_in_progress) {
+        CAN_DEBUG_INFO("Driver restart already in progress, skipping");
+        return;
+    }
+    restart_in_progress = true;
+    
+    restart_count++;
+    last_restart_ms = now_ms;
+    
+    CAN_DEBUG_ERROR("Attempting full TWAI driver restart #%lu due to invalid state", (unsigned long)restart_count);
+    
+    // Store current configuration
+    uint32_t saved_bitrate = current_bitrate;
+    
+    // Stop and uninstall driver (may fail if in invalid state, but continue anyway)
+    esp_err_t result = twai_stop();
+    if (result != ESP_OK) {
+        CAN_DEBUG_WARN("TWAI stop failed (error %d), forcing uninstall", result);
+    }
+    
+    result = twai_driver_uninstall();
+    if (result != ESP_OK) {
+        CAN_DEBUG_WARN("TWAI uninstall failed (error %d), continuing anyway", result);
+    }
+    
+    // Brief delay to let hardware settle
+    hal.scheduler->delay_microseconds(10000); // 10ms
+    
+    // Clear queues (they should be empty after stop/uninstall, but be safe)
+    if (rx_queue) {
+        xQueueReset(rx_queue);
+    }
+    if (tx_queue) {
+        xQueueReset(tx_queue);
+    }
+    
+    // Reinitialize with saved configuration
+    initialized = false;
+    if (init(saved_bitrate, NormalMode)) {
+        CAN_DEBUG_INFO("TWAI driver restart successful after %lu restarts", (unsigned long)restart_count);
+        update_error_stats(0x00); // Clear error state
+    } else {
+        CAN_DEBUG_ERROR("TWAI driver restart failed - interface may be unusable");
+    }
+    
+    restart_in_progress = false;
 }
 
 #endif // HAL_NUM_CAN_IFACES > 0
