@@ -834,6 +834,13 @@ class ESP32HWDef(hwdef.HWDef):
             # Keep listen-only DOM fix disabled for performance (already in target config)
             # CONFIG_TWAI_ERRATA_FIX_LISTEN_ONLY_DOM=n
         
+        # UHCI (UART-DMA) configuration for high-speed serial communication
+        # Only enable on chips that support it (ESP32-S3 supports, ESP32 classic does not)
+        if self.mcu.upper() == 'ESP32S3' and self.serial_pins:
+            config_lines.append("# UHCI (UART-DMA) for high-speed MAVLink/CRSF communication")
+            config_lines.append("CONFIG_UHCI_ISR_HANDLER_IN_IRAM=y")
+            config_lines.append("CONFIG_UHCI_ISR_CACHE_SAFE=y")
+        
         return config_lines
 
     def write_esp_idf_config(self, filename="sdkconfig.board"):
