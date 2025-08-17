@@ -772,9 +772,16 @@ class ESP32HWDef(hwdef.HWDef):
         else:
             self.progress("No PSRAM configured - using ESP-IDF 5.5+ defaults")
         
-        # ESP32 Memory Protection and Debugging Configuration
+        # ESP32 Memory Protection and Debugging Configuration  
         # Check ESP32_DEBUG_MODE define to determine debug vs performance mode
-        debug_mode = self.intdefines.get('ESP32_DEBUG_MODE', '1')  # Default to debug mode for safety
+        # Parse it directly from hwdef content since intdefines may not be populated yet
+        debug_mode = '1'  # Default to debug mode for safety
+        for line in self.hwdef:
+            with open(line, 'r') as f:
+                for content_line in f:
+                    if content_line.strip().startswith('define ESP32_DEBUG_MODE'):
+                        debug_mode = content_line.strip().split()[-1]
+                        break
         
         if debug_mode == '1':
             self.progress("Adding ESP32 memory protection and debugging options (DEBUG MODE)")
@@ -786,6 +793,12 @@ class ESP32HWDef(hwdef.HWDef):
             # Enable heap tracing for memory leak detection
             config_lines.append("CONFIG_HEAP_TRACING=y")
             config_lines.append("CONFIG_HEAP_TRACING_STACK_DEPTH=10")
+            
+            # Enable heap task tracking for detailed memory analysis
+            config_lines.append("CONFIG_HEAP_TASK_TRACKING=y")
+            
+            # Enable frame pointer for better stack traces and debugging
+            config_lines.append("CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y")
             
             # Enable memory corruption detection
             config_lines.append("CONFIG_HEAP_ABORT_WHEN_ALLOCATION_FAILS=y")
@@ -835,9 +848,10 @@ class ESP32HWDef(hwdef.HWDef):
             # CONFIG_TWAI_ERRATA_FIX_LISTEN_ONLY_DOM=n
         
         # UHCI (UART-DMA) configuration for high-speed serial communication
-        # Only enable on chips that support it (ESP32-S3 supports, ESP32 classic does not)
-        if self.mcu.upper() == 'ESP32S3' and self.serial_pins:
+        # Only enable on chips that support it (checked via SOC capabilities at runtime)
+        if self.serial_pins:
             config_lines.append("# UHCI (UART-DMA) for high-speed MAVLink/CRSF communication")
+            config_lines.append("# Enabled conditionally based on SOC_UHCI_SUPPORTED capability")
             config_lines.append("CONFIG_UHCI_ISR_HANDLER_IN_IRAM=y")
             config_lines.append("CONFIG_UHCI_ISR_CACHE_SAFE=y")
         

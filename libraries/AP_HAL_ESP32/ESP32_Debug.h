@@ -71,3 +71,14 @@
         default: break; \
     } \
 } while(0)
+
+// Heap monitoring functions for debug builds
+#if !ESP32_DEBUG_DISABLED && ESP32_DEBUG_MODE
+void esp32_debug_init_heap_monitoring(void);
+void esp32_debug_print_heap_stats(void);
+void esp32_debug_heap_monitor_task(void);
+#else
+#define esp32_debug_init_heap_monitoring() do {} while(0)
+#define esp32_debug_print_heap_stats() do {} while(0)
+#define esp32_debug_heap_monitor_task() do {} while(0)
+#endif

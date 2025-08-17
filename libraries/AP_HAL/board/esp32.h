@@ -21,6 +21,17 @@
 // access instead of direct struct field access, avoiding alignment issues.
 #define ESP32_MAVLINK_OVERRIDE_APPLIED 1
 
+// UHCI (UART-DMA) configuration - conditionally enable based on SOC capabilities
+#ifdef SOC_UHCI_SUPPORTED
+#if SOC_UHCI_SUPPORTED
+#define AP_HAL_ESP32_UHCI_SUPPORTED 1
+#else
+#define AP_HAL_ESP32_UHCI_SUPPORTED 0
+#endif
+#else
+#define AP_HAL_ESP32_UHCI_SUPPORTED 0
+#endif
+
 // Board-specific configuration now handled automatically by hwdef.h
 // Generated during build process by esp32_hwdef.py
 #define HAL_BOARD_NAME "ESP32"
