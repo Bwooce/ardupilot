@@ -52,16 +52,13 @@
 #include "malloc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "freertos/xtensa_api.h"
+#include <xtensa_api.h>
 #include "freertos/task.h"
 #include "freertos/ringbuf.h"
 #include "soc/dport_reg.h"
 #include "esp_pm.h"
 #include "soc/soc_memory_layout.h"
-//#include "hal/i2c_hal.h"
-#include "soc/i2c_periph.h"
 #include "driver/i2c.h"
-#include "driver/periph_ctrl.h"
 #include "lwip/netdb.h"
 #include "i2c_sw.h"
 

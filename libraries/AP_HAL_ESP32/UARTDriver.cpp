@@ -56,29 +56,6 @@ static const UARTDesc uart_pins[] = {HAL_ESP32_UART_DEVICES};
 // 
 // This replaces the previous hardcoded 'uart_num == 0' logic with proper detection:
 // - CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG: Console uses USB Serial/JTAG (CDC device)
-// - CONFIG_ESP_CONSOLE_UART: Console uses traditional UART with external USB-UART bridge
-// - CONFIG_ESP_CONSOLE_UART_NUM: Specifies which UART number is used for console
-//
-static bool is_console_uart(uint8_t uart_num) {
-#ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-    // Console is configured to use USB Serial/JTAG CDC interface
-    // Check if this UART corresponds to the console UART
-    #ifdef CONFIG_ESP_CONSOLE_UART_NUM
-        return (uart_num == CONFIG_ESP_CONSOLE_UART_NUM);
-    #else
-        // Default console UART is typically UART0 on ESP32-S3
-        return (uart_num == 0);
-    #endif
-#elif defined(CONFIG_ESP_CONSOLE_UART) || defined(CONFIG_ESP_CONSOLE_UART_DEFAULT)
-    // Console is configured for regular UART - no USB Serial/JTAG usage
-    // All UARTs use standard hardware UART interfaces
-    return false;
-#else
-    // Fallback - assume UART0 might be console (for older ESP-IDF versions)
-    return (uart_num == 0);
-#endif
-}
-
 // Protocol-based mutex type selection - determines if a UART needs non-recursive mutexes
 // Non-recursive mutexes prevent deadlock during atomic packet transmission
 // for protocols that require strict serialization (MAVLink, CRSF)
@@ -106,7 +83,14 @@ UARTDriver::UARTDriver(uint8_t serial_num)
 {
     _initialized = false;
     uart_num = serial_num;
+#ifdef HAL_ESP32_USE_USB_CONSOLE
+    // When USB console is explicitly requested, use USB-Serial/JTAG for SERIAL0
+    // This avoids UART0 drops when no external UART is connected
+    _is_usb_console = (serial_num == 0);
+#else
+    // Default behavior - check if this UART is the ESP-IDF console
     _is_usb_console = is_console_uart(serial_num);
+#endif
     
     // ESP log level will be controlled by ESP32_DEBUG_LEVEL parameter
     // Default to warning level for UART drops and flow control until parameter is loaded
@@ -116,6 +100,10 @@ UARTDriver::UARTDriver(uint8_t serial_num)
 
 void UARTDriver::vprintf(const char *fmt, va_list ap)
 {
+    // DISABLED: Console mutex causing complete system lockup during early boot
+    // The mutex was being initialized/taken before console was ready
+    // TODO: Implement proper console synchronization after system is fully initialized
+    
     // Use standard ArduPilot vprintf implementation for all UARTs
     // ESP-IDF logging is now handled separately at the system level
     AP_HAL::UARTDriver::vprintf(fmt, ap);

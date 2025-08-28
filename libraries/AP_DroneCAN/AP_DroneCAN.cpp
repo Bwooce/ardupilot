@@ -323,12 +323,17 @@ bool AP_DroneCAN::add_interface(AP_HAL::CANIface* can_iface)
 
 void AP_DroneCAN::init(uint8_t driver_index, bool enable_filters)
 {
+    hal.console->printf("\n=======================================\n");
+    hal.console->printf("DroneCAN::init STARTING! driver_index=%d, enable_filters=%d\n", driver_index, enable_filters);
+    hal.console->printf("=======================================\n");
     if (driver_index != _driver_index) {
         debug_dronecan(AP_CANManager::LOG_ERROR, "DroneCAN: init called with wrong driver_index");
+        hal.console->printf("DroneCAN: WRONG driver_index! expected %d, got %d\n", _driver_index, driver_index);
         return;
     }
     if (_initialized) {
         debug_dronecan(AP_CANManager::LOG_ERROR, "DroneCAN: init called more than once\n\r");
+        hal.console->printf("DroneCAN: Already initialized!\n");
         return;
     }
     uint8_t node = _dronecan_node;
@@ -367,10 +372,22 @@ void AP_DroneCAN::init(uint8_t driver_index, bool enable_filters)
     memcpy(node_info_rsp.hardware_version.unique_id, unique_id, uid_len);
 
     //Start Servers
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGI("DRONECAN", "About to init DNA server, pool_size=%u", (unsigned)_pool_size);
+#endif
+    hal.console->printf("DroneCAN: About to init DNA server, pool_size=%u\n", (unsigned)_pool_size);
     if (!_dna_server.init(unique_id, uid_len, node)) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        ESP_LOGE("DRONECAN", "FAILED to start DNA Server");
+#endif
+        hal.console->printf("DroneCAN: FAILED to start DNA Server\n");
         debug_dronecan(AP_CANManager::LOG_ERROR, "DroneCAN: Failed to start DNA Server\n\r");
         return;
     }
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGI("DRONECAN", "DNA Server started successfully");
+#endif
+    hal.console->printf("DroneCAN: DNA Server started successfully\n");
 
     // Roundup all subscribers from supported drivers
     bool subscribed = true;
@@ -534,6 +551,22 @@ void AP_DroneCAN::loop(void)
         // ensure that the DroneCAN thread cannot completely saturate
         // the CPU, preventing low priority threads from running
         hal.scheduler->delay_microseconds(100);
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // Debug: Track how often we're calling process
+        static uint32_t process_count = 0;
+        static uint32_t last_process_report = 0;
+        process_count++;
+        
+        uint32_t now = AP_HAL::millis();
+        if (now - last_process_report > 5000) {
+            if (process_count > 5000) {
+                ESP_LOGE("DRONECAN", "Loop called process() %lu times in 5s!", process_count);
+            }
+            process_count = 0;
+            last_process_report = now;
+        }
+#endif
 
         canard_iface.process(1);
 
@@ -845,13 +878,13 @@ void AP_DroneCAN::SRV_send_himark(void)
 
 void AP_DroneCAN::SRV_send_esc(void)
 {
-#if CAN_LOGLEVEL >= 5
+#if 0  // Temporarily disabled for debugging node allocation
     static uint32_t esc_send_call_count = 0;
     static uint32_t last_esc_log_ms = 0;
     esc_send_call_count++;
     uint32_t now_ms = AP_HAL::millis();
-    if (now_ms - last_esc_log_ms >= 10000) {  // Log every 10 seconds instead of every second
-        printf("DroneCAN: SRV_send_esc() called %lu times in last 10s\n", (unsigned long)esc_send_call_count);
+    if (now_ms - last_esc_log_ms >= 60000) {  // Log every 60 seconds for reduced spam
+        printf("DroneCAN: SRV_send_esc() called %lu times in last minute\n", (unsigned long)esc_send_call_count);
         esc_send_call_count = 0;
         last_esc_log_ms = now_ms;
     }
@@ -969,13 +1002,13 @@ void AP_DroneCAN::SRV_push_servos()
 {
     WITH_SEMAPHORE(SRV_sem);
     
-#if CAN_LOGLEVEL >= 3
+#if 0  // Temporarily disabled for debugging node allocation
     static uint32_t push_count = 0;
     static uint32_t last_log_ms = 0;
     push_count++;
     uint32_t now_ms = AP_HAL::millis();
-    if (now_ms - last_log_ms >= 1000) {  // Log every second
-        printf("DroneCAN: SRV_push_servos() called %lu times in last second\n", push_count);
+    if (now_ms - last_log_ms >= 60000) {  // Log every 60 seconds
+        printf("DroneCAN: SRV_push_servos() called %lu times in last minute\n", push_count);
         push_count = 0;
         last_log_ms = now_ms;
     }
@@ -1686,7 +1719,23 @@ void AP_DroneCAN::handle_debug(const CanardRxTransfer& transfer, const uavcan_pr
         if (send_mavlink) {
             // when we send as MAVLink it also gets logged locally, so
             // we return to avoid a duplicate
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            // Debug: Check if msg.text.data is valid
+            ESP_LOGE("DRONECAN", "Sending LogMessage as STATUSTEXT: src=%u, text='%.50s'",
+                     transfer.source_node_id, msg.text.data);
+            // Ensure null-termination and check for buffer issues
+            if (msg.text.len > 0 && msg.text.len < 91) {
+                char safe_text[91];
+                memcpy(safe_text, msg.text.data, msg.text.len);
+                safe_text[msg.text.len] = '\0';
+                GCS_SEND_TEXT(mavlink_level, "CAN[%u] %s", transfer.source_node_id, safe_text);
+            } else {
+                ESP_LOGE("DRONECAN", "Invalid LogMessage text len=%u", msg.text.len);
+                GCS_SEND_TEXT(mavlink_level, "CAN[%u] (invalid text)", transfer.source_node_id);
+            }
+#else
             GCS_SEND_TEXT(mavlink_level, "CAN[%u] %s", transfer.source_node_id, msg.text.data);
+#endif
             return;
         }
     }

@@ -86,7 +86,7 @@ public:
     static const int STORAGE_PRIO = 4;
 
     static const int TIMER_SS     = 1024*3;
-    static const int MAIN_SS      = 1024*5;
+    static const int MAIN_SS      = 1024*8;  // Increased from 5KB to 8KB
     static const int RCIN_SS      = 1024*3;
     static const int RCOUT_SS     = 1024*1.5;
     static const int WIFI_SS1     = 1024*2.25;

@@ -299,6 +299,9 @@ extern AP_Vehicle& vehicle;
  */
 void AP_Vehicle::setup()
 {
+    hal.console->printf("\n========================================\n");
+    hal.console->printf("AP_Vehicle::setup() STARTING!\n");
+    hal.console->printf("========================================\n");
     
     // load the default values of variables listed in var_info[]
     AP_Param::setup_sketch_defaults();
@@ -406,10 +409,16 @@ void AP_Vehicle::setup()
     stats.init();
 #endif
 
+    hal.console->printf("AP_Vehicle: BoardConfig.init() starting\n");
     BoardConfig.init();
+    hal.console->printf("AP_Vehicle: BoardConfig.init() completed\n");
 
 #if HAL_CANMANAGER_ENABLED
+    hal.console->printf("AP_Vehicle: HAL_CANMANAGER_ENABLED is true, calling can_mgr.init()\n");
     can_mgr.init();
+    hal.console->printf("AP_Vehicle: can_mgr.init() completed\n");
+#else
+    hal.console->printf("AP_Vehicle: HAL_CANMANAGER_ENABLED is false, skipping can_mgr.init()\n");
 #endif
 
 #if HAL_LOGGING_ENABLED

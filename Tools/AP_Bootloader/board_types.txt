@@ -320,7 +320,8 @@ AP_HW_JFB200                         1200
 
 AP_HW_ESP32_PERIPH                   1205
 AP_HW_ESP32S3_PERIPH                 1206
-
+AP_HW_ESP32_LILYGO_TCONNECT         1207
+AP_HW_ESP32_LILYGO_T2CAN            1208
 AP_HW_CSKY-PMU                       1212
 
 AP_HW_MUPilot                        1222

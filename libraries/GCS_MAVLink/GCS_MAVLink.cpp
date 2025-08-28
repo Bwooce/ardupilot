@@ -194,12 +194,63 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
         // Check for obviously invalid message IDs that indicate corruption  
         if (msgid > 50000) { // Most valid MAVLink message IDs are < 50000
             static bool first_corruption = true;
+            static uint32_t last_corrupt_time = 0;
+            static uint8_t corruption_count = 0;
+            uint32_t now = AP_HAL::millis();
+            
+            corruption_count++;
             
             // Use both ESP-IDF logging AND hal.console to ensure visibility
-            ESP_LOGE("MAVLINK", "=== CORRUPTED MAVLink MESSAGE DETECTED ===");
+            ESP_LOGE("MAVLINK", "=== CORRUPTION #%d (dt=%lums) ===", 
+                     corruption_count, (unsigned long)(now - last_corrupt_time));
             ESP_LOGE("MAVLINK", "Channel: %d, Length: %d, Message ID: %lu", chan, len, (unsigned long)msgid);
             ESP_LOGE("MAVLINK", "Raw header: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
                      buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9]);
+            
+            // Check for specific corruption patterns
+            if (buf[0] == 0xFD) {
+                // Valid MAVLink v2 start
+                uint32_t extracted_msgid = buf[7] | (buf[8] << 8) | (buf[9] << 16);
+                ESP_LOGE("MAVLINK", "Extracted msgid from buf[7-9]: %lu (0x%06lx)", 
+                         (unsigned long)extracted_msgid, (unsigned long)extracted_msgid);
+                
+                // Check if buffer might contain overlapping messages
+                for (int i = 1; i < len && i < 30; i++) {
+                    if (buf[i] == 0xFD) {
+                        ESP_LOGE("MAVLINK", "WARNING: Found 0xFD at offset %d - possible buffer overlap!", i);
+                        // Print surrounding bytes for context
+                        if (i > 2 && i < len - 2) {
+                            ESP_LOGE("MAVLINK", "Context: [%d]=%02x %02x [%02x] %02x %02x", 
+                                     i, buf[i-2], buf[i-1], buf[i], buf[i+1], buf[i+2]);
+                        }
+                    }
+                }
+                
+                // Check if this looks like ASCII text corruption
+                bool looks_like_text = true;
+                for (int i = 7; i < 10 && looks_like_text; i++) {
+                    if (buf[i] < 0x20 || buf[i] > 0x7E) {
+                        looks_like_text = false;
+                    }
+                }
+                if (looks_like_text) {
+                    ESP_LOGE("MAVLINK", "Msgid bytes look like ASCII: '%c%c%c' (0x%02x%02x%02x)",
+                             buf[7], buf[8], buf[9], buf[7], buf[8], buf[9]);
+                }
+                
+                // Check for partial overwrite pattern
+                if ((msgid & 0xFF) == 0xFD) {
+                    ESP_LOGE("MAVLINK", "Pattern: msgid LSB is 0xFD - likely buffer overwrite");
+                }
+            }
+            
+            // Check UART buffer status when corruption detected
+            if (mavlink_comm_port[chan]) {
+                uint32_t txspace = mavlink_comm_port[chan]->txspace();
+                ESP_LOGE("MAVLINK", "Ch%d TX buffer space: %lu bytes", chan, (unsigned long)txspace);
+            }
+            
+            last_corrupt_time = now;
             
             hal.console->printf("\n=== ESP32: CORRUPTED MAVLink MESSAGE DETECTED ===\n");
             hal.console->printf("Channel: %d, Length: %d, Message ID: %lu\n", chan, len, (unsigned long)msgid);
@@ -243,6 +294,23 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
     
     // Use atomic packet writing to prevent interleaving with debug output
     size_t written = 0;
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Track timing between messages
+    static uint32_t last_send_time[MAVLINK_COMM_NUM_BUFFERS] = {};
+    static uint32_t rapid_send_count[MAVLINK_COMM_NUM_BUFFERS] = {};
+    uint32_t now = AP_HAL::micros();
+    uint32_t dt = now - last_send_time[chan];
+    
+    if (dt < 100 && last_send_time[chan] != 0) { // Less than 100us between sends
+        rapid_send_count[chan]++;
+        if (rapid_send_count[chan] % 100 == 0) {
+            ESP_LOGE("MAVLINK", "Ch%d: %lu rapid sends (dt<%luus)", 
+                     chan, (unsigned long)rapid_send_count[chan], (unsigned long)dt);
+        }
+    }
+    last_send_time[chan] = now;
+#endif
     
     // Use standard write() - all platforms handle atomicity correctly
     written = mavlink_comm_port[chan]->write(buf, len);

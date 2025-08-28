@@ -46,3 +46,11 @@ CONFIG_MCPWM_SUPPRESS_DEPRECATE_WARN=y
 CONFIG_RMT_SUPPRESS_DEPRECATE_WARN=y
 # SPIRAM Configuration - ESP-IDF 5.5+ handles SPIRAM automatically via detection
 # No manual SPIRAM configuration needed - removed deprecated symbols
+
+# Configure ESP-IDF to use USB-Serial/JTAG as primary console
+# This prevents UART0 buffer overflow when no external UART is connected
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+# Disable UART0 console to prevent dropped writes
+CONFIG_ESP_CONSOLE_UART=n
+CONFIG_ESP_CONSOLE_UART_DEFAULT=n

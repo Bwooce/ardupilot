@@ -54,6 +54,16 @@ private:
 
     QueueHandle_t rx_queue;
     QueueHandle_t tx_queue;
+    
+    // Track transmitted frames to filter self-reception
+    struct TxTracker {
+        uint32_t can_id;
+        uint64_t timestamp_us;
+        bool loopback_requested;
+    };
+    static constexpr uint8_t TX_TRACKER_SIZE = 32;
+    TxTracker tx_tracker[TX_TRACKER_SIZE];
+    uint8_t tx_tracker_index = 0;
 };
 
 } // namespace ESP32

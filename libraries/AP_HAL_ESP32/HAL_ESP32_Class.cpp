@@ -34,6 +34,12 @@
 #include "Storage.h"
 #include "AnalogIn.h"
 #include "Util.h"
+#ifndef HAL_NUM_CAN_IFACES
+#error HAL_NUM_CAN_IFACES not defined
+#endif
+#if HAL_NUM_CAN_IFACES == 0
+#error HAL_NUM_CAN_IFACES is zero
+#endif
 #if HAL_NUM_CAN_IFACES > 0
 #include "CANIface.h"
 #if HAL_NUM_CAN_IFACES > 1
@@ -141,6 +147,8 @@ HAL_ESP32::HAL_ESP32() :
 #endif
     )
 {
+    // NOTE: Cannot use ESP_LOG here - constructor runs before ESP-IDF initialization!
+    // Any logging here will cause system to hang before app_main()
 #if HAL_NUM_CAN_IFACES > 0
     // Initialize CAN driver array based on configuration
     for (uint8_t i = 0; i < HAL_NUM_CAN_IFACES; i++) {
@@ -149,6 +157,7 @@ HAL_ESP32::HAL_ESP32() :
     
     // CAN interface 0: Native TWAI (if available)
     if (HAL_NUM_CAN_IFACES > 0) {
+        // Cannot use ESP_LOG here - constructor runs before ESP-IDF initialization!
         canDrivers[0] = new ESP32::CANIface(0);
     }
     

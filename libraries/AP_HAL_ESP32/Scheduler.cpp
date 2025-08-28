@@ -98,8 +98,10 @@ void Scheduler::init()
     // pin main thread to Core 0, and we'll also pin other heavy-tasks to core 1, like wifi-related.
     if (xTaskCreatePinnedToCore(_main_thread, "APM_MAIN", Scheduler::MAIN_SS, this, Scheduler::MAIN_PRIO, &_main_task_handle,FASTCPU) != pdPASS) {
     //if (xTaskCreate(_main_thread, "APM_MAIN", Scheduler::MAIN_SS, this, Scheduler::MAIN_PRIO, &_main_task_handle) != pdPASS) {
+        ESP_LOGE("SCHEDULER", "FAILED to create task _main_thread on FASTCPU");
         hal.console->printf("FAILED to create task _main_thread on FASTCPU\n");
     } else {
+    	ESP_LOGI("SCHEDULER", "OK created task _main_thread on FASTCPU");
     	hal.console->printf("OK created task _main_thread on FASTCPU\n");
     }
 
@@ -559,7 +561,9 @@ void Scheduler::print_main_loop_rate(void)
 
 void IRAM_ATTR Scheduler::_main_thread(void *arg)
 {
+    ESP_LOGI("MAIN", "===========================================");
     ESP_LOGI("MAIN", "ArduPilot main thread starting");
+    ESP_LOGI("MAIN", "===========================================");
 #ifdef SCHEDDEBUG
     printf("%s:%d start\n", __PRETTY_FUNCTION__, __LINE__);
 #endif
@@ -577,7 +581,17 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
     hal.rcout->init();
 
     ESP_LOGI("MAIN", "Calling ArduPilot setup() - this may take a while...");
-    sched->callbacks->setup();
+    ESP_LOGI("SCHEDULER", "========================================");
+    ESP_LOGI("SCHEDULER", "About to call callbacks->setup()");
+    ESP_LOGI("SCHEDULER", "callbacks=%p", sched->callbacks);
+    ESP_LOGI("SCHEDULER", "========================================");
+    if (sched->callbacks != nullptr) {
+        ESP_LOGI("SCHEDULER", "Callbacks valid, calling setup()");
+        sched->callbacks->setup();
+        ESP_LOGI("SCHEDULER", "callbacks->setup() returned");
+    } else {
+        ESP_LOGE("SCHEDULER", "ERROR: callbacks is NULL!");
+    }
     ESP_LOGI("MAIN", "ArduPilot setup completed successfully");
     
     // Re-apply ESP-IDF log levels after parameter loading in setup()

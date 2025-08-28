@@ -167,3 +167,19 @@ define CAN_LOGLEVEL 3
 
 # LCD1602 I2C Display Support
 define HAL_DISPLAY_ENABLED 1
+
+# RemoteID Support - Enable for ground vehicle/obstacle beacon use
+define AP_OPENDRONEID_ENABLED 1
+define AP_DRONECAN_SEND_GPS 1
+# For ground/stationary use, configure as:
+# - RID_TYPE = 2 (MAV_ODID_CATEGORY_EU for ground obstacle)
+# - RID_UA_TYPE = 15 (MAV_ODID_UA_TYPE_OTHER for non-aircraft)
+# - Or use RID_UA_TYPE = 0 (MAV_ODID_UA_TYPE_NONE for ground station/beacon)
+
+# Board ID for firmware checking
+APJ_BOARD_ID 1208
+
+# USB Console Configuration  
+# Use USB-Serial/JTAG for SERIAL0 instead of UART0 to avoid dropped messages
+# This prevents UART0 buffer overflows when no external UART is connected
+define HAL_ESP32_USE_USB_CONSOLE 1

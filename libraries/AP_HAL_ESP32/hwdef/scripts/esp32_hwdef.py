@@ -204,6 +204,12 @@ class ESP32HWDef(hwdef.HWDef):
             self.env_vars['MCU'] = self.mcu
             # Initialize hardware constraints now that we know the MCU
             self.init_hardware_constraints()
+        elif line.startswith("APJ_BOARD_ID"):
+            parts = line.split()
+            if len(parts) >= 2:
+                # Store the board ID as an integer define
+                self.intdefines['APJ_BOARD_ID'] = parts[1]
+                self.progress("Found APJ_BOARD_ID: %s" % parts[1])
         elif line.startswith("PSRAM_SIZE"):
             parts = line.split()
             if len(parts) >= 2:
@@ -280,6 +286,16 @@ class ESP32HWDef(hwdef.HWDef):
             elif pin_name == 'APA102_CLOCK_PIN':
                 if self.validate_pin_assignment(pin_value, 'LED_CLOCK', 'APA102'):
                     self.led_pins['apa102_clock'] = pin_value
+            elif pin_name == 'APA102_NUM_LEDS':
+                # Number of APA102 LEDs in the chain
+                try:
+                    num_leds = int(pin_value)
+                    if 1 <= num_leds <= 16:  # Reasonable range
+                        self.led_pins['apa102_num_leds'] = num_leds
+                    else:
+                        print(f"Warning: APA102_NUM_LEDS value {num_leds} out of range (1-16), using default")
+                except ValueError:
+                    print(f"Warning: Invalid APA102_NUM_LEDS value '{pin_value}', using default")
             
             # Boot/system pins
             elif pin_name == 'KEY_BOOT':
@@ -443,6 +459,13 @@ class ESP32HWDef(hwdef.HWDef):
             f.write("#undef HAL_USE_ADC\n")
             f.write("#define HAL_USE_ADC 0\n")
         
+        # Automatically disable GYROFFT when DSP is disabled (GYROFFT requires DSP)
+        if 'HAL_WITH_DSP' in self.intdefines and self.intdefines['HAL_WITH_DSP'] == '0':
+            if 'HAL_GYROFFT_ENABLED' not in self.intdefines:
+                self.progress("HAL_WITH_DSP is 0, automatically disabling HAL_GYROFFT_ENABLED")
+                f.write("#undef HAL_GYROFFT_ENABLED\n")
+                f.write("#define HAL_GYROFFT_ENABLED 0\n")
+        
         # Ensure GCS support is enabled by default for ESP32 (required after board header removal)
         if 'HAL_GCS_ENABLED' not in self.intdefines:
             f.write("#undef HAL_GCS_ENABLED\n")
@@ -509,6 +532,8 @@ class ESP32HWDef(hwdef.HWDef):
                 f.write(f"#define HAL_APA102_DATA_PIN {self.led_pins['apa102_data']}\n")
             if 'apa102_clock' in self.led_pins:
                 f.write(f"#define HAL_APA102_CLOCK_PIN {self.led_pins['apa102_clock']}\n")
+            if 'apa102_num_leds' in self.led_pins:
+                f.write(f"#define HAL_APA102_NUM_LEDS {self.led_pins['apa102_num_leds']}\n")
             f.write("\n")
         
         # Only generate RCOUT if pins are defined (empty for T-Connect)

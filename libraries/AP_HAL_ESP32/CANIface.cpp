@@ -6,6 +6,7 @@
 #include <AP_HAL/AP_HAL.h>
 #include "driver/gpio.h"
 #include "driver/twai.h"
+#include "esp_debug_helpers.h"  // For esp_backtrace_print()
 
 extern const AP_HAL::HAL& hal;
 
@@ -27,8 +28,11 @@ using namespace ESP32;
 CANIface::CANIface(uint8_t instance) :
     ESP32_CANBase(instance),
     initialized(false),
-    current_bitrate(500000)
+    current_bitrate(500000),
+    tx_tracker_index(0)
 {
+    // Initialize tx_tracker array
+    memset(tx_tracker, 0, sizeof(tx_tracker));
 }
 
 bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
@@ -127,7 +131,8 @@ bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
 
     CAN_DEBUG_INFO("Creating RX and TX tasks...");
     xTaskCreate(rx_task, "can_rx", 4096, this, 5, NULL);
-    xTaskCreate(tx_task, "can_tx", 4096, this, 5, NULL);
+    // Higher priority for TX task to reduce latency in DNA responses
+    xTaskCreate(tx_task, "can_tx", 4096, this, 6, NULL);
 
     initialized = true;
     CAN_DEBUG_INFO("Interface %d initialization complete!", instance);
@@ -140,6 +145,7 @@ int16_t CANIface::send(const AP_HAL::CANFrame &frame, uint64_t tx_deadline, AP_H
     if (!initialized) {
         return -1;
     }
+
 
     CanTxItem tx_item;
     tx_item.frame = frame;
@@ -242,8 +248,36 @@ void CANIface::rx_task(void *arg)
         CanRxItem rx_item;
         rx_item.timestamp_us = AP_HAL::micros64();
         rx_item.frame.id = message.identifier;
+        if (message.extd) {
+            rx_item.frame.id |= AP_HAL::CANFrame::FlagEFF;  // Set extended frame flag
+        }
         rx_item.frame.dlc = message.data_length_code;
         memcpy(rx_item.frame.data, message.data, message.data_length_code);
+        rx_item.flags = 0;
+        
+        // Check if this is a self-transmitted frame
+        bool is_self_tx = false;
+        bool loopback_requested = false;
+        for (uint8_t i = 0; i < TX_TRACKER_SIZE; i++) {
+            if (iface->tx_tracker[i].can_id == message.identifier &&
+                iface->tx_tracker[i].timestamp_us != 0) {
+                is_self_tx = true;
+                loopback_requested = iface->tx_tracker[i].loopback_requested;
+                iface->tx_tracker[i].timestamp_us = 0; // Clear entry
+                break;
+            }
+        }
+        
+        if (is_self_tx && !loopback_requested) {
+            // Self-transmitted frame without loopback - drop it
+            ESP_LOGW("CAN_RX", "SELF-TX detected! Dropping frame ID=0x%08X", 
+                     (unsigned)message.identifier);
+            continue;
+        }
+        
+        if (is_self_tx && loopback_requested) {
+            rx_item.flags = AP_HAL::CANIface::Loopback;
+        }
 
         // Update statistics
         iface->update_rx_stats();
@@ -291,17 +325,68 @@ void CANIface::tx_task(void *arg)
         CAN_DEBUG_VERBOSE("TX: ID=0x%08X DLC=%d DATA=[%s]", (unsigned)tx_item.frame.id, tx_item.frame.dlc, data_str);
 
         twai_message_t message;
-        message.identifier = tx_item.frame.id;
+        memset(&message, 0, sizeof(message));
+        message.identifier = tx_item.frame.id & AP_HAL::CANFrame::MaskExtID;  // Use only 29-bit ID
         message.data_length_code = tx_item.frame.dlc;
         message.extd = 1;  // Enable 29-bit extended CAN frames (required for DroneCAN)
         message.rtr = 0;   // Data frame, not remote transmission request
+        message.ss = 0;    // Allow retransmission
+        message.self = 0;  // Not self-reception
         memcpy(message.data, tx_item.frame.data, tx_item.frame.dlc);
+        
+        // Debug CAN ID issues
+        // DroneCAN extended frame format: 
+        // Bits 28-24: Priority (5 bits)
+        // Bits 23-8: Message type (16 bits) 
+        // Bit 7: Service not message
+        // Bits 6-0: Source node ID (7 bits)
+        //uint8_t priority = (message.identifier >> 24) & 0x1F;  // Unused for now
+        //uint16_t msg_type = (message.identifier >> 8) & 0xFFFF;  // Unused after removing type 342 debug
+        //bool is_service = (message.identifier >> 7) & 0x01;  // Unused for now
+        //uint8_t source_node = message.identifier & 0x7F;  // Unused after removing type 342 debug
+        
+        // WAIT - The identifier might already be wrong! Let's check the raw frame
+        if (message.identifier == 0x1F01560A) {
+            static uint32_t raw_check_count = 0;
+            if (raw_check_count++ < 5) {
+                ESP_LOGE("CAN_TX", "RAW CHECK: tx_item.frame.id=0x%08X vs message.identifier=0x%08X",
+                         (unsigned)tx_item.frame.id, (unsigned)message.identifier);
+                ESP_LOGE("CAN_TX", "  Frame: extended=%d, id=0x%08X, dlc=%d",
+                         tx_item.frame.isExtended(), (unsigned)tx_item.frame.id, tx_item.frame.dlc);
+            }
+        }
+        
+        // Debug excessive message sending
+        static uint32_t total_msg_count = 0;
+        static uint32_t last_total_report = 0;
+        total_msg_count++;
+        
+        uint32_t now = AP_HAL::millis();
+        if (now - last_total_report > 5000) { // Report every 5 seconds
+            if (total_msg_count > 1000) {
+                ESP_LOGE("CAN_TX", "ERROR: Sent %lu total CAN messages in 5 sec!", total_msg_count);
+                // Something is flooding the bus
+            }
+            total_msg_count = 0;
+            last_total_report = now;
+        }
+        
+        
+        // Commented out verbose logging
 
         // Single transmission attempt for DroneCAN compliance
         // DroneCAN handles reliability at protocol layer, HAL retries violate timing assumptions
-        const TickType_t timeout_ms = 1; // Minimal timeout for real-time performance
+        const TickType_t timeout_ms = 10; // Allow sufficient time for transmission
         
         esp_err_t result = twai_transmit(&message, pdMS_TO_TICKS(timeout_ms));
+        
+        if (result == ESP_OK) {
+            // Track for self-reception filtering
+            iface->tx_tracker[iface->tx_tracker_index].can_id = message.identifier;
+            iface->tx_tracker[iface->tx_tracker_index].timestamp_us = AP_HAL::micros64();
+            iface->tx_tracker[iface->tx_tracker_index].loopback_requested = (tx_item.flags & AP_HAL::CANIface::Loopback) != 0;
+            iface->tx_tracker_index = (iface->tx_tracker_index + 1) % TX_TRACKER_SIZE;
+        }
         
         // Update statistics and handle errors
         iface->update_tx_stats(result == ESP_OK);
@@ -310,7 +395,14 @@ void CANIface::tx_task(void *arg)
             // Handle specific TWAI error conditions
             if (result == ESP_ERR_TIMEOUT) {
                 // TX timeout - bus may be congested or disconnected
-                CAN_DEBUG_WARN("TX timeout on message ID=0x%08X", (unsigned)tx_item.frame.id);
+                // Only log occasionally to reduce spam when bus is disconnected
+                static uint32_t timeout_count = 0;
+                timeout_count++;
+                if (timeout_count <= 5 || (timeout_count % 100) == 0) {
+                    CAN_DEBUG_WARN("TX timeout on message ID=0x%08X (total timeouts=%lu)", 
+                                   (unsigned)(tx_item.frame.id & AP_HAL::CANFrame::MaskExtID), 
+                                   (unsigned long)timeout_count);
+                }
             } else if (result == ESP_FAIL) {
                 // TX failed - check bus state
                 twai_status_info_t twai_status;
@@ -325,7 +417,14 @@ void CANIface::tx_task(void *arg)
                         // Note: Recovery is automatic in TWAI driver
                     }
                 }
-                CAN_DEBUG_ERROR("Failed to transmit message ID=0x%08X, error=%d", (unsigned)tx_item.frame.id, result);
+                // Reduce log spam - only log occasionally
+                static uint32_t fail_count = 0;
+                fail_count++;
+                if (fail_count <= 5 || (fail_count % 100) == 0) {
+                    CAN_DEBUG_ERROR("Failed to transmit message ID=0x%08X, error=%d (count=%lu)", 
+                                    (unsigned)(tx_item.frame.id & AP_HAL::CANFrame::MaskExtID), 
+                                    result, (unsigned long)fail_count);
+                }
             } else if (result == ESP_ERR_INVALID_STATE) {
                 // TWAI driver in invalid state - likely electrical disconnection
                 // This requires full driver restart to recover
@@ -339,7 +438,8 @@ void CANIface::tx_task(void *arg)
             } else {
                 // Other errors
                 iface->update_error_stats(result);
-                CAN_DEBUG_ERROR("Error %d on message ID=0x%08X", result, (unsigned)tx_item.frame.id);
+                CAN_DEBUG_ERROR("Error %d on message ID=0x%08X", result, 
+                                (unsigned)(tx_item.frame.id & AP_HAL::CANFrame::MaskExtID));
             }
         }
     }
@@ -414,6 +514,13 @@ bool CANIface::configure_hw_filters(const CanFilterConfig* filter_configs, uint1
     gpio_num_t rx_pin = (gpio_num_t)HAL_CAN1_RX_PIN;
     
     twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(tx_pin, rx_pin, TWAI_MODE_NORMAL);
+    
+    // ESP-IDF 5.5 configuration
+    g_config.alerts_enabled = TWAI_ALERT_ALL;  // Enable all alerts
+    g_config.clkout_divider = 0;  // No clock output
+    g_config.tx_queue_len = 20;   // Increase TX queue
+    g_config.intr_flags = ESP_INTR_FLAG_LEVEL1;  // Level 1 interrupt
+    
     twai_timing_config_t t_config;
     
     // Use the current bitrate for timing configuration

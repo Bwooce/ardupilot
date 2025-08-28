@@ -59,11 +59,15 @@ void ESP32Params::apply_log_level() {
         case 5:  level = ESP_LOG_VERBOSE; break;  // Level 5: All debug output
         default: level = ESP_LOG_INFO;    break;  // Default to Info
     }
+    level = ESP_LOG_INFO;
     
     // NEVER allow ESP_LOG_NONE to preserve critical logging infrastructure
+    esp_log_level_set("HAL_INIT", ESP_LOG_ERROR);	
     
     // Apply to all ESP32 HAL modules
-    esp_log_level_set("UART_DROP", level);
+    // UART_DROP messages are too spammy and ESP-IDF doesn't distinguish per-UART
+    // Since console drops are expected when debugging is verbose, suppress all UART_DROP
+    esp_log_level_set("UART_DROP", ESP_LOG_NONE);
     esp_log_level_set("UART_TICK", level);
     esp_log_level_set("UART_WRITE_DATA", level);
     esp_log_level_set("UART_HW", level);
@@ -72,12 +76,24 @@ void ESP32Params::apply_log_level() {
     esp_log_level_set("HAL", level);
     esp_log_level_set("SCHED", level);
     
-    // CAN/DroneCAN debugging - use INFO level minimum for visibility, or higher if set
-    esp_log_level_t can_level = (level < ESP_LOG_INFO) ? ESP_LOG_INFO : level;
-    esp_log_level_set("CAN", can_level);
-    esp_log_level_set("CAN_RX", can_level);
-    esp_log_level_set("CAN_TX", can_level);
-    esp_log_level_set("DRONECAN", can_level);
+    // Important initialization messages should always be visible
+    esp_log_level_set("SCHEDULER", ESP_LOG_INFO);
+    esp_log_level_set("CONSOLE", ESP_LOG_INFO);
+    esp_log_level_set("DNA_SERVER", ESP_LOG_INFO);
+    esp_log_level_set("CANMANAGER", ESP_LOG_INFO);
+    esp_log_level_set("GPS", ESP_LOG_INFO);       // GPS detection and status
+    esp_log_level_set("GPS_UART", ESP_LOG_INFO);  // GPS UART communication
+    esp_log_level_set("STATUSTEXT", ESP_LOG_INFO); // STATUSTEXT corruption debugging
+    
+    // CAN/DroneCAN debugging - controlled centrally here
+    // Adjust these levels to control verbosity without changing code
+    esp_log_level_set("CAN", ESP_LOG_WARN);      // Reduce general CAN spam
+    esp_log_level_set("CAN_RX", ESP_LOG_WARN);   // RX is working, reduce spam
+    esp_log_level_set("CAN_TX", ESP_LOG_WARN);   // TX is working, reduce spam
+    esp_log_level_set("CAN_SEND", ESP_LOG_WARN); // Reduce send queue logging
+    esp_log_level_set("DRONECAN", ESP_LOG_INFO); // DroneCAN protocol messages
+    esp_log_level_set("CANARD", ESP_LOG_INFO);   // Canard library messages
+    esp_log_level_set("DNA_SERVER", ESP_LOG_INFO); // Keep DNA server visible
     
     // Apply global default for any unspecified tags
     esp_log_level_set("*", level);
@@ -87,8 +103,11 @@ void ESP32Params::apply_log_level() {
     esp_log_level_set("MAVLINK", ESP_LOG_ERROR);
     esp_log_level_set("MAVLINK_RX", ESP_LOG_ERROR);
     
+    // CRITICAL: Force CAN_RX debugging to work for DroneCAN message decode debugging
+    esp_log_level_set("CAN_RX", ESP_LOG_ERROR);
+    
     // Debug: verify the logging configuration is applied and investigate parameter source
-    printf("ESP32: ESP32_DEBUG_LEVEL param=%d (configured=%d) -> ESP-IDF level=%d (%s), CAN level=%d (%s), MAVLINK=ERROR\n", 
+    printf("ESP32: ESP32_DEBUG_LEVEL param=%d (configured=%d) -> ESP-IDF level=%d (%s), CAN_RX=ERROR, CAN_LOGLEVEL=%d, MAVLINK=ERROR\n", 
            debug_level.get(),
            debug_level.configured(),
            level, 
@@ -97,16 +116,17 @@ void ESP32Params::apply_log_level() {
            level == ESP_LOG_INFO ? "INFO" :
            level == ESP_LOG_DEBUG ? "DEBUG" :
            level == ESP_LOG_VERBOSE ? "VERBOSE" : "UNKNOWN",
-           can_level,
-           can_level == ESP_LOG_ERROR ? "ERROR" :
-           can_level == ESP_LOG_WARN ? "WARN" :
-           can_level == ESP_LOG_INFO ? "INFO" :
-           can_level == ESP_LOG_DEBUG ? "DEBUG" :
-           can_level == ESP_LOG_VERBOSE ? "VERBOSE" : "UNKNOWN");
+           CAN_LOGLEVEL);
     
     // Test if ESP-IDF logging actually works after our configuration
-    ESP_LOGE("MAVLINK", "ESP-IDF logging test after configuration - you should see this!");
+    ESP_LOGE("CAN", "ESP-IDF logging test after configuration - you should see this!");
     printf("ESP32: If you see this printf but not the ESP_LOGE above, ESP-IDF logging is broken\n");
+    
+    // Test CAN logging specifically
+#if CAN_LOGLEVEL >= 4
+    ESP_LOGV("CAN", "CAN debug logging enabled - frame-by-frame logging should work");
+#endif
+    ESP_LOGE("CAN", "CAN basic logging test - you should see this message");
 }
 
 } // namespace ESP32

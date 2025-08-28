@@ -56,8 +56,19 @@ bool Display_HD44780_I2C::hw_init()
         return false;
     }
 
-    // Take I2C bus semaphore
-    _dev->get_semaphore()->take_blocking();
+    // Take I2C bus semaphore with timeout
+    if (!_dev->get_semaphore()->take(100)) {
+        return false;
+    }
+
+    // First check if device is present by trying a simple write
+    uint8_t test_data = HD44780_BACKLIGHT;
+    if (!_dev->transfer(&test_data, 1, nullptr, 0)) {
+        // Device not responding, release semaphore and fail gracefully
+        _dev->get_semaphore()->give();
+        hal.console->printf("HD44780: Display not found at I2C address\n");
+        return false;
+    }
 
     // LCD initialization sequence for HD44780 with I2C backpack
     // Wait for LCD to power up
