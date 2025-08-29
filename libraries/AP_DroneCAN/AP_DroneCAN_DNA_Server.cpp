@@ -723,8 +723,15 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     // CRITICAL: Set the length to what we actually received, not the full array size
     // The encoder will only encode rsp.unique_id.len bytes, not the entire array
     rsp.unique_id.len = rcvd_unique_id_offset;
-    rsp.first_part_of_unique_id = 0; // Clear the flag - we're sending the complete response
+    
+    // Per DroneCAN spec: Echo the first_part flag from the request when responding to partial allocations
+    // Only set to 0 when we're sending the final response with allocated node_id
+    rsp.first_part_of_unique_id = msg.first_part_of_unique_id;
     rsp.node_id = 0; // Will be set if allocation succeeds
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGI("DNA_SERVER", "Preparing response: accumulated_uid_len=%d bytes", rcvd_unique_id_offset);
+#endif
 
     // Check if this looks like a complete UID:
     // - Standard UIDs are 16 bytes, but shorter UIDs are valid
@@ -732,12 +739,21 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     bool uid_looks_complete = (rcvd_unique_id_offset == sizeof(rcvd_unique_id)) ||
                               (!msg.first_part_of_unique_id && rcvd_unique_id_offset > 0);
     
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGI("DNA_SERVER", "UID completeness check: offset=%d, sizeof=%d, first_part=%d, looks_complete=%d",
+             rcvd_unique_id_offset, (int)sizeof(rcvd_unique_id), msg.first_part_of_unique_id, uid_looks_complete);
+#endif
+    
     if (uid_looks_complete) { // full unique ID received, allocate it!
         // we ignore the preferred node ID as it seems nobody uses the feature
         // and we couldn't guarantee it anyway. we will always remember and
         // re-assign node IDs consistently, so the node could send a status
         // with a particular ID once then switch back to no preference for DNA
         rsp.node_id = db.handle_allocation(rcvd_unique_id);
+        
+        // For the final allocation response, always clear first_part flag per spec
+        rsp.first_part_of_unique_id = 0;
+        
         rcvd_unique_id_offset = 0; // reset state for next allocation
         memset(rcvd_unique_id, 0, sizeof(rcvd_unique_id)); // Clear buffer for next allocation
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
@@ -895,7 +911,7 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
 #endif
     );
     
-    ESP_LOGI("DNA_SERVER", "Manual encode returned %lu bytes (expected 8 for 6-byte UID)", encoded_len);
+    ESP_LOGI("DNA_SERVER", "Manual encode returned %lu bytes (expected 7 for 6-byte UID)", encoded_len);
     
     // Log the encoded data to see what we're actually sending
     for (uint32_t i = 0; i < encoded_len && i < 40; i += 8) {
@@ -940,10 +956,53 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     // Non-ESP32 path
 #endif
     
+    // Log what we're about to transmit
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGI("DNA_SERVER", "TRANSMITTING DNA Response:");
+    ESP_LOGI("DNA_SERVER", "  node_id: %d (0x%02X)", rsp.node_id, rsp.node_id);
+    ESP_LOGI("DNA_SERVER", "  first_part_of_unique_id: %d", rsp.first_part_of_unique_id);
+    ESP_LOGI("DNA_SERVER", "  unique_id.len: %d bytes", rsp.unique_id.len);
+    
+    // Log the complete UID being transmitted
+    if (rsp.unique_id.len > 0) {
+        char uid_str[128];
+        int offset = 0;
+        for (int i = 0; i < rsp.unique_id.len && i < 16; i++) {
+            offset += snprintf(uid_str + offset, sizeof(uid_str) - offset, "%02X ", rsp.unique_id.data[i]);
+        }
+        ESP_LOGI("DNA_SERVER", "  unique_id data: %s", uid_str);
+    }
+    
+    // Track what we're actually sending
+    static uint32_t tx_sequence = 0;
+    tx_sequence++;
+    ESP_LOGI("DNA_SERVER", "TX Sequence #%lu: Broadcasting allocation response", tx_sequence);
+#else
+    hal.console->printf("DNA: TRANSMITTING Response: node_id=%d, first_part=%d, uid_len=%d\n",
+                       rsp.node_id, rsp.first_part_of_unique_id, rsp.unique_id.len);
+    if (rsp.unique_id.len > 0) {
+        hal.console->printf("DNA: TX UID data:");
+        for (int i = 0; i < rsp.unique_id.len && i < 16; i++) {
+            hal.console->printf(" %02X", rsp.unique_id.data[i]);
+        }
+        hal.console->printf("\n");
+    }
+#endif
+    
     allocation_pub.broadcast(rsp, false); // never publish allocation message with CAN FD
     
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DNA_SERVER", "RETURNED from allocation_pub.broadcast()");
+    ESP_LOGI("DNA_SERVER", "RETURNED from allocation_pub.broadcast() - TX should be queued");
+    
+    // Log TX status
+    ESP_LOGI("DNA_SERVER", "TX Status: Response queued for transmission to anonymous node");
+    if (rsp.node_id != 0) {
+        ESP_LOGI("DNA_SERVER", "TX Result: Allocated node ID %d to device", rsp.node_id);
+    } else {
+        ESP_LOGI("DNA_SERVER", "TX Result: Echoing partial UID (%d bytes)", rsp.unique_id.len);
+    }
+#else
+    hal.console->printf("DNA: Response broadcast queued for transmission\n");
 #endif
     
     // Immediately push the frame to CAN bus to reduce latency
