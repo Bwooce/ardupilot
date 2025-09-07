@@ -1786,11 +1786,23 @@ void GCS_MAVLINK::update_send()
             }
         }
         
-        ESP_LOGE("MAVLINK", "Ch%d [%.1fs]: sent=%lu (%.1f/s) def=%lu buck=%lu timeout=%lu | tx=%lu pend=%u overdue=%lu oldest=%lums",
-                 chan, interval_sec, (unsigned long)messages_sent[chan], msg_rate, 
+        // Add more diagnostic info
+        static uint32_t report_count[MAVLINK_COMM_NUM_BUFFERS] = {};
+        report_count[chan]++;
+        
+        ESP_LOGE("MAVLINK", "Ch%d #%lu [%.3fs] upd=%lu: sent=%lu (%.1f/s) def=%lu buck=%lu timeout=%lu | tx=%lu pend=%u overdue=%lu oldest=%lums",
+                 chan, (unsigned long)report_count[chan], interval_sec, 
+                 (unsigned long)update_count[chan], (unsigned long)messages_sent[chan], msg_rate, 
                  (unsigned long)deferred_sent[chan], (unsigned long)bucket_sent[chan], 
                  (unsigned long)out_of_time_count[chan], (unsigned long)tx_space, pending, 
                  (unsigned long)overdue_count, (unsigned long)oldest_msg_age_ms);
+        
+        // Also show cumulative totals to verify counting
+        static uint32_t total_messages[MAVLINK_COMM_NUM_BUFFERS] = {};
+        total_messages[chan] += messages_sent[chan];
+        ESP_LOGE("MAVLINK", "  Ch%d totals: msgs=%lu updates=%lu (actual_ms=%lu)",
+                 chan, (unsigned long)total_messages[chan], 
+                 (unsigned long)update_count[chan], (unsigned long)interval_ms);
         
         // Reset counters for next period
         update_count[chan] = 0;
