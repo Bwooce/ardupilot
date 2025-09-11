@@ -62,16 +62,35 @@ void AP_DroneCAN_DNA_Server::Database::init(StorageAccess *storage_)
 
     // validate magic number
     uint16_t magic = storage->read_uint16(0);
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGD("DNA_SERVER", "Database init: magic=0x%04x (expected 0x%04x)", 
+             magic, NODERECORD_MAGIC);
+    hal.console->printf("DNA: Database magic=0x%04x (expected 0x%04x)\n", 
+                       magic, NODERECORD_MAGIC);
+#endif
+    
     if (magic != NODERECORD_MAGIC) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        ESP_LOGW("DNA_SERVER", "Invalid magic, resetting database!");
+        hal.console->printf("DNA: Invalid magic, resetting database!\n");
+#endif
         reset(); // resetting the database will put the magic back
     }
 
     // check and note each possible node ID's registration's presence
+    uint8_t registered_count = 0;
     for (uint8_t i = 1; i <= MAX_NODE_ID; i++) {
         if (check_registration(i)) {
             node_registered.set(i);
+            registered_count++;
         }
     }
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGD("DNA_SERVER", "Found %d existing node registrations in database", registered_count);
+    hal.console->printf("DNA: Found %d existing node registrations\n", registered_count);
+#endif
 }
 
 // remove all registrations from the database
@@ -249,6 +268,21 @@ void AP_DroneCAN_DNA_Server::Database::read_record(NodeRecord &record, uint8_t n
     }
 
     storage->read_block(&record, NODERECORD_LOC(node_id), sizeof(NodeRecord));
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Debug: Check if record has valid data
+    bool is_empty = true;
+    for (int i = 0; i < sizeof(NodeRecord::uid_hash); i++) {
+        if (record.uid_hash[i] != 0) {
+            is_empty = false;
+            break;
+        }
+    }
+    if (!is_empty) {
+        ESP_LOGD("DNA_SERVER", "Read record for node_id=%d from offset=%d (has data)", 
+                 node_id, NODERECORD_LOC(node_id));
+    }
+#endif
 }
 
 // write the given node ID's registration's record
@@ -258,6 +292,13 @@ void AP_DroneCAN_DNA_Server::Database::write_record(const NodeRecord &record, ui
         return;
     }
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGD("DNA_SERVER", "Writing record for node_id=%d to storage offset=%d", 
+             node_id, NODERECORD_LOC(node_id));
+    hal.console->printf("DNA: Writing node %d to storage offset %d\n", 
+                       node_id, NODERECORD_LOC(node_id));
+#endif
+    
     storage->write_block(NODERECORD_LOC(node_id), &record, sizeof(NodeRecord));
 }
 
@@ -278,7 +319,7 @@ Server Record. */
 bool AP_DroneCAN_DNA_Server::init(uint8_t own_unique_id[], uint8_t own_unique_id_len, uint8_t node_id)
 {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DNA_SERVER", "Init called with node_id=%d", node_id);
+    ESP_LOGD("DNA_SERVER", "Init called with node_id=%d", node_id);
 #endif
     hal.console->printf("DNA: Server init called with node_id=%d\n", node_id);
     
@@ -386,7 +427,7 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     uint32_t now = AP_HAL::millis();
     uint32_t dt = now - last_nodestatus_time[transfer.source_node_id];
     if (last_nodestatus_time[transfer.source_node_id] != 0 && (dt > 1500 || dt < 50)) {
-        ESP_LOGE("DRONECAN", "Node %d NodeStatus interval %lums (expected ~1000ms)", 
+        ESP_LOGI("DRONECAN", "Node %d NodeStatus interval %lums (expected ~1000ms)", 
                  transfer.source_node_id, (unsigned long)dt);
     }
     last_nodestatus_time[transfer.source_node_id] = now;
@@ -429,7 +470,7 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
             node_healthy.set(transfer.source_node_id);
         } else {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            ESP_LOGE("DRONECAN", "Node %d not verified, sending GetNodeInfo request from our node %d", 
+            ESP_LOGI("DRONECAN", "Node %d not verified, sending GetNodeInfo request from our node %d", 
                      transfer.source_node_id, _ap_dronecan.canard_iface.get_node_id());
 #endif
             //immediately begin verification of the node_id
@@ -562,7 +603,12 @@ Or register if the node id is available and not recorded for the
 received Unique ID */
 void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, const uavcan_protocol_GetNodeInfoResponse& rsp)
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGD("DNA_SERVER", "handleNodeInfo CALLED for node %d!", transfer.source_node_id);
+#endif
     if (transfer.source_node_id > MAX_NODE_ID || transfer.source_node_id == 0) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#endif
         return;
     }
     
@@ -601,6 +647,8 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
 #endif
 
     bool duplicate = db.handle_node_info(transfer.source_node_id, rsp.hardware_version.unique_id);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#endif
     if (duplicate) {
         if (!_ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_DUPLICATE_NODE)) {
             /* This is a device with node_id already registered
@@ -608,10 +656,14 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
             server_state = DUPLICATE_NODES;
             fault_node_id = transfer.source_node_id;
             memcpy(fault_node_name, rsp.name.data, sizeof(fault_node_name));
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#endif
         }
     } else {
         //Verify as well
         node_verified.set(transfer.source_node_id);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#endif
         if (transfer.source_node_id == curr_verifying_node) {
             nodeInfo_resp_rcvd = true;
         }
@@ -634,7 +686,7 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
             ESP_LOGE("DNA_SERVER", "handle_allocation called %lu times/sec! source=%d, first=%d, uid_len=%d", 
                      call_count, transfer.source_node_id, msg.first_part_of_unique_id, msg.unique_id.len);
         } else {
-            ESP_LOGI("DNA_SERVER", "handle_allocation at T+%lums! source=%d, first=%d, uid_len=%d", 
+            ESP_LOGD("DNA_SERVER", "handle_allocation at T+%lums! source=%d, first=%d, uid_len=%d", 
                      (unsigned long)start_ms, transfer.source_node_id, msg.first_part_of_unique_id, msg.unique_id.len);
         }
         call_count = 0;
@@ -673,7 +725,7 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
         rcvd_unique_id_offset = 0;
         memset(rcvd_unique_id, 0, sizeof(rcvd_unique_id)); // Clear entire buffer to avoid garbage
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP_LOGI("DNA_SERVER", "First part received, resetting state and clearing buffer");
+        ESP_LOGD("DNA_SERVER", "First part received, resetting state and clearing buffer");
 #endif
     } else if (rcvd_unique_id_offset == 0) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
@@ -706,8 +758,16 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     rcvd_unique_id_offset += msg.unique_id.len;
     
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DNA_SERVER", "Accumulated %d bytes total (added %d), first_part=%d", 
+    ESP_LOGD("DNA_SERVER", "Accumulated %d bytes total (added %d), first_part=%d", 
              rcvd_unique_id_offset, msg.unique_id.len, msg.first_part_of_unique_id);
+    
+    // Debug: Show what we've accumulated (only occasionally to reduce spam)
+    static uint32_t last_uid_debug_ms = 0;
+    uint32_t now_ms = AP_HAL::millis();
+    if (now_ms - last_uid_debug_ms > 10000) {  // Only log every 10 seconds
+        ESP_LOGI("DNA_SERVER", "Processing DNA requests (rcvd_unique_id_offset=%d)", rcvd_unique_id_offset);
+        last_uid_debug_ms = now_ms;
+    }
 #endif
 
     // respond with the message containing the received unique ID so far, or
@@ -724,13 +784,22 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     // The encoder will only encode rsp.unique_id.len bytes, not the entire array
     rsp.unique_id.len = rcvd_unique_id_offset;
     
+    // WORKAROUND for potential bool packing issue on ESP32
+    // Ensure first_part_of_unique_id is properly set as 0 or 1
+    rsp.first_part_of_unique_id = msg.first_part_of_unique_id ? 1 : 0;
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Debug: Log response summary (detailed logging removed to reduce spam)
+    ESP_LOGD("DNA_SERVER", "Preparing response with %d UID bytes", rsp.unique_id.len);
+#endif
+    
     // Per DroneCAN spec: Echo the first_part flag from the request when responding to partial allocations
     // Only set to 0 when we're sending the final response with allocated node_id
     rsp.first_part_of_unique_id = msg.first_part_of_unique_id;
     rsp.node_id = 0; // Will be set if allocation succeeds
     
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DNA_SERVER", "Preparing response: accumulated_uid_len=%d bytes", rcvd_unique_id_offset);
+    ESP_LOGD("DNA_SERVER", "Preparing response: accumulated_uid_len=%d bytes", rcvd_unique_id_offset);
 #endif
 
     // Check if this looks like a complete UID:
@@ -740,7 +809,7 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
                               (!msg.first_part_of_unique_id && rcvd_unique_id_offset > 0);
     
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DNA_SERVER", "UID completeness check: offset=%d, sizeof=%d, first_part=%d, looks_complete=%d",
+    ESP_LOGD("DNA_SERVER", "UID completeness check: offset=%d, sizeof=%d, first_part=%d, looks_complete=%d",
              rcvd_unique_id_offset, (int)sizeof(rcvd_unique_id), msg.first_part_of_unique_id, uid_looks_complete);
 #endif
     
@@ -757,12 +826,15 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
         rcvd_unique_id_offset = 0; // reset state for next allocation
         memset(rcvd_unique_id, 0, sizeof(rcvd_unique_id)); // Clear buffer for next allocation
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP32_DEBUG_INFO("DNA: Full UID received, allocated node ID %d", rsp.node_id);
+        ESP_LOGD("DNA", "Full UID received, allocated node ID %d", rsp.node_id);
 #endif
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP_LOGI("DNA_SERVER", "Full UID received, allocated node ID %d", rsp.node_id);
+        ESP_LOGD("DNA_SERVER", "Full UID received, allocated node ID %d", rsp.node_id);
 #endif
-        hal.console->printf("DNA: Full UID received, allocated node ID %d\n", rsp.node_id);
+        // Log only important allocations (non-zero node IDs)
+        if (rsp.node_id != 0) {
+            hal.console->printf("DNA: Allocated node ID %d\n", rsp.node_id);
+        }
         if (rsp.node_id == 0) { // allocation failed
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
             ESP32_DEBUG_ERROR("DNA: Allocation failed - database full");
@@ -776,7 +848,7 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
         }
     } else {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP_LOGI("DNA_SERVER", "Partial UID received (%d/%d bytes), sending echo", 
+        ESP_LOGD("DNA_SERVER", "Partial UID received (%d/%d bytes), sending echo", 
                  rcvd_unique_id_offset, (int)sizeof(rcvd_unique_id));
 #endif
         hal.console->printf("DNA: Partial UID received (%d/%d bytes), sending echo\n", 
@@ -784,18 +856,18 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     }
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DNA_SERVER", "Broadcasting allocation response, node_id=%d, uid_len=%d", 
+    ESP_LOGD("DNA_SERVER", "Broadcasting allocation response, node_id=%d, uid_len=%d", 
              rsp.node_id, rsp.unique_id.len);
     // Dump the full response message
-    ESP_LOGI("DNA_SERVER", "Response details:");
-    ESP_LOGI("DNA_SERVER", "  node_id: %d", rsp.node_id);
-    ESP_LOGI("DNA_SERVER", "  first_part_of_unique_id: %d", rsp.first_part_of_unique_id);
-    ESP_LOGI("DNA_SERVER", "  unique_id.len: %d", rsp.unique_id.len);
-    ESP_LOGI("DNA_SERVER", "  unique_id data: %02X %02X %02X %02X %02X %02X %02X %02X",
+    ESP_LOGD("DNA_SERVER", "Response details:");
+    ESP_LOGD("DNA_SERVER", "  node_id: %d", rsp.node_id);
+    ESP_LOGD("DNA_SERVER", "  first_part_of_unique_id: %d", rsp.first_part_of_unique_id);
+    ESP_LOGD("DNA_SERVER", "  unique_id.len: %d", rsp.unique_id.len);
+    ESP_LOGD("DNA_SERVER", "  unique_id data: %02X %02X %02X %02X %02X %02X %02X %02X",
              rsp.unique_id.data[0], rsp.unique_id.data[1], rsp.unique_id.data[2], rsp.unique_id.data[3],
              rsp.unique_id.data[4], rsp.unique_id.data[5], rsp.unique_id.data[6], rsp.unique_id.data[7]);
     if (rsp.unique_id.len > 8) {
-        ESP_LOGI("DNA_SERVER", "            cont: %02X %02X %02X %02X %02X %02X %02X %02X",
+        ESP_LOGD("DNA_SERVER", "            cont: %02X %02X %02X %02X %02X %02X %02X %02X",
                  rsp.unique_id.data[8], rsp.unique_id.data[9], rsp.unique_id.data[10], rsp.unique_id.data[11],
                  rsp.unique_id.data[12], rsp.unique_id.data[13], rsp.unique_id.data[14], rsp.unique_id.data[15]);
     }
@@ -804,51 +876,60 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
                        rsp.node_id, rsp.unique_id.len);
     
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DNA_SERVER", "Allocation publisher timeout_ms = %lu", 
+    ESP_LOGD("DNA_SERVER", "Allocation publisher timeout_ms = %lu", 
              (unsigned long)allocation_pub.get_timeout_ms());
 #endif
     
     // Debug: verify response structure before sending
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     uint32_t broadcast_ms = AP_HAL::millis();
-    ESP_LOGI("DNA_SERVER", "Broadcasting response at T+%lums (delay from request: %lums)",
+    ESP_LOGD("DNA_SERVER", "Broadcasting response at T+%lums (delay from request: %lums)",
              (unsigned long)broadcast_ms, (unsigned long)(broadcast_ms - start_ms));
-    ESP_LOGI("DNA_SERVER", "Final response: sizeof=%d, node_id=%d, first_part=%d, uid.len=%d",
+    ESP_LOGD("DNA_SERVER", "Final response: sizeof=%d, node_id=%d, first_part=%d, uid.len=%d",
              (int)sizeof(rsp), rsp.node_id, rsp.first_part_of_unique_id, rsp.unique_id.len);
     
     // Calculate expected encoded size
     // node_id: 7 bits, first_part: 1 bit, unique_id: variable length array
     int expected_bits = 7 + 1 + 5 + (rsp.unique_id.len * 8); // 7+1 for fields, 5 for array len, then data
-    ESP_LOGI("DNA_SERVER", "  Expected encoded bits=%d, bytes=%d", expected_bits, (expected_bits + 7) / 8);
+    ESP_LOGD("DNA_SERVER", "  Expected encoded bits=%d, bytes=%d", expected_bits, (expected_bits + 7) / 8);
 #endif
     
     // Final verification before broadcast
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DNA_SERVER", "About to broadcast: node_id=%d (0x%02X), first_part=%d, uid_len=%d", 
-             rsp.node_id, rsp.node_id, rsp.first_part_of_unique_id, rsp.unique_id.len);
+    // ESP_LOGI("DNA_SERVER", "About to broadcast: node_id=%d (0x%02X), first_part=%d, uid_len=%d", 
+    //          rsp.node_id, rsp.node_id, rsp.first_part_of_unique_id, rsp.unique_id.len);
+    
+    // CRITICAL: Verify the struct values RIGHT before encoding
+    // ESP_LOGI("DNA_SERVER", "PRE-ENCODE CHECK:");
+    // ESP_LOGI("DNA_SERVER", "  rsp.node_id = %d (should be 0 for echo, non-zero for allocation)", rsp.node_id);
+    // ESP_LOGI("DNA_SERVER", "  rsp.first_part_of_unique_id = %d (should match request for echo)", rsp.first_part_of_unique_id);
+    // ESP_LOGI("DNA_SERVER", "  rsp.unique_id.len = %d", rsp.unique_id.len);
+    // ESP_LOGI("DNA_SERVER", "  rsp.unique_id.data[0-5] = %02X %02X %02X %02X %02X %02X",
+    //          rsp.unique_id.data[0], rsp.unique_id.data[1], rsp.unique_id.data[2],
+    //          rsp.unique_id.data[3], rsp.unique_id.data[4], rsp.unique_id.data[5]);
     
     // Check struct size and alignment
-    ESP_LOGI("DNA_SERVER", "Struct info: sizeof(rsp)=%d, sizeof(bool)=%d, alignof(rsp)=%d",
+    ESP_LOGD("DNA_SERVER", "Struct info: sizeof(rsp)=%d, sizeof(bool)=%d, alignof(rsp)=%d",
              (int)sizeof(rsp), (int)sizeof(bool), (int)__alignof__(rsp));
-    ESP_LOGI("DNA_SERVER", "Field offsets: node_id=%d, first_part=%d, unique_id=%d",
+    ESP_LOGD("DNA_SERVER", "Field offsets: node_id=%d, first_part=%d, unique_id=%d",
              (int)offsetof(struct uavcan_protocol_dynamic_node_id_Allocation, node_id),
              (int)offsetof(struct uavcan_protocol_dynamic_node_id_Allocation, first_part_of_unique_id),
              (int)offsetof(struct uavcan_protocol_dynamic_node_id_Allocation, unique_id));
     
     // Log actual struct memory to debug encoding issue
-    ESP_LOGI("DNA_SERVER", "Response struct memory dump (first 32 bytes):");
+    ESP_LOGD("DNA_SERVER", "Response struct memory dump (first 32 bytes):");
     uint8_t* rsp_bytes = (uint8_t*)&rsp;
     for (int i = 0; i < 32 && i < (int)sizeof(rsp); i += 8) {
-        ESP_LOGI("DNA_SERVER", "  [%02d]: %02X %02X %02X %02X %02X %02X %02X %02X",
+        ESP_LOGD("DNA_SERVER", "  [%02d]: %02X %02X %02X %02X %02X %02X %02X %02X",
                  i, rsp_bytes[i], rsp_bytes[i+1], rsp_bytes[i+2], rsp_bytes[i+3],
                  rsp_bytes[i+4], rsp_bytes[i+5], rsp_bytes[i+6], rsp_bytes[i+7]);
     }
     
     // Check if we're sending the expected data
     if (rsp.unique_id.len == 6) {
-        ESP_LOGI("DNA_SERVER", "Sending 6-byte UID response for node %d", rsp.node_id);
+        ESP_LOGD("DNA_SERVER", "Sending 6-byte UID response for node %d", rsp.node_id);
         // Expected encoded size: 7 bits (node_id) + 1 bit (first_part) + 5 bits (len) + 48 bits (6 bytes) = 61 bits = 8 bytes
-        ESP_LOGI("DNA_SERVER", "Expected encoded size = 8 bytes, actual struct size = %d bytes", (int)sizeof(rsp));
+        ESP_LOGD("DNA_SERVER", "Expected encoded size = 8 bytes, actual struct size = %d bytes", (int)sizeof(rsp));
     }
 #endif
     
@@ -897,71 +978,16 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     last_response_node_id = rsp.node_id;
     last_uid_hash = uid_hash;
     
-    ESP_LOGI("DNA_SERVER", "CALLING allocation_pub.broadcast() for node_id=%d, uid_len=%d", 
+    ESP_LOGD("DNA_SERVER", "CALLING allocation_pub.broadcast() for node_id=%d, uid_len=%d", 
              rsp.node_id, rsp.unique_id.len);
     
-    // TEST: Manually encode to see what size we get
-    uint8_t test_buf[64];  // Larger buffer to see how much is actually written
-    memset(test_buf, 0xFF, sizeof(test_buf)); // Fill with 0xFF to see what gets written
-    
-    // Call the encoder directly to see what it produces
-    uint32_t encoded_len = uavcan_protocol_dynamic_node_id_Allocation_encode(&rsp, test_buf
-#if CANARD_ENABLE_TAO_OPTION
-        , true  // TAO = true for broadcasts
-#endif
-    );
-    
-    ESP_LOGI("DNA_SERVER", "Manual encode returned %lu bytes (expected 7 for 6-byte UID)", encoded_len);
-    
-    // Log the encoded data to see what we're actually sending
-    for (uint32_t i = 0; i < encoded_len && i < 40; i += 8) {
-        ESP_LOGI("DNA_SERVER", "  [%02lu-%02lu]: %02X %02X %02X %02X %02X %02X %02X %02X",
-                 i, i+7,
-                 i < encoded_len ? test_buf[i] : 0xFF,
-                 i+1 < encoded_len ? test_buf[i+1] : 0xFF,
-                 i+2 < encoded_len ? test_buf[i+2] : 0xFF,
-                 i+3 < encoded_len ? test_buf[i+3] : 0xFF,
-                 i+4 < encoded_len ? test_buf[i+4] : 0xFF,
-                 i+5 < encoded_len ? test_buf[i+5] : 0xFF,
-                 i+6 < encoded_len ? test_buf[i+6] : 0xFF,
-                 i+7 < encoded_len ? test_buf[i+7] : 0xFF);
-    }
-    
-    // ESP32 uses non-TAO encoding which produces different sizes:
-    // For a 6-byte UID: 1 byte length + 6 bytes data = 7 bytes total
-    // The original code incorrectly expected 8 bytes for non-TAO
-    uint32_t expected_len;
-    if (rsp.unique_id.len == 6) {
-        // Both TAO and non-TAO produce 7 bytes for 6-byte UID
-        // TAO: omits array length when it fills remaining space
-        // Non-TAO: 1 byte for length (0x06) + 6 bytes data
-        expected_len = 7;
-    } else {
-        // For other lengths, calculate appropriately
-        // This is a simplified expectation - actual encoding may vary
-        expected_len = 1 + rsp.unique_id.len;  // length byte + data bytes
-    }
-    
-    if (encoded_len != expected_len) {
-        ESP_LOGE("DNA_SERVER", "ERROR: Encoder produced %lu bytes instead of expected %lu!", 
-                 encoded_len, expected_len);
-        // Try to figure out what went wrong
-        ESP_LOGE("DNA_SERVER", "Input struct: node_id=%d, first_part=%d, uid.len=%d",
-                 rsp.node_id, rsp.first_part_of_unique_id, rsp.unique_id.len);
-    } else {
-        ESP_LOGI("DNA_SERVER", "Encoder correctly produced %lu bytes for %d-byte UID", 
-                 encoded_len, rsp.unique_id.len);
-    }
-#else
-    // Non-ESP32 path
-#endif
     
     // Log what we're about to transmit
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DNA_SERVER", "TRANSMITTING DNA Response:");
-    ESP_LOGI("DNA_SERVER", "  node_id: %d (0x%02X)", rsp.node_id, rsp.node_id);
-    ESP_LOGI("DNA_SERVER", "  first_part_of_unique_id: %d", rsp.first_part_of_unique_id);
-    ESP_LOGI("DNA_SERVER", "  unique_id.len: %d bytes", rsp.unique_id.len);
+    ESP_LOGD("DNA_SERVER", "TRANSMITTING DNA Response:");
+    ESP_LOGD("DNA_SERVER", "  node_id: %d (0x%02X)", rsp.node_id, rsp.node_id);
+    ESP_LOGD("DNA_SERVER", "  first_part_of_unique_id: %d", rsp.first_part_of_unique_id);
+    ESP_LOGD("DNA_SERVER", "  unique_id.len: %d bytes", rsp.unique_id.len);
     
     // Log the complete UID being transmitted
     if (rsp.unique_id.len > 0) {
@@ -970,13 +996,13 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
         for (int i = 0; i < rsp.unique_id.len && i < 16; i++) {
             offset += snprintf(uid_str + offset, sizeof(uid_str) - offset, "%02X ", rsp.unique_id.data[i]);
         }
-        ESP_LOGI("DNA_SERVER", "  unique_id data: %s", uid_str);
+        ESP_LOGD("DNA_SERVER", "  unique_id data: %s", uid_str);
     }
     
     // Track what we're actually sending
     static uint32_t tx_sequence = 0;
     tx_sequence++;
-    ESP_LOGI("DNA_SERVER", "TX Sequence #%lu: Broadcasting allocation response", tx_sequence);
+    ESP_LOGD("DNA_SERVER", "TX Sequence #%lu: Broadcasting allocation response", tx_sequence);
 #else
     hal.console->printf("DNA: TRANSMITTING Response: node_id=%d, first_part=%d, uid_len=%d\n",
                        rsp.node_id, rsp.first_part_of_unique_id, rsp.unique_id.len);
@@ -989,17 +1015,21 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     }
 #endif
     
-    allocation_pub.broadcast(rsp, false); // never publish allocation message with CAN FD
+    // Make a defensive copy to ensure struct doesn't get modified during broadcast
+    struct uavcan_protocol_dynamic_node_id_Allocation rsp_copy;
+    memcpy(&rsp_copy, &rsp, sizeof(rsp_copy));
+    
+    allocation_pub.broadcast(rsp_copy, false); // never publish allocation message with CAN FD
     
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DNA_SERVER", "RETURNED from allocation_pub.broadcast() - TX should be queued");
+    ESP_LOGD("DNA_SERVER", "RETURNED from allocation_pub.broadcast() - TX should be queued");
     
     // Log TX status
-    ESP_LOGI("DNA_SERVER", "TX Status: Response queued for transmission to anonymous node");
+    ESP_LOGD("DNA_SERVER", "TX Status: Response queued for transmission to anonymous node");
     if (rsp.node_id != 0) {
-        ESP_LOGI("DNA_SERVER", "TX Result: Allocated node ID %d to device", rsp.node_id);
+        ESP_LOGD("DNA_SERVER", "TX Result: Allocated node ID %d to device", rsp.node_id);
     } else {
-        ESP_LOGI("DNA_SERVER", "TX Result: Echoing partial UID (%d bytes)", rsp.unique_id.len);
+        ESP_LOGD("DNA_SERVER", "TX Result: Echoing partial UID (%d bytes)", rsp.unique_id.len);
     }
 #else
     hal.console->printf("DNA: Response broadcast queued for transmission\n");
@@ -1009,7 +1039,7 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     _canard_iface.processTx(false);
     
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DNA_SERVER", "Called processTx() to send frame immediately");
+    ESP_LOGD("DNA_SERVER", "Called processTx() to send frame immediately");
     
     // Log that we sent a response to help debug continuous sending
     static uint32_t last_broadcast_log = 0;
@@ -1017,10 +1047,8 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     broadcast_count++;
     uint32_t now_bc = AP_HAL::millis();
     if (now_bc - last_broadcast_log > 1000) {
-        if (broadcast_count > 5) {
-            ESP_LOGE("DNA_SERVER", "ERROR: Broadcast DNA response %lu times in last second!", broadcast_count);
-        } else if (broadcast_count > 1) {
-            ESP_LOGW("DNA_SERVER", "Broadcast DNA response %lu times in last second", broadcast_count);
+        if (broadcast_count > 10) {  // Only warn if excessive
+            ESP_LOGW("DNA_SERVER", "High DNA activity: %lu responses/sec", broadcast_count);
         }
         broadcast_count = 0;
         last_broadcast_log = now_bc;
@@ -1056,3 +1084,4 @@ bool AP_DroneCAN_DNA_Server::prearm_check(char* fail_msg, uint8_t fail_msg_len) 
 }
 
 #endif //HAL_NUM_CAN_IFACES
+#endif //HAL_ENABLE_DRONECAN_DRIVERS

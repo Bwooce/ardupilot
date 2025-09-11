@@ -1,0 +1,37 @@
+--- a/build/esp32lilygo_tconnect/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.dynamic_node_id.Allocation.c
++++ b/build/esp32lilygo_tconnect/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.dynamic_node_id.Allocation.c
+@@ -1,6 +1,10 @@
+ #define CANARD_DSDLC_INTERNAL
+ #include <uavcan.protocol.dynamic_node_id.Allocation.h>
+ #include <string.h>
++#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
++#include "esp_log.h"
++#include <stdio.h>
++#endif
+ 
+ #ifdef CANARD_DSDLC_TEST_BUILD
+ #include <test_helpers.h>
+@@ -11,7 +15,29 @@ uint32_t uavcan_protocol_dynamic_node_id_Allocation_encode(struct uavcan_protoc
+     , bool tao
+ #endif
+ ) {
++#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
++    ESP_LOGI("DNA_ENCODE", "=== ENCODER CALLED ===");
++    ESP_LOGI("DNA_ENCODE", "  msg pointer: %p", msg);
++    ESP_LOGI("DNA_ENCODE", "  buffer pointer: %p", buffer);
++    ESP_LOGI("DNA_ENCODE", "  msg->node_id: %d (at %p)", msg->node_id, &msg->node_id);
++    ESP_LOGI("DNA_ENCODE", "  msg->first_part: %d (at %p)", msg->first_part_of_unique_id, &msg->first_part_of_unique_id);
++    ESP_LOGI("DNA_ENCODE", "  msg->unique_id.len: %d", msg->unique_id.len);
++    
++    // Dump raw memory at msg pointer
++    ESP_LOGI("DNA_ENCODE", "Raw memory at msg pointer:");
++    uint8_t* raw = (uint8_t*)msg;
++    for (int i = 0; i < 24; i += 8) {
++        ESP_LOGI("DNA_ENCODE", "  [%02d]: %02X %02X %02X %02X %02X %02X %02X %02X",
++                 i, raw[i], raw[i+1], raw[i+2], raw[i+3], raw[i+4], raw[i+5], raw[i+6], raw[i+7]);
++    }
++#endif
++
+     uint32_t bit_ofs = 0;
+     memset(buffer, 0, UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_MAX_SIZE);
+     _uavcan_protocol_dynamic_node_id_Allocation_encode(buffer, &bit_ofs, msg,

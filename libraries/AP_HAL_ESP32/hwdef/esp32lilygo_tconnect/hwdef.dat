@@ -12,6 +12,9 @@ PARTITION_TABLE_CUSTOM_FILENAME partitions.csv
 # Board identification
 define HAL_ESP32_BOARD_NAME "esp32lilygo_tconnect"
 
+# maximum ram, but the PSRAM is slower so watch out for problems
+define HAL_MEM_CLASS HAL_MEM_CLASS_1000 
+
 # Sensor probe helper macros for easier configuration
 define PROBE_IMU_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
 define PROBE_IMU_SPI(driver, devname, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))
@@ -71,14 +74,25 @@ define DEFAULT_SERIAL1_PROTOCOL SerialProtocol_MAVLink2
 define DEFAULT_SERIAL2_PROTOCOL SerialProtocol_GPS
 
 # Storage configuration - Use PSRAM for in-memory logging
+# PSRAM logging is enabled by default for zero flash wear
+define HAL_ESP32_USE_PSRAM_LOGGING 1
+define HAL_ESP32_PSRAM_LOG_SIZE_MB 4
+
+# Disable flash-based logging since we're using PSRAM
 define HAL_LOGGING_DATAFLASH_ENABLED 0
 define HAL_LOGGING_FILESYSTEM_ENABLED 0
-define HAL_LOGGING_MAVLINK_ENABLED 1
-define HAL_LOGGING_BACKENDS_DEFAULT 2
 
-# Storage directories
+# Enable MAVLink logging for remote access
+define HAL_LOGGING_MAVLINK_ENABLED 1
+define HAL_LOGGING_BACKENDS_DEFAULT 3  # Bit 0=File, Bit 1=MAVLink, both enabled
+
+# Storage directories (for compatibility)
 define HAL_BOARD_LOG_DIRECTORY "/APM/LOGS"
 define HAL_BOARD_TERRAIN_DIRECTORY "/APM/TERRAIN"
+
+# PSRAM logging configuration
+define HAL_LOGGER_FILE_BUFSIZE 512  # Larger buffer for PSRAM
+define HAL_LOGGER_WRITE_CHUNK_SIZE 1024  # PSRAM can handle larger chunks
 
 # Feature configuration for DroneCAN hub
 define HAL_MINIMIZE_FEATURES 0
@@ -109,7 +123,7 @@ SERIAL0_RX_PIN 2  # USB-Serial/JTAG
 # SERIAL1 for CRSF/ELRS 
 SERIAL1_TX_PIN 12
 SERIAL1_RX_PIN 46
-SERIAL1_BAUD 460
+SERIAL1_BAUD 57600
 
 # SERIAL2 for GPS
 SERIAL2_TX_PIN 43
@@ -211,3 +225,16 @@ APJ_BOARD_ID 1207
 # Use USB-Serial/JTAG for SERIAL0 instead of UART0 to avoid dropped messages
 # This prevents UART0 buffer overflows when no external UART is connected
 define HAL_ESP32_USE_USB_CONSOLE 1
+
+# ELRS RSSI configuration
+define DEFAULT_RSSI_TYPE 5
+
+
+# MAVLink Command Long Debug
+# Uncomment to enable detailed logging of all COMMAND_LONG messages received
+# This helps debug command routing issues and parameter passing problems
+# Output format: "ESP32: CMD_LONG #N: cmd=X from sys=Y comp=Z (p1=A p2=B)"
+# Note: This can be verbose with GCS that send frequent commands (e.g., REQUEST_MESSAGE)
+# define ESP32_DEBUG_CMD_LONG 1
+# Enable ESP32 log to MAVLink by default for debugging
+define ESP32_LOG_MAV_DEFAULT 1

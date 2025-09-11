@@ -23,7 +23,9 @@
 #include "esp_partition.h"
 
 #define STORAGE_SIZE HAL_STORAGE_SIZE
-#define STORAGE_SECTOR_SIZE (128*1024)
+// ESP32 flash sector size is 4KB, but we use 8KB for efficiency
+// Total storage partition is 16KB, so we have 2 sectors of 8KB each
+#define STORAGE_SECTOR_SIZE (8*1024)
 
 #define STORAGE_LINE_SHIFT 3
 

@@ -84,13 +84,17 @@ def configure(cfg):
                 except subprocess.CalledProcessError as e:
                     cfg.fatal(f"hwdef processing failed: {e}")
     
-    # Build list of sdkconfig.defaults files: target-level + board-level (if exists)
+    # Build list of sdkconfig.defaults files: target-level + debug (if --debug) + board-level (if exists)
     target_sdkconfig = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/targets/{mcu}/esp-idf/sdkconfig.defaults')
+    debug_sdkconfig = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/targets/{mcu}/esp-idf/sdkconfig.debug')
     board_sdkconfig = os.path.join(cfg.bldnode.abspath(), 'sdkconfig.board')
     
+    # Check if we need to include debug configuration
+    include_debug = cfg.options.debug and os.path.exists(debug_sdkconfig)
+    
     sdkconfig_list = [target_sdkconfig]
-    if os.path.exists(board_sdkconfig):
-        # Create a combined sdkconfig.defaults that includes both target and board configs
+    if os.path.exists(board_sdkconfig) or include_debug:
+        # Create a combined sdkconfig.defaults that includes target, debug (if applicable), and board configs
         combined_sdkconfig = os.path.join(cfg.bldnode.abspath(), 'sdkconfig.combined')
         print(f"Creating combined ESP-IDF config: {combined_sdkconfig}")
         
@@ -101,10 +105,19 @@ def configure(cfg):
                 combined_file.write(target_file.read())
                 combined_file.write("\n")
             
+            # Include debug configuration if --debug was specified
+            if include_debug:
+                with open(debug_sdkconfig, 'r') as debug_file:
+                    combined_file.write(f"# Debug configuration from {debug_sdkconfig}\n")
+                    combined_file.write(debug_file.read())
+                    combined_file.write("\n")
+                print(f"Including ESP32 debug config with stack protection")
+            
             # Include board-specific configuration
-            with open(board_sdkconfig, 'r') as board_file:
-                combined_file.write(f"# Board-specific configuration from {board_sdkconfig}\n")
-                combined_file.write(board_file.read())
+            if os.path.exists(board_sdkconfig):
+                with open(board_sdkconfig, 'r') as board_file:
+                    combined_file.write(f"# Board-specific configuration from {board_sdkconfig}\n")
+                    combined_file.write(board_file.read())
         
         cfg.env['ESP_IDF_SDKCONFIG_DEFAULTS'] = combined_sdkconfig
         print(f"Using combined ESP-IDF config: {combined_sdkconfig}")

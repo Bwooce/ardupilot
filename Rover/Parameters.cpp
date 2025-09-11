@@ -639,8 +639,15 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @Path: mode_circle.cpp
     AP_SUBGROUPINFO(mode_circle, "CIRC", 57, ParametersG2, ModeCircle),
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // @Group: ESP32
+    // @Path: ../libraries/AP_HAL_ESP32/ESP32_Params.cpp
+    AP_SUBGROUPINFO(esp32_params, "ESP32", 58, ParametersG2, ESP32::ESP32Params),
+#endif
+
     AP_GROUPEND
 };
+
 
 // These auxiliary channel param descriptions are here so that users of beta Mission Planner (which uses the master branch as its source of descriptions)
 // can get them.  These lines can be removed once Rover-3.6-beta testing begins or we improve the source of descriptions for GCSs.
@@ -700,6 +707,9 @@ ParametersG2::ParametersG2(void)
     wp_nav(attitude_control, pos_control),
     sailboat(),
     pos_control(attitude_control)
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ,esp32_params()
+#endif
 {
     AP_Param::setup_object_defaults(this, var_info);
 }

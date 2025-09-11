@@ -25,6 +25,15 @@
 
 #include <cmath>
 #include <string.h>
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include "esp_log.h"
+#include "esp_attr.h"
+#include "esp_rom_uart.h"
+#include <stdio.h>
+#define IF_ESP32(x) x
+#else
+#define IF_ESP32(x)
+#endif
 
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
@@ -59,13 +68,24 @@ AP_Param *AP_Param::_singleton;
 #endif
 
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+// Enable debug on ESP32 to get better error messages
+#define ENABLE_DEBUG 1
+#else
 #define ENABLE_DEBUG 0
+#endif
 
 #if ENABLE_DEBUG
-# define FATAL(fmt, args ...) AP_HAL::panic(fmt, ## args);
+# define FATAL(fmt, args ...) do { \
+    IF_ESP32(esp_rom_printf("\n*** AP_Param FATAL: " fmt " ***\n", ## args)); \
+    AP_HAL::panic(fmt, ## args); \
+  } while(0)
  # define Debug(fmt, args ...)  do {::printf("%s:%d: " fmt "\n", __FUNCTION__, __LINE__, ## args); } while(0)
 #else
- # define FATAL(fmt, args ...) AP_HAL::panic("Bad parameter table");
+ # define FATAL(fmt, args ...) do { \
+    IF_ESP32(esp_rom_printf("\n*** AP_Param FATAL: Bad parameter table ***\n")); \
+    AP_HAL::panic("Bad parameter table"); \
+  } while(0)
  # define Debug(fmt, args ...)
 #endif
 
@@ -1594,6 +1614,27 @@ bool AP_Param::load_all()
         info = find_by_header(phdr, &ptr);
         if (info != nullptr) {
             _storage.read_block(ptr, ofs+sizeof(phdr), type_size((enum ap_var_type)phdr.type));
+            
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            // Debug: Log FRAME_CLASS parameter loading
+            if (info->name && strcmp(info->name, "FRAME_CLASS") == 0) {
+                float value = 0;
+                if (phdr.type == AP_PARAM_FLOAT) {
+                    value = *(float*)ptr;
+                } else if (phdr.type == AP_PARAM_INT8) {
+                    value = *(int8_t*)ptr;
+                } else if (phdr.type == AP_PARAM_INT16) {
+                    value = *(int16_t*)ptr;
+                } else if (phdr.type == AP_PARAM_INT32) {
+                    value = *(int32_t*)ptr;
+                }
+                // Use console and ESP_LOG for visibility
+                hal.console->printf("ESP32: Loaded FRAME_CLASS = %.1f from storage (type=%d)\n", 
+                                   value, phdr.type);
+                // Also use ESP_LOG which will definitely show up
+                ESP_LOGI("PARAM", "FRAME_CLASS loaded from storage = %.1f (type=%d)", value, phdr.type);
+            }
+#endif
         }
 
         ofs += type_size((enum ap_var_type)phdr.type) + sizeof(phdr);

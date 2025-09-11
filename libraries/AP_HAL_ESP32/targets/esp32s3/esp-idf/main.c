@@ -9,14 +9,17 @@
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <esp_system.h>
+#include <esp_heap_caps.h>
+#include <esp_rom_uart.h>
+#include <driver/usb_serial_jtag.h>
+#include <hal/usb_serial_jtag_ll.h>
 
 int main(int argc, char *argv[]);
 
 void app_main()
 {
-    ESP_LOGI("APP", "ESP32-S3 app_main() entry point reached");
-    ESP_LOGI("APP", "Starting ArduPilot main()");
-    
+    ESP_LOGI("APP", "ESP32-S3 starting ArduPilot");
     int result = main(0, NULL);
     
     // This should NEVER be reached - main() should never return!

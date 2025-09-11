@@ -78,8 +78,9 @@
 #ifndef HAL_NUM_CAN_IFACES
 #define HAL_NUM_CAN_IFACES 0
 #endif
+#ifndef HAL_MEM_CLASS
 #define HAL_MEM_CLASS HAL_MEM_CLASS_192
-
+#endif 
 // disable uncommon stuff that we'd otherwise get 
 #define AP_EXTERNAL_AHRS_ENABLED 0
 #ifndef HAL_GENERATOR_ENABLED

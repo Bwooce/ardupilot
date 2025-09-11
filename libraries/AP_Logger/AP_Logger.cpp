@@ -5,6 +5,7 @@
 #include "AP_Logger_Backend.h"
 
 #include "AP_Logger_File.h"
+#include "AP_Logger_ESP32_PSRAM.h"
 #include "AP_Logger_Flash_JEDEC.h"
 #include "AP_Logger_W25NXX.h"
 #include "AP_Logger_MAVLink.h"
@@ -241,7 +242,13 @@ void AP_Logger::init(const AP_Int32 &log_bitmask, const struct LogStructure *str
         Backend_Type type;
         AP_Logger_Backend* (*probe_fn)(AP_Logger&, LoggerMessageWriter_DFLogStart*);
     } backend_configs[] {
-#if HAL_LOGGING_FILESYSTEM_ENABLED
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(HAL_ESP32_USE_PSRAM_LOGGING)
+        { Backend_Type::FILESYSTEM, AP_Logger_ESP32_PSRAM::probe },
+        // Fallback to file-based logging if PSRAM not available
+    #if HAL_LOGGING_FILESYSTEM_ENABLED
+        { Backend_Type::FILESYSTEM, AP_Logger_File::probe },
+    #endif
+#elif HAL_LOGGING_FILESYSTEM_ENABLED
         { Backend_Type::FILESYSTEM, AP_Logger_File::probe },
 #endif
 #if HAL_LOGGING_DATAFLASH_ENABLED
@@ -267,10 +274,28 @@ void AP_Logger::init(const AP_Int32 &log_bitmask, const struct LogStructure *str
         }
         backends[_next_backend] = backend_config.probe_fn(*this, message_writer);
         if (backends[_next_backend] == nullptr) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            // ESP32: Don't panic if specific backend not available, try next one
+            // This allows fallback from PSRAM -> File -> MAVLink
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Logger backend %d not available", 
+                         (int)backend_config.type);
+            // Don't delete message_writer here - let backend handle cleanup
+            // Some backends may still use it even if probe returns nullptr
+            continue;
+#else
             AP_BoardConfig::allocation_error("logger backend");
+#endif
         }
         _next_backend++;
     }
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32: Ensure we have at least one backend (MAVLink should always work)
+    if (_next_backend == 0) {
+        GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "No logger backends available!");
+        // Continue anyway - system can run without logging
+    }
+#endif
 
     for (uint8_t i=0; i<_next_backend; i++) {
         backends[i]->Init();

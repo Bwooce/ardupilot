@@ -8,6 +8,8 @@ def build(bld):
             'AnalogIn.cpp',
             'CANIface.cpp',
             'DeviceBus.cpp',
+            'ESP32_PSRAM_Logger.cpp',
+            'ESP32_SPIFFS.cpp',
             'GPIO.cpp',
             'HAL_ESP32_Class.cpp',
             'I2CDevice.cpp',

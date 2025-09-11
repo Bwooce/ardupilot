@@ -16,6 +16,14 @@
 #include <AP_HAL/AP_HAL.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
 #include "Storage.h"
+#include "esp_log.h"
+#include "esp_partition.h"
+#ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "driver/usb_serial_jtag.h"
+#include "hal/usb_serial_jtag_ll.h"
+#endif
+#include <string.h>
+#include <stdio.h>
 
 //#define STORAGEDEBUG 1
 
@@ -31,8 +39,21 @@ void Storage::_storage_open(void)
 #ifdef STORAGEDEBUG
     printf("%s:%d _storage_open \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
+    // Opening storage partition
+    
     _dirty_mask.clearall();
     p = esp_partition_find_first((esp_partition_type_t)0x45, ESP_PARTITION_SUBTYPE_ANY, nullptr);
+    
+    if (p == nullptr) {
+        ESP_LOGE("STORAGE", "ERROR - No storage partition found (type 0x45)!");
+        hal.console->printf("Storage: ERROR - No storage partition found (type 0x45)!\n");
+    } else {
+#ifdef STORAGEDEBUG
+        ESP_LOGI("STORAGE", "Found partition '%s' at 0x%08lx, size %lu bytes", 
+                 p->label, (unsigned long)p->address, (unsigned long)p->size);
+#endif
+    }
+    
     // load from storage backend
     _flash_load();
     _initialised = true;
@@ -66,6 +87,7 @@ void Storage::read_block(void *dst, uint16_t loc, size_t n)
 #endif
         return;
     }
+    // Delay storage init until first use to avoid early boot issues
     _storage_open();
     memcpy(dst, &_buffer[loc], n);
 }
@@ -176,7 +198,26 @@ bool Storage::_flash_read_data(uint8_t sector, uint32_t offset, uint8_t *data, u
 #ifdef STORAGEDEBUG
     printf("%s:%d  -> sec:%u off:%d len:%d addr:%d\n", __PRETTY_FUNCTION__, __LINE__,sector,offset,length,address);
 #endif
-    esp_partition_read(p, address, data, length);
+    
+    // Debug: Check if we're reading FRAME_CLASS parameter area
+    // FRAME_CLASS is typically in the first few sectors
+    if (sector == 0 && offset < 100) {
+        ESP_LOGI("STORAGE", "Reading sector %u offset %u len %u (possible param area)", 
+                 sector, offset, length);
+    }
+    
+    esp_err_t err = esp_partition_read(p, address, data, length);
+    if (err != ESP_OK) {
+        ESP_LOGE("STORAGE", "Read failed at addr 0x%x: %s", address, esp_err_to_name(err));
+        return false;
+    }
+    
+    // Debug: Log first few bytes if in param area
+    if (sector == 0 && offset < 100 && length > 0) {
+        ESP_LOGI("STORAGE", "Read data[0-3]: 0x%02X 0x%02X 0x%02X 0x%02X",
+                 data[0], data[1], data[2], data[3]);
+    }
+    
     return true;
 }
 

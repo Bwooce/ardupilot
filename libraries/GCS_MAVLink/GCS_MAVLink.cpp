@@ -145,51 +145,49 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
     }
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // ESP32: Debug first messages and track the mysterious len=10 message
-    static uint32_t msg_count = 0;
-    msg_count++;
-    if (msg_count <= 15) {  // Track more messages to catch the mystery one
-        hal.console->printf("ESP32 TX: #%lu len=%d chan=%d - Raw: ", (unsigned long)msg_count, len, chan);
-        
-        // ALWAYS print ALL bytes regardless of message type
-        for (int i = 0; i < len; i++) {
-            hal.console->printf("%02x ", buf[i]);
-        }
-        
-        // Add message type analysis
-        if (len >= 10 && buf[0] == 0xfd) {
-            uint32_t msgid = buf[7] | (buf[8] << 8) | (buf[9] << 16);
-            hal.console->printf("(MAVLink v2, msgid=%lu)", (unsigned long)msgid);
-        }
-        else if (len >= 6 && buf[0] == 0xfe) {
-            hal.console->printf("(MAVLink v1, msgid=%d)", buf[5]);
-        }
-        else if (len == 10) {
-            hal.console->printf("*** MYSTERY 10-BYTE MESSAGE ***");
-        }
-        else {
-            hal.console->printf("(Unknown protocol)");
-        }
-        
-        hal.console->printf("\n");
-    }
+    // ESP32: Check heap integrity before processing MAVLink messages (with recursion guard)
+    // Use thread-local storage to prevent recursion per-task
+    static __thread bool in_heap_check = false;
+    static uint32_t heap_check_count = 0;
     
-    // ESP32: Check heap integrity before processing MAVLink messages
-    // Check heap integrity to catch memory corruption early
-    if (!heap_caps_check_integrity_all(true)) {
-        ESP_LOGE("MAVLINK", "HEAP CORRUPTION DETECTED before MAVLink send!");
-        hal.console->printf("ESP32: HEAP CORRUPTION DETECTED before MAVLink send!\n");
-        esp_backtrace_print(10);
+    // Check heap integrity periodically (every 1000 messages) or in debug builds (every 100)
+    #ifdef DEBUG_BUILD
+    const uint32_t check_interval = 100;
+    #else
+    const uint32_t check_interval = 1000;
+    #endif
+    
+    // Only perform heap check if CONFIG_HEAP_POISONING is enabled
+    #if defined(CONFIG_HEAP_POISONING_COMPREHENSIVE) || defined(CONFIG_HEAP_POISONING_LIGHT)
+    if (!in_heap_check && (++heap_check_count % check_interval) == 0) {
+        in_heap_check = true;
+        // Use silent mode (false) to prevent ESP_LOG calls that could recurse
+        bool heap_ok = heap_caps_check_integrity_all(false);
+        in_heap_check = false;
+        
+        if (!heap_ok) {
+            // Direct console output only, no ESP_LOG to avoid recursion
+            hal.console->printf("ESP32: HEAP CORRUPTION DETECTED at msg %lu\n", (unsigned long)heap_check_count);
+            // Track corruption detection count for debugging
+            static uint32_t corruption_count = 0;
+            corruption_count++;
+            // Could add more actions here like reducing heap check frequency after first detection
+        }
     }
+    #endif
     
     // ESP32: Validate MAVLink message structure before sending
+    static uint32_t msg_count = 0;
+    msg_count++;
     if (len >= 10 && buf[0] == 0xfd) { // MAVLink v2 message
         uint32_t msgid = buf[7] | (buf[8] << 8) | (buf[9] << 16);
         
-        // Only log first few messages for debugging, skip normal heartbeats
+        // Only log first few messages for debugging in verbose mode
+        #ifdef DEBUG_BUILD
         if (msg_count <= 5 && msgid != 0) {
-            ESP_LOGE("MAVLINK", "Checking message: len=%d, msgid=%lu", len, (unsigned long)msgid);
+            ESP_LOGD("MAVLINK", "Checking message: len=%d, msgid=%lu", len, (unsigned long)msgid);
         }
+        #endif
         
         // Check for obviously invalid message IDs that indicate corruption  
         if (msgid > 50000) { // Most valid MAVLink message IDs are < 50000
@@ -213,6 +211,27 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
                 uint32_t extracted_msgid = buf[7] | (buf[8] << 8) | (buf[9] << 16);
                 ESP_LOGE("MAVLINK", "Extracted msgid from buf[7-9]: %lu (0x%06lx)", 
                          (unsigned long)extracted_msgid, (unsigned long)extracted_msgid);
+                
+                // Check for specific corruption pattern: ends with 0xC0
+                if ((extracted_msgid & 0xFF) == 0xC0) {
+                    ESP_LOGE("MAVLINK", "PATTERN: msgid ends with 0xC0 - consistent corruption pattern detected!");
+                }
+                
+                // Check if msgid looks like ESP32 memory address (possible overflow)
+                if ((extracted_msgid & 0xFF0000) == 0x420000 || 
+                    (extracted_msgid & 0xFF0000) == 0x3F0000 ||
+                    (extracted_msgid & 0xFF0000) == 0x400000) {
+                    ESP_LOGE("MAVLINK", "WARNING: msgid looks like ESP32 address! Possible memory corruption");
+                    
+                    // Dump surrounding memory for analysis
+                    ESP_LOGE("MAVLINK", "Buffer context at %p:", buf);
+                    for (int i = -16; i < 32 && i < (int)len; i++) {
+                        if (i >= 0) {
+                            printf("%02X ", buf[i]);
+                        }
+                    }
+                    printf("\n");
+                }
                 
                 // Check if buffer might contain overlapping messages
                 for (int i = 1; i < len && i < 30; i++) {
@@ -295,8 +314,8 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
     // Use atomic packet writing to prevent interleaving with debug output
     size_t written = 0;
     
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Track timing between messages
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(DEBUG_BUILD)
+    // Track timing between messages (only in debug builds)
     static uint32_t last_send_time[MAVLINK_COMM_NUM_BUFFERS] = {};
     static uint32_t rapid_send_count[MAVLINK_COMM_NUM_BUFFERS] = {};
     uint32_t now = AP_HAL::micros();
@@ -304,9 +323,10 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
     
     if (dt < 100 && last_send_time[chan] != 0) { // Less than 100us between sends
         rapid_send_count[chan]++;
-        if (rapid_send_count[chan] % 100 == 0) {
-            ESP_LOGE("MAVLINK", "Ch%d: %lu rapid sends (dt<%luus)", 
-                     chan, (unsigned long)rapid_send_count[chan], (unsigned long)dt);
+        // Only log if this becomes a persistent problem (>10000 rapid sends)
+        if (rapid_send_count[chan] == 10000) {
+            ESP_LOGW("MAVLINK", "Ch%d: Excessive rapid sends detected (%lu)", 
+                     chan, (unsigned long)rapid_send_count[chan]);
         }
     }
     last_send_time[chan] = now;

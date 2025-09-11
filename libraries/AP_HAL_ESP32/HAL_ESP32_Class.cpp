@@ -20,8 +20,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include <string.h>
+#ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "driver/usb_serial_jtag.h"
+#include "hal/usb_serial_jtag_ll.h"
+#endif
 #include "ESP32_Debug.h"
 #include "ESP32_Params.h"
+#include "esp_log_redirect.h"
 #include "Scheduler.h"
 #include "I2CDevice.h"
 #include "SPIDevice.h"
@@ -163,39 +169,41 @@ HAL_ESP32::HAL_ESP32() :
     
     // MCP2515 interfaces: Auto-detect based on pin definitions
 #if HAL_NUM_CAN_IFACES > 1
-    uint8_t mcp_index = 1; // Start after native TWAI
+    // TEMPORARILY DISABLE MCP2515 TO DEBUG BOOT
+    // uint8_t mcp_index = 1; // Start after native TWAI
     
     // MCP2515 #1 (traditional pin names for backward compatibility)
-#if defined(MCP2515_CS_PIN)
-    if (mcp_index < HAL_NUM_CAN_IFACES) {
-        canDrivers[mcp_index] = new ESP32::CANIface_MCP2515(mcp_index);
-        mcp_index++;
-    }
-#endif
+// #if defined(MCP2515_CS_PIN)
+//     if (mcp_index < HAL_NUM_CAN_IFACES) {
+//         canDrivers[mcp_index] = new ESP32::CANIface_MCP2515(mcp_index);
+//         mcp_index++;
+//     }
+// #endif
 
+    // TEMPORARILY DISABLED FOR DEBUGGING
     // MCP2515 #2 (numbered pins)
-#if HAL_NUM_CAN_IFACES > 2 && defined(MCP2515_2_CS_PIN)
-    if (mcp_index < HAL_NUM_CAN_IFACES) {
-        canDrivers[mcp_index] = new ESP32::CANIface_MCP2515(mcp_index);
-        mcp_index++;
-    }
-#endif
+// #if HAL_NUM_CAN_IFACES > 2 && defined(MCP2515_2_CS_PIN)
+//     if (mcp_index < HAL_NUM_CAN_IFACES) {
+//         canDrivers[mcp_index] = new ESP32::CANIface_MCP2515(mcp_index);
+//         mcp_index++;
+//     }
+// #endif
 
     // MCP2515 #3 (numbered pins)
-#if HAL_NUM_CAN_IFACES > 3 && defined(MCP2515_3_CS_PIN)
-    if (mcp_index < HAL_NUM_CAN_IFACES) {
-        canDrivers[mcp_index] = new ESP32::CANIface_MCP2515(mcp_index);
-        mcp_index++;
-    }
-#endif
+// #if HAL_NUM_CAN_IFACES > 3 && defined(MCP2515_3_CS_PIN)
+//     if (mcp_index < HAL_NUM_CAN_IFACES) {
+//         canDrivers[mcp_index] = new ESP32::CANIface_MCP2515(mcp_index);
+//         mcp_index++;
+//     }
+// #endif
 
     // MCP2515 #4 (numbered pins) - extend as needed
-#if HAL_NUM_CAN_IFACES > 4 && defined(MCP2515_4_CS_PIN)
-    if (mcp_index < HAL_NUM_CAN_IFACES) {
-        canDrivers[mcp_index] = new ESP32::CANIface_MCP2515(mcp_index);
-        mcp_index++;
-    }
-#endif
+// #if HAL_NUM_CAN_IFACES > 4 && defined(MCP2515_4_CS_PIN)
+//     if (mcp_index < HAL_NUM_CAN_IFACES) {
+//         canDrivers[mcp_index] = new ESP32::CANIface_MCP2515(mcp_index);
+//         mcp_index++;
+//     }
+// #endif
 #endif // HAL_NUM_CAN_IFACES > 1
 #endif
 }
@@ -204,6 +212,20 @@ void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
 {
     // Initialize ESP32 parameters before any ESP-IDF logging
     ESP32::esp32_params()->init();
+    
+    // Initialize ESP log redirection to MAVLink if needed
+    esp32_log_redirect_init();
+    
+    // Force a test message to verify redirect is working  
+    if (ESP32::esp32_params()->log_to_mavlink.get()) {
+        ESP_LOGE("TEST", "ESP32 log redirect ACTIVE");
+        // Also send directly as CRITICAL to ensure it gets through
+        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "ESP32: Log redirect enabled=%d", 
+                     (int)ESP32::esp32_params()->log_to_mavlink.get());
+    } else {
+        // Send message that redirect is disabled
+        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "ESP32: Log redirect DISABLED");
+    }
     
     // Debug via MAVLink STATUSTEXT - safe from serial contamination
     ESP32_DEBUG_INFO("HAL run starting with callbacks");

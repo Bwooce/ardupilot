@@ -27,9 +27,11 @@
 
 #include "esp_task_wdt.h"
 #include "esp_log.h"
+#include "esp_system.h"
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Scheduler/AP_Scheduler.h>
+#include <GCS_MAVLink/GCS.h>
 #include <stdio.h>
 #include <inttypes.h>
 
@@ -38,6 +40,18 @@
 using namespace ESP32;
 
 extern const AP_HAL::HAL& hal;
+
+// RTC memory structure for WDT info (survives resets)
+#define WDT_INFO_MAGIC 0xDEADBEEF
+RTC_DATA_ATTR struct {
+    uint32_t magic;
+    char task_name[16];
+    uint32_t stack_hwm;
+    uint32_t timestamp;
+    uint32_t heap_free;
+    uint32_t heap_min;
+    uint32_t last_pc;  // Last program counter if available
+} wdt_info;
 
 bool Scheduler::_initialized = true;
 
@@ -52,6 +66,11 @@ Scheduler::~Scheduler()
         esp_task_wdt_deinit();
     }
 }
+
+// Note: wdt_info structure is defined above at line 44-54
+// with additional fields for heap and PC tracking
+
+#define WDT_INFO_MAGIC 0xDEADBEEF
 
 void Scheduler::wdt_init(uint32_t timeout, uint32_t core_mask)
 {
@@ -77,6 +96,116 @@ void Scheduler::wdt_init(uint32_t timeout, uint32_t core_mask)
     if (ESP_OK != esp_task_wdt_add(NULL)) {
         printf("esp_task_wdt_add(NULL) failed");
     }
+    
+    // Note: ESP-IDF v5.x removed the user callback API
+    // WDT info will be captured via panic handler or coredump instead
+}
+
+void Scheduler::report_reset_reason()
+{
+    // Try immediate report (may fail if GCS not ready)
+    GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "WDT: Check magic=0x%lX exp=0x%lX", 
+                  (unsigned long)wdt_info.magic, (unsigned long)WDT_INFO_MAGIC);
+    
+    // Check for saved WDT info from previous crash
+    if (wdt_info.magic == WDT_INFO_MAGIC) {
+        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "WDT: Found valid saved info!");
+        // Report detailed WDT info
+        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, 
+                     "WDT: Task=%s Stack=%lu Heap=%lu/%lu",
+                     wdt_info.task_name,
+                     (unsigned long)wdt_info.stack_hwm,
+                     (unsigned long)wdt_info.heap_free,
+                     (unsigned long)wdt_info.heap_min);
+        
+        // Report last PC if available
+        if (wdt_info.last_pc != 0) {
+            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,
+                         "WDT: PC=0x%lX Tick=%lu",
+                         (unsigned long)wdt_info.last_pc,
+                         (unsigned long)wdt_info.timestamp);
+        }
+        
+        // Clear the magic so we don't report it again
+        wdt_info.magic = 0;
+    }
+    
+    esp_reset_reason_t reason = esp_reset_reason();
+    const char* reason_str = nullptr;
+    MAV_SEVERITY severity = MAV_SEVERITY_INFO;
+    
+    switch(reason) {
+        case ESP_RST_UNKNOWN:
+            reason_str = "ESP32 Reset: Unknown reason";
+            severity = MAV_SEVERITY_WARNING;
+            break;
+        case ESP_RST_POWERON:
+            reason_str = "ESP32 Reset: Power-on reset";
+            break;
+        case ESP_RST_EXT:
+            reason_str = "ESP32 Reset: External reset (EN pin)";
+            break;
+        case ESP_RST_SW:
+            reason_str = "ESP32 Reset: Software reset (esp_restart)";
+            break;
+        case ESP_RST_PANIC:
+            reason_str = "ESP32 PANIC: Stack overflow or exception";
+            severity = MAV_SEVERITY_CRITICAL;
+            // Note: Backtrace will be in console output
+            // Use decode_esp32_backtrace.sh to analyze
+            break;
+        case ESP_RST_INT_WDT:
+            reason_str = "ESP32 Reset: Interrupt watchdog";
+            severity = MAV_SEVERITY_CRITICAL;
+            break;
+        case ESP_RST_TASK_WDT:
+            reason_str = "ESP32 Reset: Task watchdog timeout";
+            severity = MAV_SEVERITY_CRITICAL;
+            break;
+        case ESP_RST_WDT:
+            reason_str = "ESP32 Reset: Other watchdog reset";
+            severity = MAV_SEVERITY_CRITICAL;
+            break;
+        case ESP_RST_DEEPSLEEP:
+            reason_str = "ESP32 Reset: Wake from deep sleep";
+            break;
+        case ESP_RST_BROWNOUT:
+            reason_str = "ESP32 Reset: Brownout (low voltage)";
+            severity = MAV_SEVERITY_CRITICAL;
+            break;
+        case ESP_RST_SDIO:
+            reason_str = "ESP32 Reset: SDIO reset";
+            break;
+        default:
+            reason_str = "ESP32 Reset: Unrecognized code";
+            severity = MAV_SEVERITY_WARNING;
+            break;
+    }
+    
+    // Send reset reason via MAVLink STATUSTEXT
+    if (reason_str != nullptr) {
+        GCS_SEND_TEXT(severity, "%s (%d)", reason_str, (int)reason);
+    }
+    
+    // Additional info for watchdog resets - get more details if available
+    if (reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT || reason == ESP_RST_WDT) {
+        // Report heap status in case it's memory related
+        size_t free_heap = esp_get_free_heap_size();
+        size_t min_free_heap = esp_get_minimum_free_heap_size();
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Heap: free=%u min=%u", 
+                     (unsigned)free_heap, (unsigned)min_free_heap);
+        
+        // Try to get WDT task name if available
+        #if CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0 || CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1
+        // Note: ESP-IDF doesn't provide direct API to get which task triggered WDT
+        // but we can report that WDT was triggered
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "WDT: Check console for task details");
+        #endif
+        
+        // Log more details via ESP_LOG which might be captured
+        ESP_LOGE("WDT", "Watchdog reset detected - heap free=%u min=%u", 
+                 (unsigned)free_heap, (unsigned)min_free_heap);
+    }
 }
 
 void Scheduler::init()
@@ -89,6 +218,29 @@ void Scheduler::init()
     // Debug via MAVLink STATUSTEXT - safe from serial contamination
     ESP32_DEBUG_INFO("Starting ESP32 Scheduler initialization");
     ESP32_DEBUG_VERBOSE("Scheduler running with CONFIG_FREERTOS_HZ=%d", CONFIG_FREERTOS_HZ);
+    
+    // Report ESP32 reset reason via MAVLink
+    report_reset_reason();
+    
+    // Report debug protection status if enabled
+#if defined(CONFIG_COMPILER_STACK_CHECK) || defined(CONFIG_HEAP_POISONING_COMPREHENSIVE) || defined(CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK)
+    // Build protection flags string
+    const char* protections = "ESP32 Debug: "
+#ifdef CONFIG_COMPILER_STACK_CHECK
+        "STACK "
+#endif
+#ifdef CONFIG_HEAP_POISONING_COMPREHENSIVE
+        "HEAP "
+#endif
+#ifdef CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK
+        "WATCH"
+#endif
+        ;
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "%s", protections);
+    
+    // Also print to console for local debugging
+    printf("%s protections enabled\n", protections);
+#endif
 
     // keep main tasks that need speed on CPU 0
     // pin potentially slow stuff to CPU 1, as we have disabled the WDT on that core.
@@ -546,16 +698,29 @@ void Scheduler::print_stats(void)
     // printf("loop_rate_hz: %d",get_loop_rate_hz());
 }
 
-// Run every 10s
+// Run every 30s (was 10s - increased for mLRS compatibility)
 void Scheduler::print_main_loop_rate(void)
 {
     static int64_t last_run = 0;
-    if (AP_HAL::millis64() - last_run > 10000) {
+    if (AP_HAL::millis64() - last_run > 30000) {  // Changed from 10000 to 30000 for mLRS
         last_run = AP_HAL::millis64();
+        
+        // Reset WDT before potentially blocking console write
+        esp_task_wdt_reset();
+        
         // null pointer in here...
         const float actual_loop_rate = AP::scheduler().get_filtered_loop_rate_hz();
         const uint16_t expected_loop_rate = AP::scheduler().get_loop_rate_hz();
-        hal.console->printf("loop_rate: actual: %fHz, expected: %uHz\n", actual_loop_rate, expected_loop_rate);
+        
+        // Use GCS instead of console to avoid blocking
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Loop rate: %.1fHz / %uHz", 
+                     actual_loop_rate, expected_loop_rate);
+        
+        // Don't use console->printf as it might block on UART
+        // hal.console->printf("loop_rate: actual: %fHz, expected: %uHz\n", actual_loop_rate, expected_loop_rate);
+        
+        // Reset WDT after the operation
+        esp_task_wdt_reset();
     }
 }
 
@@ -605,8 +770,53 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
 #ifdef SCHEDDEBUG
     printf("%s:%d initialised\n", __PRETTY_FUNCTION__, __LINE__);
 #endif
+    static uint32_t max_loop_time = 0;  // Track max loop time across all iterations
+    
     while (true) {
+        // Reset WDT BEFORE running the loop to ensure we don't timeout
+        static uint32_t wdt_reset_count = 0;
+        static uint32_t last_wdt_reset_report = 0;
+        esp_err_t wdt_err = esp_task_wdt_reset();
+        if (wdt_err != ESP_OK) {
+            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "WDT: Reset failed err=%d at %lu ms", 
+                         (int)wdt_err, (unsigned long)AP_HAL::millis());
+            ESP_LOGE("WDT", "Failed to reset WDT: error %d", wdt_err);
+        } else {
+            wdt_reset_count++;
+            // Report WDT reset success periodically
+            uint32_t now = AP_HAL::millis();
+            if (now - last_wdt_reset_report > 10000) {
+                last_wdt_reset_report = now;
+                // Suppress this message - it's just counting successful WDT feeds, not actual resets
+                // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "WDT: %lu resets OK", 
+                //              (unsigned long)wdt_reset_count);
+                wdt_reset_count = 0;
+            }
+        }
+        
+        // Track loop timing for debugging
+        static uint32_t last_loop_start = 0;
+        uint32_t loop_start = AP_HAL::millis();
+        uint32_t time_since_last = loop_start - last_loop_start;
+        
+        // Warn if too much time passed since last loop (indicates blocking)
+        if (last_loop_start != 0 && time_since_last > 2000) {
+            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "WDT: %lums since last loop!", 
+                         (unsigned long)time_since_last);
+        }
+        last_loop_start = loop_start;
+        
         sched->callbacks->loop();
+        
+        uint32_t loop_time = AP_HAL::millis() - loop_start;
+        if (loop_time > max_loop_time) {
+            max_loop_time = loop_time;
+            if (loop_time > 2000) {  // Warn if loop takes > 2 seconds
+                GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "WDT: Loop took %lums (max %lums)", 
+                             (unsigned long)loop_time, (unsigned long)max_loop_time);
+            }
+        }
+        
         sched->delay_microseconds(250);
 
         // run stats periodically
@@ -614,9 +824,84 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
         sched->print_stats();
 #endif
         sched->print_main_loop_rate();
-
-        if (ESP_OK != esp_task_wdt_reset()) {
-            printf("esp_task_wdt_reset() failed\n");
+        
+        // Delayed WDT info report (10 seconds after boot, once only)
+        static bool wdt_delayed_report_done = false;
+        static uint32_t boot_time = AP_HAL::millis();
+        static uint32_t loop_count = 0;
+        loop_count++;
+        
+        // Stagger this to 15 seconds to avoid collision with other periodic messages
+        if (!wdt_delayed_report_done && AP_HAL::millis() - boot_time > 15000) {
+            wdt_delayed_report_done = true;
+            
+            // Reset WDT before multiple GCS sends
+            esp_task_wdt_reset();
+            
+            // Combine messages to reduce mLRS traffic
+            if (wdt_info.magic == WDT_INFO_MAGIC) {
+                // Send one combined message instead of multiple
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "WDT: %s S=%lu H=%lu L=%d", 
+                             wdt_info.task_name,
+                             (unsigned long)wdt_info.stack_hwm,
+                             (unsigned long)wdt_info.heap_free,
+                             (int)ESP32::esp32_params()->log_to_mavlink.get());
+                esp_task_wdt_reset();
+                // Don't clear magic here - let report_reset_reason do it
+            }
+        }
+        
+        // Save task info to RTC memory periodically (every ~5 seconds)
+        // This will be available after a WDT reset
+        static uint32_t last_wdt_save = 0;
+        uint32_t now = AP_HAL::millis();
+        if (now - last_wdt_save > 5000) {
+            last_wdt_save = now;
+            
+            // Save current task info
+            wdt_info.magic = WDT_INFO_MAGIC;
+            
+            // Get current task name
+            const char* task_name = pcTaskGetName(NULL);
+            if (task_name) {
+                strncpy(wdt_info.task_name, task_name, sizeof(wdt_info.task_name)-1);
+                wdt_info.task_name[sizeof(wdt_info.task_name)-1] = '\0';
+            } else {
+                strcpy(wdt_info.task_name, "main");
+            }
+            
+            // Get stack high water mark (bytes remaining)
+            wdt_info.stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+            
+            // Save timestamp
+            wdt_info.timestamp = xTaskGetTickCount();
+            
+            // Save heap info
+            wdt_info.heap_free = esp_get_free_heap_size();
+            wdt_info.heap_min = esp_get_minimum_free_heap_size();
+            
+            // Save last PC (instruction pointer) - approximate location
+            // Note: This is a rough approximation, actual PC at WDT would be different
+            wdt_info.last_pc = (uint32_t)__builtin_return_address(0);
+            
+            // Send periodic confirmation (every 30 seconds)
+            static uint32_t last_wdt_report = 0;
+            if (now - last_wdt_report > 30000) {
+                last_wdt_report = now;
+                
+                // Reset WDT before potentially blocking GCS send
+                esp_task_wdt_reset();
+                
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "WDT: Saved %s S=%lu H=%lu/%lu MaxLoop=%lu", 
+                             wdt_info.task_name,
+                             (unsigned long)wdt_info.stack_hwm,
+                             (unsigned long)wdt_info.heap_free,
+                             (unsigned long)wdt_info.heap_min,
+                             (unsigned long)max_loop_time);
+                             
+                // Reset WDT after GCS send
+                esp_task_wdt_reset();
+            }
         };
     }
 }

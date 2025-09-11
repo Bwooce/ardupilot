@@ -280,15 +280,28 @@ void GCS_MAVLINK::handle_param_set(const mavlink_message_t &msg)
     char key[AP_MAX_NAME_SIZE+1];
     strncpy(key, (char *)packet.param_id, AP_MAX_NAME_SIZE);
     key[AP_MAX_NAME_SIZE] = 0;
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Debug: Log parameter set request
+    hal.console->printf("PARAM_SET: Received request for '%s' = %.4f\n", key, packet.param_value);
+#endif
 
     // find existing param so we can get the old value
     uint16_t parameter_flags = 0;
     vp = AP_Param::find(key, &var_type, &parameter_flags);
     if (vp == nullptr || isnan(packet.param_value) || isinf(packet.param_value)) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        hal.console->printf("PARAM_SET: Failed - param not found or invalid value (vp=%p, nan=%d, inf=%d)\n", 
+                 vp, isnan(packet.param_value), isinf(packet.param_value));
+#endif
         return;
     }
 
     float old_value = vp->cast_to_float(var_type);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    hal.console->printf("PARAM_SET: Found param, old_value=%.4f, type=%d, flags=0x%04x\n", 
+             old_value, (int)var_type, parameter_flags);
+#endif
 
     if (!vp->allow_set_via_mavlink(parameter_flags)) {
         // don't warn the user about this failure if we are dropping
@@ -305,6 +318,9 @@ void GCS_MAVLINK::handle_param_set(const mavlink_message_t &msg)
 
     // set the value
     vp->set_float(packet.param_value, var_type);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    hal.console->printf("PARAM_SET: Called set_float with value=%.4f\n", packet.param_value);
+#endif
 
     /*
       we force the save if the value is not equal to the old
@@ -314,9 +330,16 @@ void GCS_MAVLINK::handle_param_set(const mavlink_message_t &msg)
       save the change
      */
     bool force_save = !is_equal(packet.param_value, old_value);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    hal.console->printf("PARAM_SET: force_save=%d (old=%.4f, new=%.4f, equal=%d)\n", 
+             force_save, old_value, packet.param_value, is_equal(packet.param_value, old_value));
+#endif
 
     // save the change
     vp->save(force_save);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    hal.console->printf("PARAM_SET: Saved parameter, new value=%.4f\n", vp->cast_to_float(var_type));
+#endif
 
     if (force_save && (parameter_flags & AP_PARAM_FLAG_ENABLE)) {
         AP_Param::invalidate_count();
@@ -330,6 +353,10 @@ void GCS_MAVLINK::handle_param_set(const mavlink_message_t &msg)
 #endif
 
     // send confirmation back to GCS with the new value
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    float final_value = vp->cast_to_float(var_type);
+    hal.console->printf("PARAM_SET: Sending confirmation, param='%s', value=%.4f\n", key, final_value);
+#endif
     send_parameter_value(key, var_type, vp->cast_to_float(var_type));
 }
 

@@ -113,6 +113,12 @@ public:
     friend class Sailboat;
 
     Rover(void);
+    
+// Temporarily disabled to debug startup issue
+// #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+//     // Get ESP32 parameters for external access
+//     ESP32::ESP32Params* get_esp32_params() { return &g2.esp32_params; }
+// #endif
 
 private:
 

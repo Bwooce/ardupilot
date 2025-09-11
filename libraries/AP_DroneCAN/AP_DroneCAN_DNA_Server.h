@@ -18,7 +18,7 @@ class AP_DroneCAN_DNA_Server
 {
     StorageAccess storage;
 
-    struct NodeRecord {
+    struct PACKED NodeRecord {
         uint8_t uid_hash[6];
         uint8_t crc;
     };

@@ -19,6 +19,7 @@
 #include <AP_SerialManager/AP_SerialManager.h>
 #include "esp_debug_helpers.h"
 #include "esp_log.h"
+#include "driver/uart.h"
 #include "driver/usb_serial_jtag.h"
 #include "hal/usb_serial_jtag_ll.h"
 #include "freertos/FreeRTOS.h"
@@ -92,10 +93,10 @@ UARTDriver::UARTDriver(uint8_t serial_num)
     _is_usb_console = is_console_uart(serial_num);
 #endif
     
-    // ESP log level will be controlled by ESP32_DEBUG_LEVEL parameter
-    // Default to warning level for UART drops and flow control until parameter is loaded
-    esp_log_level_set("UART_DROP", ESP_LOG_WARN);
-    esp_log_level_set("UART_FLOW", ESP_LOG_WARN);
+    // ESP log level will be controlled by ESP32_DEBUG_LVL parameter
+    // Suppress UART drop messages - they're too spammy and not useful
+    esp_log_level_set("UART_DROP", ESP_LOG_NONE);
+    esp_log_level_set("UART_FLOW", ESP_LOG_NONE);
 }
 
 void UARTDriver::vprintf(const char *fmt, va_list ap)
@@ -157,8 +158,20 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
                          UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
             
             // Install UART driver with large buffers and DMA support
-            // Use event queue for interrupt-driven processing
-            uart_driver_install(p, rxS, txS, 100, &_uart_event_queue, ESP_INTR_FLAG_IRAM);
+            // Use larger event queue for low baud rates that might get flooded
+            int queue_size = (b <= 9600) ? 200 : 100;
+            uart_driver_install(p, rxS, txS, queue_size, &_uart_event_queue, ESP_INTR_FLAG_IRAM);
+            
+            // Configure for low baud rates
+            // At 4800 baud, bytes arrive slowly so we need special handling
+            if (b <= 9600) {
+                // Set RX timeout to trigger interrupt after 2 symbol periods of idle
+                // This ensures we read data promptly even with small messages
+                uart_set_rx_timeout(p, 2);  // 2 symbol periods
+                
+                hal.console->printf("UART%d: Configured for low baud rate %lu with RX timeout=2\n", 
+                                   uart_num, (unsigned long)b);
+            }
         }
         _readbuf.set_size(RX_BUF_SIZE);
         
@@ -324,16 +337,21 @@ void IRAM_ATTR UARTDriver::read_data()
         
         uart_event_t event;
         
-        // Process events one at a time to avoid race conditions
-        // Only process one event per call to prevent buffer corruption
-        if (xQueueReceive(_uart_event_queue, &event, 0) == pdTRUE) {
+        // Process ALL pending events to avoid missing data at low baud rates
+        // At 4800 baud we must process events quickly to avoid queue overflow
+        // Remove limit to ensure we don't leave events unprocessed
+        int events_processed = 0;
+        while (xQueueReceive(_uart_event_queue, &event, 0) == pdTRUE) {
+            events_processed++;
             switch (event.type) {
                 case UART_DATA: {
-                    // Read available data in chunks with better error handling
+                    // Read ALL available data, not just one chunk
+                    size_t total_read = 0;
                     size_t available = 0;
                     uart_get_buffered_data_len(p, &available);
                     
-                    if (available > 0) {
+                    // Keep reading until no more data available
+                    while (available > 0) {
                         size_t to_read = MIN(available, sizeof(_buffer));
                         int count = uart_read_bytes(p, _buffer, to_read, 0);
                         if (count > 0) {
@@ -341,11 +359,60 @@ void IRAM_ATTR UARTDriver::read_data()
                             if (_readbuf.space() >= count) {
                                 _readbuf.write(_buffer, count);
                                 _receive_timestamp_update();
+                                total_read += count;
+                                
+                                // Debug: Show ALL bytes at low baud to diagnose partial messages
+                                if (_baudrate <= 9600 && count > 0) {
+                                    hal.console->printf("UART%d RX[%u]: ", uart_num, (unsigned)count);
+                                    // Show all bytes to see if we're getting complete messages
+                                    for (int i = 0; i < count && i < 32; i++) {
+                                        hal.console->printf("%02X ", _buffer[i]);
+                                    }
+                                    if (count > 32) {
+                                        hal.console->printf("... (%u total)", (unsigned)count);
+                                    }
+                                    hal.console->printf("\n");
+                                    
+                                    // Check for MAVLink v2 start byte and decode if found
+                                    if (_buffer[0] == 0xFD) {
+                                        if (count >= 10) {
+                                            uint8_t payload_len = _buffer[1];
+                                            uint8_t msgid_low = _buffer[7];
+                                            uint8_t msgid_mid = _buffer[8];
+                                            uint8_t msgid_high = _buffer[9];
+                                            uint32_t msgid = msgid_low | (msgid_mid << 8) | (msgid_high << 16);
+                                            hal.console->printf("  MAVLink v2: len=%u, msgid=%lu, expected_total=%u\n", 
+                                                              payload_len, (unsigned long)msgid, payload_len + 12);
+                                        } else {
+                                            hal.console->printf("  MAVLink v2 start but only %u bytes (need 10+ for header)\n", (unsigned)count);
+                                        }
+                                    }
+                                    
+                                    // Special check for corrupted PARAM_REQUEST_READ
+                                    if (count >= 16 && _buffer[0] == 0x00 && _buffer[1] == 0x00 && 
+                                        _buffer[2] == 0xFF && _buffer[3] == 0x00 && _buffer[4] == 0x14) {
+                                        hal.console->printf("  WARNING: Looks like PARAM_REQUEST_READ missing FD 11 00 header!\n");
+                                        hal.console->printf("  Should be: FD 11 00 00 00 FF 00 14...\n");
+                                        hal.console->printf("  Got:       %02X %02X %02X FF 00 14...\n", 
+                                                          _buffer[0], _buffer[1], _buffer[2]);
+                                    }
+                                }
                             } else {
                                 // Buffer full - drop this data to prevent corruption
                                 uart_flush_input(p);
+                                break;
                             }
                         }
+                        
+                        // Check if more data arrived
+                        uart_get_buffered_data_len(p, &available);
+                        if (available == 0) break;
+                    }
+                    
+                    // Debug low baud rate reception
+                    if (_baudrate <= 9600 && total_read > 0) {
+                        hal.console->printf("UART%d: Read %u bytes at %lu baud\n", 
+                                          uart_num, (unsigned)total_read, (unsigned long)_baudrate);
                     }
                     break;
                 }
@@ -433,7 +500,8 @@ size_t UARTDriver::_write(const uint8_t *buffer, size_t size)
         // Buffer full - drop entire write to maintain atomicity
         static uint32_t drop_count = 0;
         if ((++drop_count % 100) == 1) {
-            ESP_LOGW("UART_DROP", "UART%d dropped write #%" PRIu32 " (size %d, space %" PRIu32 ")", 
+            // Use debug level to avoid spam - these are expected when console buffer is full
+            ESP_LOGD("UART_DROP", "UART%d dropped write #%" PRIu32 " (size %d, space %" PRIu32 ")", 
                      uart_num, drop_count, size, _writebuf.space());
         }
     }
@@ -522,7 +590,16 @@ void UARTDriver::calculate_buffer_sizes(uint32_t baudrate, uint16_t &rxS, uint16
     if (baudrate > 0) {
         // Convert baud (bits/sec) to bytes/sec, then to bytes per 100ms
         uint32_t bytes_per_100ms = (baudrate / 10) / 10; // /10 for bits->bytes, /10 for 100ms
-        min_rx_buffer = MAX(min_rx_buffer, bytes_per_100ms);
+        // Force larger buffer for low baud rates to handle MAVLink
+        // At 4800 baud, ensure at least 1024 bytes
+        if (baudrate <= 9600) {
+            min_rx_buffer = MAX(1024, min_rx_buffer);
+        } else {
+            min_rx_buffer = MAX(512, MAX(min_rx_buffer, bytes_per_100ms));
+        }
+        
+        hal.console->printf("UART%d: Baud=%lu, RX buffer size=%u bytes\n", 
+                           uart_num, (unsigned long)baudrate, min_rx_buffer);
     }
     
     // Double buffers for high-speed connections

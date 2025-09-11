@@ -1,0 +1,26 @@
+--- a/build/esp32lilygo_tconnect/libraries/GCS_MAVLink/include/mavlink/v2.0/mavlink_helpers.h
++++ b/build/esp32lilygo_tconnect/libraries/GCS_MAVLink/include/mavlink/v2.0/mavlink_helpers.h
+@@ -605,6 +605,7 @@ MAVLINK_HELPER uint8_t mavlink_frame_char_buffer(mavlink_message_t* rxmsg,
+ 		{
+ 			status->parse_state = MAVLINK_PARSE_STATE_GOT_STX;
+ 			rxmsg->len = 0;
++			rxmsg->msgid = 0;
+ 			rxmsg->magic = c;
+                         status->flags &= ~MAVLINK_STATUS_FLAG_IN_MAVLINK1;
+ 			mavlink_start_checksum(rxmsg);
+@@ -612,6 +613,7 @@ MAVLINK_HELPER uint8_t mavlink_frame_char_buffer(mavlink_message_t* rxmsg,
+ 		{
+ 			status->parse_state = MAVLINK_PARSE_STATE_GOT_STX;
+ 			rxmsg->len = 0;
++			rxmsg->msgid = 0;
+ 			rxmsg->magic = c;
+                         status->flags |= MAVLINK_STATUS_FLAG_IN_MAVLINK1;
+ 			mavlink_start_checksum(rxmsg);
+@@ -1009,6 +1011,7 @@ MAVLINK_HELPER uint8_t mavlink_frame_char(uint8_t chan, uint8_t c, mavlink_mess
+ 	    {
+ 		    status->parse_state = MAVLINK_PARSE_STATE_GOT_STX;
+ 		    rxmsg->len = 0;
++		    rxmsg->msgid = 0;
+ 		    mavlink_start_checksum(rxmsg);
+ 	    }
+ 	    return 0;

@@ -43,6 +43,10 @@
 
 #include "include/mavlink/v2.0/mavlink_types.h"
 
+// ESP32 workaround: MAVLink uses char buffers for message construction when
+// MAVLINK_ALIGNED_FIELDS is 0, but these need proper alignment for float/int access
+// We'll handle this per-message for now until MAVLink library is updated
+
 /// MAVLink streams used for each telemetry port
 extern AP_HAL::UARTDriver	*mavlink_comm_port[MAVLINK_COMM_NUM_BUFFERS];
 extern bool gcs_alternative_active[MAVLINK_COMM_NUM_BUFFERS];

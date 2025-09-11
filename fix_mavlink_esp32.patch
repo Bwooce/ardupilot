@@ -1,0 +1,19 @@
+--- a/pymavlink/generator/mavgen_c.py
++++ b/pymavlink/generator/mavgen_c.py
+@@ -560,7 +560,7 @@ static inline void mavlink_msg_${name_lower}_send(mavlink_channel_t chan, ${arg
+     _mav_put_${type}(buf, ${wire_offset}, ${putname});
+ ${{scalar_fields:    ${putfield}}}
+ 
+-    _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_${name}, buf, MAVLINK_MSG_ID_${name}_MIN_LEN, MAVLINK_MSG_ID_${name}_LEN, MAVLINK_MSG_ID_${name}_CRC);
++    _mav_finalize_message_chan_send(chan, (uint32_t)MAVLINK_MSG_ID_${name}, buf, MAVLINK_MSG_ID_${name}_MIN_LEN, MAVLINK_MSG_ID_${name}_LEN, MAVLINK_MSG_ID_${name}_CRC);
+ #else
+     mavlink_${name_lower}_t packet;
+ ${{scalar_fields:    packet.${putname} = ${putname};
+@@ -568,7 +568,7 @@ ${{scalar_fields:    packet.${putname} = ${putname};
+ ${{array_fields:    mav_array_memcpy(packet.${name}, ${name}, sizeof(${type})*${array_length});
+ }}
+ 
+-    _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_${name}, (const char *)&packet, MAVLINK_MSG_ID_${name}_MIN_LEN, MAVLINK_MSG_ID_${name}_LEN, MAVLINK_MSG_ID_${name}_CRC);
++    _mav_finalize_message_chan_send(chan, (uint32_t)MAVLINK_MSG_ID_${name}, (const char *)&packet, MAVLINK_MSG_ID_${name}_MIN_LEN, MAVLINK_MSG_ID_${name}_LEN, MAVLINK_MSG_ID_${name}_CRC);
+ #endif
+ }

@@ -39,6 +39,9 @@ public:
     // Debug level parameter (0=disabled, 1=errors, 2=warnings, 3=info, 4=verbose, 5=all)
     AP_Int8 debug_level;
     
+    // Log to MAVLink parameter (0=disabled, 1=enabled)
+    AP_Int8 log_to_mavlink;
+    
     // Initialize parameters and apply settings
     void init();
     
@@ -48,8 +51,11 @@ public:
     // Apply ESP-IDF logging level from parameter
     void apply_log_level();
     
+public:
+    // Constructor needs to be public for embedding in vehicle parameters
+    ESP32Params();
+    
 private:
-    ESP32Params() = default;
     ESP32Params(const ESP32Params&) = delete;
     ESP32Params& operator=(const ESP32Params&) = delete;
 };

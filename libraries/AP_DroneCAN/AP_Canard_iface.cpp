@@ -94,12 +94,54 @@ bool CanardInterface::broadcast(const Canard::Transfer &bcast_transfer) {
     }
 #endif
 
+    // Validate and fix priority if corrupted
+    uint8_t safe_priority = bcast_transfer.priority;
+    if (safe_priority > 31) {
+        ESP_LOGE("CANARD", "INVALID PRIORITY %u (0x%02X) for DataTypeID %u - clamping to 31",
+                 (unsigned)safe_priority, (unsigned)safe_priority, 
+                 (unsigned)bcast_transfer.data_type_id);
+        
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // Enhanced diagnostic to find corruption source
+        ESP_LOGE("CANARD", "broadcast() corruption detected - Transfer at %p:", &bcast_transfer);
+        ESP_LOGE("CANARD", "  transfer_type=%u, signature=0x%llX", 
+                 (unsigned)bcast_transfer.transfer_type, 
+                 (unsigned long long)bcast_transfer.data_type_signature);
+        ESP_LOGE("CANARD", "  data_type_id=%u (0x%04X), priority=%u (0x%02X)", 
+                 (unsigned)bcast_transfer.data_type_id, (unsigned)bcast_transfer.data_type_id,
+                 (unsigned)bcast_transfer.priority, (unsigned)bcast_transfer.priority);
+        ESP_LOGE("CANARD", "  payload=%p, payload_len=%lu, iface_mask=0x%02X",
+                 bcast_transfer.payload, (unsigned long)bcast_transfer.payload_len,
+                 (unsigned)bcast_transfer.iface_mask);
+        
+        // Dump raw memory to check for corruption pattern
+        const uint8_t* raw = (const uint8_t*)&bcast_transfer;
+        ESP_LOGE("CANARD", "  Raw Transfer bytes [0-31]:");
+        ESP_LOGE("CANARD", "    %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+                 raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7],
+                 raw[8], raw[9], raw[10], raw[11], raw[12], raw[13], raw[14], raw[15]);
+        ESP_LOGE("CANARD", "    %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+                 raw[16], raw[17], raw[18], raw[19], raw[20], raw[21], raw[22], raw[23],
+                 raw[24], raw[25], raw[26], raw[27], raw[28], raw[29], raw[30], raw[31]);
+        
+        // Check if it's a specific corruption pattern
+        if ((bcast_transfer.priority & 0x80) != 0) {
+            ESP_LOGE("CANARD", "Priority has bit 7 set - likely struct alignment/packing issue!");
+        }
+#endif
+        
+        safe_priority = 31;  // Clamp to maximum valid priority
+    }
+    
+    // CRITICAL: Zero-initialize the entire structure first to avoid garbage values
+    memset(&tx_transfer, 0, sizeof(tx_transfer));
+    
     tx_transfer = {
         .transfer_type = bcast_transfer.transfer_type,
         .data_type_signature = bcast_transfer.data_type_signature,
         .data_type_id = bcast_transfer.data_type_id,
         .inout_transfer_id = bcast_transfer.inout_transfer_id,
-        .priority = bcast_transfer.priority,
+        .priority = safe_priority,
         .payload = (const uint8_t*)bcast_transfer.payload,
         .payload_len = uint16_t(bcast_transfer.payload_len),
 #if CANARD_ENABLE_CANFD
@@ -123,10 +165,8 @@ bool CanardInterface::broadcast(const Canard::Transfer &bcast_transfer) {
                  (long long)(deadline - now));
     }
     
-    if (bcast_transfer.data_type_id == 1) { // Allocation message
-        ESP_LOGI("CANARD", "Allocation deadline calc: now=%llu, timeout_ms=%lu, deadline=%llu",
-                 now, (unsigned long)bcast_transfer.timeout_ms, deadline);
-    }
+    // Debug logging removed to reduce spam
+    // ESP_LOGD("CANARD", "Allocation deadline: now=%llu, deadline=%llu", now, deadline);
 #endif
     // Debug what DroneCAN thinks it's sending (only at verbose debug level)
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && 0  // Disabled - too verbose, enable only for debugging broadcast issues
@@ -156,12 +196,24 @@ bool CanardInterface::request(uint8_t destination_node_id, const Canard::Transfe
     }
     WITH_SEMAPHORE(_sem_tx);
 
+    // Validate and fix priority if corrupted
+    uint8_t safe_priority = req_transfer.priority;
+    if (safe_priority > 31) {
+        ESP_LOGE("CANARD", "INVALID REQUEST PRIORITY %u (0x%02X) for DataTypeID %u - clamping to 31",
+                 (unsigned)safe_priority, (unsigned)safe_priority, 
+                 (unsigned)req_transfer.data_type_id);
+        safe_priority = 31;  // Clamp to maximum valid priority
+    }
+    
+    // CRITICAL: Zero-initialize the entire structure first to avoid garbage values
+    memset(&tx_transfer, 0, sizeof(tx_transfer));
+    
     tx_transfer = {
         .transfer_type = req_transfer.transfer_type,
         .data_type_signature = req_transfer.data_type_signature,
         .data_type_id = req_transfer.data_type_id,
         .inout_transfer_id = req_transfer.inout_transfer_id,
-        .priority = req_transfer.priority,
+        .priority = safe_priority,
         .payload = (const uint8_t*)req_transfer.payload,
         .payload_len = uint16_t(req_transfer.payload_len),
 #if CANARD_ENABLE_CANFD
@@ -183,7 +235,7 @@ bool CanardInterface::request(uint8_t destination_node_id, const Canard::Transfe
     int16_t ret = canardRequestOrRespondObj(&canard, destination_node_id, &tx_transfer);
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     if (ret > 0) {
-        ESP_LOGE("CAN_RX", "GetNodeInfo request queued successfully: %d frames to node %d", 
+        ESP_LOGD("CAN_RX", "GetNodeInfo request queued successfully: %d frames to node %d", 
                  ret, destination_node_id);
     } else {
         ESP_LOGE("CAN_RX", "GetNodeInfo request FAILED: error %d to node %d", 
@@ -204,12 +256,24 @@ bool CanardInterface::respond(uint8_t destination_node_id, const Canard::Transfe
     }
     WITH_SEMAPHORE(_sem_tx);
 
+    // Validate and fix priority if corrupted
+    uint8_t safe_priority = res_transfer.priority;
+    if (safe_priority > 31) {
+        ESP_LOGE("CANARD", "INVALID RESPONSE PRIORITY %u (0x%02X) for DataTypeID %u - clamping to 31",
+                 (unsigned)safe_priority, (unsigned)safe_priority, 
+                 (unsigned)res_transfer.data_type_id);
+        safe_priority = 31;  // Clamp to maximum valid priority
+    }
+    
+    // CRITICAL: Zero-initialize the entire structure first to avoid garbage values
+    memset(&tx_transfer, 0, sizeof(tx_transfer));
+    
     tx_transfer = {
         .transfer_type = res_transfer.transfer_type,
         .data_type_signature = res_transfer.data_type_signature,
         .data_type_id = res_transfer.data_type_id,
         .inout_transfer_id = res_transfer.inout_transfer_id,
-        .priority = res_transfer.priority,
+        .priority = safe_priority,
         .payload = (const uint8_t*)res_transfer.payload,
         .payload_len = uint16_t(res_transfer.payload_len),
 #if CANARD_ENABLE_CANFD
@@ -233,11 +297,19 @@ bool CanardInterface::respond(uint8_t destination_node_id, const Canard::Transfe
 void CanardInterface::onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer) {
     CanardInterface* iface = (CanardInterface*) ins->user_reference;
     
-    // Debug for allocation messages
-    if (transfer->data_type_id == 1) {
+    // Debug for allocation messages (only for broadcast messages with ID 1, not service responses)
+    if (transfer->data_type_id == 1 && transfer->transfer_type == CanardTransferTypeBroadcast) {
         hal.console->printf("DNA: onTransferReception got Allocation message from node %d\n", 
                            transfer->source_node_id);
     }
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Debug GetNodeInfo responses
+    if (transfer->transfer_type == CanardTransferTypeResponse && transfer->data_type_id == 1) {
+        ESP_LOGD("CAN_RX", "GetNodeInfo RESPONSE in onTransferReception from node %d! Payload len=%d",
+                 transfer->source_node_id, transfer->payload_len);
+    }
+#endif
     
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     // Track all DroneCAN message reception
@@ -255,23 +327,24 @@ void CanardInterface::onTransferReception(CanardInstance* ins, CanardRxTransfer*
         first_can_rx = false;
     }
     
-    // Log LogMessage transfers at ERROR level for debugging decode failures
+    // Log LogMessage transfers at DEBUG level (only visible when debugging)
     if (transfer->data_type_id == 16383) { // uavcan.protocol.debug.LogMessage
         logmsg_count++;
-        ESP_LOGE("CAN_RX", "LogMessage RX: src_node=%d, len=%d", 
+        ESP_LOGD("CAN_RX", "LogMessage RX: src_node=%d, len=%d", 
                  transfer->source_node_id, transfer->payload_len);
-        // Removed redundant printf - was causing console corruption with ESP_LOGE
         
-        // Log first 32 bytes of payload for debugging
+        // Only log payload in verbose debug mode
+        #ifdef DEBUG_BUILD
         if (transfer->payload_len > 0) {
             char hex_buf[97] = {0}; // 32 bytes * 3 chars per byte + null
             int bytes_to_log = transfer->payload_len > 32 ? 32 : transfer->payload_len;
             for (int i = 0; i < bytes_to_log; i++) {
                 snprintf(&hex_buf[i*3], 4, "%02X ", ((uint8_t*)transfer->payload_head)[i]);
             }
-            ESP_LOGE("CAN_RX", "  Payload preview: %s%s", hex_buf, 
+            ESP_LOGD("CAN_RX", "  Payload preview: %s%s", hex_buf, 
                      transfer->payload_len > 32 ? "..." : "");
         }
+        #endif
         
         // Try to decode it manually to check for errors
         struct uavcan_protocol_debug_LogMessage test_msg;
@@ -296,13 +369,16 @@ void CanardInterface::onTransferReception(CanardInstance* ins, CanardRxTransfer*
         }
     }
     
-    // Report statistics every 5 seconds
+    // Report statistics every 5 seconds (use ESP_LOGD for debug-level logging only)
     uint32_t now_ms = AP_HAL::millis();
     if (now_ms - last_report_ms > 5000) {
-        ESP_LOGE("CAN_RX", "DroneCAN stats: %lu total msgs, %lu LogMessages in last 5s",
+        ESP_LOGD("CAN_RX", "DroneCAN stats: %lu total msgs, %lu LogMessages in last 5s",
                  dronecan_msg_count, logmsg_count);
-        hal.console->printf("ESP32 CAN_RX: DroneCAN received %lu msgs (%lu LogMessages) in 5s\n",
-                           dronecan_msg_count, logmsg_count);
+        // Only print to console if we have LogMessages (indicating potential issues)
+        if (logmsg_count > 0) {
+            hal.console->printf("ESP32 CAN_RX: DroneCAN received %lu msgs (%lu LogMessages) in 5s\n",
+                               dronecan_msg_count, logmsg_count);
+        }
         dronecan_msg_count = 0;
         logmsg_count = 0;
         last_report_ms = now_ms;
@@ -343,20 +419,20 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
         reject_count++;
         // Log every 50th rejection
         if (reject_count % 50 == 1) {
-            ESP_LOGE("CAN_RX", "shouldAccept REJECTED dtid=%d, xfer_type=%d, src=%d (total rejected=%d)",
+            ESP_LOGD("CAN_RX", "shouldAccept REJECTED dtid=%d, xfer_type=%d, src=%d (total rejected=%d)",
                      data_type_id, transfer_type, source_node_id, reject_count);
         }
     } else {
         // Log all accepted messages
-        ESP_LOGE("CAN_RX", "shouldAccept ACCEPTED dtid=%d, xfer_type=%d, src=%d, sig=0x%llx",
+        ESP_LOGD("CAN_RX", "shouldAccept ACCEPTED dtid=%d, xfer_type=%d, src=%d, sig=0x%llx",
                  data_type_id, transfer_type, source_node_id, (unsigned long long)*out_data_type_signature);
         
         // Special logging for service responses
         if (transfer_type == CanardTransferTypeResponse) {
-            ESP_LOGE("CAN_RX", "SERVICE RESPONSE RECEIVED! dtid=%d from node %d", 
+            ESP_LOGD("CAN_RX", "SERVICE RESPONSE RECEIVED! dtid=%d from node %d", 
                      data_type_id, source_node_id);
             if (data_type_id == 1) {  // GetNodeInfo response
-                ESP_LOGE("CAN_RX", "GetNodeInfo RESPONSE from node %d!", source_node_id);
+                ESP_LOGD("CAN_RX", "GetNodeInfo RESPONSE from node %d!", source_node_id);
             }
         }
     }
@@ -364,7 +440,7 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
     // Periodically log summary
     uint32_t now = AP_HAL::millis();
     if (now - last_debug > 10000) {
-        ESP_LOGE("CAN_RX", "shouldAccept stats: %d messages rejected in last 10s", reject_count);
+        ESP_LOGD("CAN_RX", "shouldAccept stats: %d messages rejected in last 10s", reject_count);
         reject_count = 0;
         last_debug = now;
     }
@@ -616,13 +692,14 @@ void CanardInterface::processRx() {
             
             // Log every 100th extended frame for debugging
             if (extended_frames % 100 == 0) {
-                uint16_t data_type = extractDataType(rxmsg.id);
-                uint8_t source_node = extractSourceNodeID(rxmsg.id);
+                uint32_t masked_id = rxmsg.id & CANARD_CAN_EXT_ID_MASK;
+                uint16_t data_type = extractDataType(masked_id);
+                uint8_t source_node = extractSourceNodeID(masked_id);
                 // Also show what the real message type is for broadcast messages
-                bool is_service = (rxmsg.id >> 23) & 0x1;
-                uint16_t real_msg_type = is_service ? ((rxmsg.id >> 8) & 0xFF) : ((rxmsg.id >> 8) & 0x7FFF);
-                ESP_LOGE("CAN_RX", "Frame %d: id=0x%08X, dtype=%d (real=%d), src=%d, svc=%d, len=%d", 
-                         extended_frames, rxmsg.id, data_type, real_msg_type, source_node, is_service, rxmsg.dlc);
+                bool is_service = (masked_id >> 7) & 0x1;
+                uint16_t real_msg_type = is_service ? ((masked_id >> 16) & 0xFF) : ((masked_id >> 8) & 0x7FFF);
+                ESP_LOGD("CAN_RX", "Frame %d: id=0x%08X, dtype=%d (real=%d), src=%d, svc=%d, len=%d", 
+                         extended_frames, masked_id, data_type, real_msg_type, source_node, is_service, rxmsg.dlc);
             }
 #endif
 
@@ -632,6 +709,7 @@ void CanardInterface::processRx() {
             rx_frame.canfd = rxmsg.canfd;
 #endif
             rx_frame.id = rxmsg.id;
+            
 #if CANARD_MULTI_IFACE
             rx_frame.iface_id = i;
 #endif
@@ -645,7 +723,7 @@ void CanardInterface::processRx() {
                 static uint32_t last_nodeid_log = 0;
                 uint32_t now = AP_HAL::millis();
                 if (now - last_nodeid_log > 5000) {
-                    ESP_LOGE("CAN_RX", "Our node ID: %d, broadcast ID: %d", 
+                    ESP_LOGD("CAN_RX", "Our node ID: %d, broadcast ID: %d", 
                              canardGetLocalNodeID(&canard), CANARD_BROADCAST_NODE_ID);
                     
                     // Show acceptance criteria for a LogMessage
@@ -653,7 +731,7 @@ void CanardInterface::processRx() {
                     uint16_t test_dtype = 16383; // LogMessage
                     bool would_accept_broadcast = shouldAcceptTransfer(&canard, &test_sig, test_dtype, 
                                                                       CanardTransferTypeBroadcast, 36);
-                    ESP_LOGE("CAN_RX", "Would accept LogMessage broadcast from node 36? %s (sig=0x%llx)",
+                    ESP_LOGD("CAN_RX", "Would accept LogMessage broadcast from node 36? %s (sig=0x%llx)",
                              would_accept_broadcast ? "YES" : "NO", (unsigned long long)test_sig);
                     last_nodeid_log = now;
                 }
@@ -661,22 +739,52 @@ void CanardInterface::processRx() {
                 const int16_t res = canardHandleRxFrame(&canard, &rx_frame, timestamp);
                 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+                // Log frames that were accepted by shouldAccept but failed in canardHandleRxFrame
+                if (res <= 0) {
+                    // Extract fields using masked ID (without FlagEFF)
+                    uint32_t masked_id = rx_frame.id & CANARD_CAN_EXT_ID_MASK;
+                    uint16_t data_type = extractDataType(masked_id);
+                    uint8_t source_node = extractSourceNodeID(masked_id);
+                    uint64_t check_sig = 0;
+                    bool should_accept = shouldAcceptTransfer(&canard, &check_sig, data_type,
+                                                             extractTransferType(masked_id), source_node);
+                    if (should_accept && res < 0) {
+                        // Rate limit mismatch messages to reduce spam
+                        static uint32_t last_mismatch_log_ms = 0;
+                        static uint32_t mismatch_count = 0;
+                        uint32_t now_ms = AP_HAL::millis();
+                        mismatch_count++;
+                        
+                        if (now_ms - last_mismatch_log_ms > 5000) {  // Log at most every 5 seconds
+                            ESP_LOGI("CAN_RX", "MISMATCH: %lu occurrences (last: dtype=%d node=%d res=%d)",
+                                     (unsigned long)mismatch_count, data_type, source_node, res);
+                            // Log one example frame for debugging
+                            ESP_LOGI("CAN_RX", "  Example: ID=0x%08X, len=%d",
+                                     (unsigned)(rx_frame.id & 0x1FFFFFFF), rx_frame.data_len);
+                            last_mismatch_log_ms = now_ms;
+                            mismatch_count = 0;
+                        }
+                    }
+                }
+                
                 if (res > 0) {
                     canard_success++;
                     // Log successful message assembly
-                    uint16_t data_type = extractDataType(rx_frame.id);
-                    uint8_t source_node = extractSourceNodeID(rx_frame.id);
-                    ESP_LOGE("CAN_RX", "SUCCESS: canardHandleRxFrame returned %d for dtype=%d from node=%d",
+                    uint32_t masked_id = rx_frame.id & CANARD_CAN_EXT_ID_MASK;
+                    uint16_t data_type = extractDataType(masked_id);
+                    uint8_t source_node = extractSourceNodeID(masked_id);
+                    ESP_LOGD("CAN_RX", "SUCCESS: canardHandleRxFrame returned %d for dtype=%d from node=%d",
                              res, data_type, source_node);
                     // This means a complete transfer was assembled - onTransferReception should be called
-                    ESP_LOGE("CAN_RX", "COMPLETE TRANSFER ASSEMBLED! Check if onTransferReception is called");
+                    ESP_LOGD("CAN_RX", "COMPLETE TRANSFER ASSEMBLED! Check if onTransferReception is called");
                 } else if (res < 0) {
                     canard_errors++;
                     // Log every 50th error with more details
                     if (canard_errors % 50 == 1) {
-                        uint16_t data_type = extractDataType(rx_frame.id);
-                        uint8_t source_node = extractSourceNodeID(rx_frame.id);
-                        uint8_t dest_node = (rx_frame.id >> 7) & 0x7F; // Destination for service frames
+                        uint32_t masked_id = rx_frame.id & CANARD_CAN_EXT_ID_MASK;
+                        uint16_t data_type = extractDataType(masked_id);
+                        uint8_t source_node = extractSourceNodeID(masked_id);
+                        uint8_t dest_node = (masked_id >> 8) & 0x7F; // Destination for service frames (bits 14-8)
                         const char* error_name = "UNKNOWN";
                         switch(-res) {
                             case CANARD_ERROR_RX_WRONG_ADDRESS: error_name = "WRONG_ADDRESS"; break;
@@ -688,9 +796,22 @@ void CanardInterface::processRx() {
                             case CANARD_ERROR_RX_BAD_CRC: error_name = "BAD_CRC"; break;
                             default: break;
                         }
-                        ESP_LOGE("CAN_RX", "ERROR %s (%d): dtype=%d, src=%d, dest=%d, our_id=%d", 
+                        ESP_LOGI("CAN_RX", "ERROR %s (%d): dtype=%d, src=%d, dest=%d, our_id=%d", 
                                  error_name, res, data_type, source_node, dest_node, 
                                  canardGetLocalNodeID(&canard));
+                        
+                        // Log the actual frame data for debugging
+                        // Log the actual 29-bit CAN ID without internal flags
+                        ESP_LOGI("CAN_RX", "  Frame ID: 0x%08X, DLC: %d", 
+                                 (unsigned)(rx_frame.id & 0x1FFFFFFF), rx_frame.data_len);
+                        if (rx_frame.data_len > 0) {
+                            char hex_str[25]; // 8 bytes * 3 chars per byte + null
+                            int offset = 0;
+                            for (int i = 0; i < rx_frame.data_len && i < 8; i++) {
+                                offset += snprintf(hex_str + offset, sizeof(hex_str) - offset, "%02X ", rx_frame.data[i]);
+                            }
+                            ESP_LOGI("CAN_RX", "  Frame data: %s", hex_str);
+                        }
                     }
                 }
 #endif
@@ -698,10 +819,11 @@ void CanardInterface::processRx() {
                 if (res == -CANARD_ERROR_RX_MISSED_START) {
                     // this might remaining frames from a message that we don't accept, so check
                     uint64_t dummy_signature;
+                    uint32_t masked_id = rx_frame.id & CANARD_CAN_EXT_ID_MASK;
                     if (shouldAcceptTransfer(&canard,
                                         &dummy_signature,
-                                        extractDataType(rx_frame.id),
-                                        extractTransferType(rx_frame.id),
+                                        extractDataType(masked_id),
+                                        extractTransferType(masked_id),
                                         1)) { // doesn't matter what we pass here
                         update_rx_protocol_stats(res);
                     } else {
@@ -718,7 +840,7 @@ void CanardInterface::processRx() {
     // Report statistics every 5 seconds
     uint32_t now_ms = AP_HAL::millis();
     if (now_ms - last_debug_ms >= 5000) {
-        ESP_LOGE("CAN_RX", "processRx stats: total_frames=%d, extended=%d, canard_calls=%d, success=%d, errors=%d",
+        ESP_LOGD("CAN_RX", "processRx stats: total_frames=%d, extended=%d, canard_calls=%d, success=%d, errors=%d",
                  total_frames, extended_frames, canard_calls, canard_success, canard_errors);
         last_debug_ms = now_ms;
     }

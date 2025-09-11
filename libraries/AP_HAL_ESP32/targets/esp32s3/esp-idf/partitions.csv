@@ -1,0 +1,12 @@
+# ESP32-S3 LilyGo T-Connect Partition Table (16MB Flash)
+# Standard ESP32 partition layout with partition table at 0x8000
+# OTA-enabled configuration with factory + 2 OTA partitions
+# Name,   Type, SubType, Offset,  Size
+nvs,      data, nvs,     0x9000,  0x6000
+phy_init, data, phy,     0xf000,  0x1000
+factory,  app,  factory, 0x10000, 2M
+ota_0,    app,  ota_0,   ,        2M
+ota_1,    app,  ota_1,   ,        2M
+ota_data, data, ota,     ,        0x2000
+storage,  0x45, 0x0,     ,        16K
+logs,     data, spiffs,  ,        9M

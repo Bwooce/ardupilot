@@ -8,6 +8,10 @@
 SERIAL1_PROTOCOL 2
 SERIAL1_BAUD 115200
 
+# MAVLink Options for SERIAL1
+# Bit 2: Ignore Streamrate - prevents GCS from changing stream rates
+MAV1_OPTIONS 4
+
 # Enable dual DroneCAN on both CAN ports
 CAN_P1_DRIVER 1
 CAN_D1_PROTOCOL 1
@@ -84,6 +88,7 @@ COMPASS_USE3 0
 
 # Configure vehicle frame type for rover
 FRAME_CLASS 2
+FRAME_TYPE 0
 
 # Disable arming checks that might prevent startup
 ARMING_CHECK 0

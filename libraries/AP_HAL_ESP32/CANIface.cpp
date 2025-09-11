@@ -12,7 +12,7 @@ extern const AP_HAL::HAL& hal;
 
 using namespace ESP32;
 
-// Use consistent ESP32 debug system controlled by ESP32_DEBUG_LEVEL parameter
+// Use consistent ESP32 debug system controlled by ESP32_DEBUG_LVL parameter
 #include "ESP32_Debug.h"
 
 // CAN logging macros using ESP32 debug system
@@ -116,14 +116,14 @@ bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
     CAN_DEBUG_INFO("TWAI started successfully");
 
     CAN_DEBUG_INFO("Creating RX queue...");
-    rx_queue = xQueueCreate(128, sizeof(CanRxItem));
+    rx_queue = xQueueCreate(512, sizeof(CanRxItem));  // Increased from 128 to prevent drops
     if (rx_queue == NULL) {
         CAN_DEBUG_ERROR("Failed to create RX queue");
         return false;
     }
 
     CAN_DEBUG_INFO("Creating TX queue...");
-    tx_queue = xQueueCreate(128, sizeof(CanTxItem));
+    tx_queue = xQueueCreate(256, sizeof(CanTxItem));  // Also increased TX queue
     if (tx_queue == NULL) {
         CAN_DEBUG_ERROR("Failed to create TX queue");
         return false;
@@ -282,7 +282,14 @@ void CANIface::rx_task(void *arg)
         // Update statistics
         iface->update_rx_stats();
 
-        iface->add_to_rx_queue(rx_item);
+        if (!iface->add_to_rx_queue(rx_item)) {
+            // Queue full - frame dropped
+            static uint32_t drop_count = 0;
+            drop_count++;
+            if ((drop_count % 100) == 1) {  // Log every 100 drops to avoid spam
+                ESP_LOGW("CAN_RX", "RX queue full! Dropped %lu frames", (unsigned long)drop_count);
+            }
+        }
     }
 }
 
@@ -326,13 +333,45 @@ void CANIface::tx_task(void *arg)
 
         twai_message_t message;
         memset(&message, 0, sizeof(message));
-        message.identifier = tx_item.frame.id & AP_HAL::CANFrame::MaskExtID;  // Use only 29-bit ID
-        message.data_length_code = tx_item.frame.dlc;
-        message.extd = 1;  // Enable 29-bit extended CAN frames (required for DroneCAN)
-        message.rtr = 0;   // Data frame, not remote transmission request
+        
+        // Check if this is an extended frame (bit 31 set means extended)
+        if (tx_item.frame.isExtended()) {
+            // Extended frame: strip the FlagEFF bit and use only the 29-bit ID
+            message.identifier = tx_item.frame.id & AP_HAL::CANFrame::MaskExtID;
+            message.extd = 1;
+            
+            // Validate that the ID is within 29-bit range
+            if (message.identifier > 0x1FFFFFFF) {
+                CAN_DEBUG_ERROR("Invalid extended CAN ID 0x%08X (exceeds 29-bit max), masking to 29 bits", 
+                               (unsigned)tx_item.frame.id);
+                message.identifier &= 0x1FFFFFFF;
+            }
+        } else {
+            // Standard frame: use only the 11-bit ID
+            message.identifier = tx_item.frame.id & AP_HAL::CANFrame::MaskStdID;
+            message.extd = 0;
+            
+            // Validate that the ID is within 11-bit range
+            if (message.identifier > 0x7FF) {
+                CAN_DEBUG_ERROR("Invalid standard CAN ID 0x%08X (exceeds 11-bit max), masking to 11 bits", 
+                               (unsigned)tx_item.frame.id);
+                message.identifier &= 0x7FF;
+            }
+        }
+        
+        // Validate and clamp DLC to valid range
+        if (tx_item.frame.dlc > 8) {
+            CAN_DEBUG_ERROR("Invalid DLC %d for message ID=0x%08X, clamping to 8", 
+                           tx_item.frame.dlc, (unsigned)tx_item.frame.id);
+            message.data_length_code = 8;
+        } else {
+            message.data_length_code = tx_item.frame.dlc;
+        }
+        
+        message.rtr = tx_item.frame.isRemoteTransmissionRequest() ? 1 : 0;
         message.ss = 0;    // Allow retransmission
         message.self = 0;  // Not self-reception
-        memcpy(message.data, tx_item.frame.data, tx_item.frame.dlc);
+        memcpy(message.data, tx_item.frame.data, message.data_length_code);
         
         // Debug CAN ID issues
         // DroneCAN extended frame format: 
@@ -345,14 +384,17 @@ void CANIface::tx_task(void *arg)
         //bool is_service = (message.identifier >> 7) & 0x01;  // Unused for now
         //uint8_t source_node = message.identifier & 0x7F;  // Unused after removing type 342 debug
         
-        // WAIT - The identifier might already be wrong! Let's check the raw frame
-        if (message.identifier == 0x1F01560A) {
-            static uint32_t raw_check_count = 0;
-            if (raw_check_count++ < 5) {
-                ESP_LOGE("CAN_TX", "RAW CHECK: tx_item.frame.id=0x%08X vs message.identifier=0x%08X",
+        // Debug: Check if bit 31 is being set (FlagEFF) - this is expected and handled
+        if ((tx_item.frame.id & 0x80000000) != 0) {
+            static uint32_t bit31_warn_count = 0;
+            if (bit31_warn_count++ == 0) {
+                ESP_LOGI("CAN_TX", "FlagEFF (bit 31) detected in frame IDs - this is normal, masking to 29 bits");
+                ESP_LOGI("CAN_TX", "  Example: frame.id=0x%08X → masked=0x%08X",
                          (unsigned)tx_item.frame.id, (unsigned)message.identifier);
-                ESP_LOGE("CAN_TX", "  Frame: extended=%d, id=0x%08X, dlc=%d",
-                         tx_item.frame.isExtended(), (unsigned)tx_item.frame.id, tx_item.frame.dlc);
+            }
+            // Only log every 100th occurrence after first explanation
+            else if ((bit31_warn_count % 100) == 0) {
+                ESP_LOGD("CAN_TX", "FlagEFF seen %lu times (working correctly)", bit31_warn_count);
             }
         }
         
@@ -426,14 +468,38 @@ void CANIface::tx_task(void *arg)
                                     result, (unsigned long)fail_count);
                 }
             } else if (result == ESP_ERR_INVALID_STATE) {
-                // TWAI driver in invalid state - likely electrical disconnection
-                // This requires full driver restart to recover
-                CAN_DEBUG_ERROR("TWAI invalid state (disconnection?) - attempting full restart");
-                iface->update_error_stats(0x08); // Invalid state error
-                iface->attempt_driver_restart();
+                // TWAI driver in invalid state - likely no other nodes on bus or disconnection
+                // Only log periodically to avoid spam
+                static uint32_t last_invalid_state_log_ms = 0;
+                static uint32_t invalid_state_count = 0;
+                uint32_t now_ms = AP_HAL::millis();
+                invalid_state_count++;
+                
+                if (now_ms - last_invalid_state_log_ms > 10000) {  // Log at most every 10 seconds
+                    CAN_DEBUG_ERROR("TWAI invalid state (no other nodes?) - count=%lu", (unsigned long)invalid_state_count);
+                    last_invalid_state_log_ms = now_ms;
+                    
+                    // Only attempt restart if we've had persistent errors for a while
+                    if (invalid_state_count > 100) {
+                        iface->update_error_stats(0x08); // Invalid state error
+                        iface->attempt_driver_restart();
+                        invalid_state_count = 0;  // Reset counter after restart attempt
+                    }
+                }
             } else if (result == ESP_ERR_INVALID_ARG) {
                 // Invalid argument - possibly corrupted message data
-                CAN_DEBUG_ERROR("TWAI invalid argument error on message ID=0x%08X", (unsigned)tx_item.frame.id);
+                // Rate limit this error to avoid spam
+                static uint32_t last_invalid_arg_log_ms = 0;
+                static uint32_t invalid_arg_count = 0;
+                uint32_t now_ms = AP_HAL::millis();
+                invalid_arg_count++;
+                
+                if (now_ms - last_invalid_arg_log_ms > 5000) {  // Log at most every 5 seconds
+                    CAN_DEBUG_ERROR("TWAI invalid argument errors: %lu occurrences (last ID=0x%08X)", 
+                                   (unsigned long)invalid_arg_count, (unsigned)tx_item.frame.id);
+                    last_invalid_arg_log_ms = now_ms;
+                    invalid_arg_count = 0;  // Reset counter
+                }
                 iface->update_error_stats(0x09); // Invalid argument error
             } else {
                 // Other errors
@@ -718,8 +784,13 @@ void CANIface::attempt_driver_restart()
     uint32_t now_ms = AP_HAL::millis();
     
     // Rate limit restarts to prevent restart loops
-    if (now_ms - last_restart_ms < 5000) {  // Minimum 5 seconds between restarts
-        CAN_DEBUG_INFO("Driver restart rate-limited (last restart %lu ms ago)", (unsigned long)(now_ms - last_restart_ms));
+    if (now_ms - last_restart_ms < 30000) {  // Minimum 30 seconds between restarts
+        // Only log periodically to avoid spam
+        static uint32_t last_log_ms = 0;
+        if (now_ms - last_log_ms > 5000) {  // Log at most every 5 seconds
+            CAN_DEBUG_INFO("Driver restart rate-limited (last restart %lu ms ago)", (unsigned long)(now_ms - last_restart_ms));
+            last_log_ms = now_ms;
+        }
         return;
     }
     
@@ -734,7 +805,10 @@ void CANIface::attempt_driver_restart()
     restart_count++;
     last_restart_ms = now_ms;
     
-    CAN_DEBUG_ERROR("Attempting full TWAI driver restart #%lu due to invalid state", (unsigned long)restart_count);
+    // Only log restart attempts periodically to reduce spam
+    if (restart_count <= 3 || (restart_count % 10) == 0) {
+        CAN_DEBUG_ERROR("TWAI driver restart #%lu (invalid state)", (unsigned long)restart_count);
+    }
     
     // Store current configuration
     uint32_t saved_bitrate = current_bitrate;
@@ -750,8 +824,11 @@ void CANIface::attempt_driver_restart()
         CAN_DEBUG_WARN("TWAI uninstall failed (error %d), continuing anyway", result);
     }
     
-    // Brief delay to let hardware settle
-    hal.scheduler->delay_microseconds(10000); // 10ms
+    // Brief delay to let hardware settle, but feed watchdog
+    // Split into smaller delays to avoid WDT timeout
+    for (int i = 0; i < 10; i++) {
+        hal.scheduler->delay_microseconds(1000); // 1ms at a time
+    }
     
     // Clear queues (they should be empty after stop/uninstall, but be safe)
     if (rx_queue) {

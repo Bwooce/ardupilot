@@ -1,0 +1,39 @@
+--- a/modules/DroneCAN/libcanard/canard/publisher.h
++++ b/modules/DroneCAN/libcanard/canard/publisher.h
+@@ -102,10 +102,26 @@
+     /// @return true if the message was put into the queue successfully
+     bool broadcast(msgtype& msg, bool canfd) {
+ #if !CANARD_ENABLE_CANFD
+         if (canfd) {
+             return false;
+         }
+ #endif
++        
++#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
++        // Debug: Log the message structure address and first few fields
++        ESP_LOGI("PUBLISHER", "broadcast() called with msg at %p", &msg);
++        uint8_t* msg_bytes = (uint8_t*)&msg;
++        ESP_LOGI("PUBLISHER", "  First 8 bytes of msg struct: %02X %02X %02X %02X %02X %02X %02X %02X",
++                 msg_bytes[0], msg_bytes[1], msg_bytes[2], msg_bytes[3],
++                 msg_bytes[4], msg_bytes[5], msg_bytes[6], msg_bytes[7]);
++#endif
++        
+         // encode the message
+         uint32_t len = msgtype::cxx_iface::encode(&msg, msg_buf 
+ #if CANARD_ENABLE_CANFD
+         , !canfd
+ #elif CANARD_ENABLE_TAO_OPTION
+         , true
+ #endif
+         );
++        
++#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
++        ESP_LOGI("PUBLISHER", "encode() returned %lu bytes", len);
++        ESP_LOGI("PUBLISHER", "  msg_buf at %p contains: %02X %02X %02X %02X %02X %02X %02X %02X",
++                 msg_buf, msg_buf[0], msg_buf[1], msg_buf[2], msg_buf[3],
++                 msg_buf[4], msg_buf[5], msg_buf[6], msg_buf[7]);
++#endif
++        
+         // send the message if encoded successfully
+         if (len > 0) {
+             Transfer msg_transfer {};

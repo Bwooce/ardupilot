@@ -4,13 +4,20 @@
 #
 # Default parameters for the LilyGO T-Connect
 
-# Set SERIAL1 for MAVLink (ELRS to GCS)
+# Set SERIAL1 for MAVLink (mLRS to GCS)
 SERIAL1_PROTOCOL 2
-SERIAL1_BAUD 460
+# mLRS for MAVLink
+SERIAL1_BAUD 57600
+# No special serial options needed (moved to MAV1_OPTIONS)
+SERIAL1_OPTIONS 0 
 
 # Set SERIAL2 for GPS (GPIO 1/2)
 SERIAL2_PROTOCOL 5
 SERIAL2_BAUD 38400
+
+# MAVLink Options for SERIAL1 (mLRS connection)
+# Bit 2: Ignore Streamrate - prevents GCS from changing stream rates
+MAV1_OPTIONS 4
 
 # Enable DroneCAN on CAN port 1
 CAN_P1_DRIVER 1
@@ -76,6 +83,7 @@ COMPASS_USE3 0
 
 # Configure vehicle frame type for rover
 FRAME_CLASS 2
+FRAME_TYPE 0
 
 # Disable arming checks that might prevent startup
 ARMING_CHECK 0

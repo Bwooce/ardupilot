@@ -51,6 +51,7 @@ public:
 
     void     print_stats(void) ;
     void     print_main_loop_rate(void);
+    void     report_reset_reason(void);
 
     uint16_t get_loop_rate_hz(void);
     AP_Int16 _active_loop_rate_hz;

@@ -6372,6 +6372,16 @@ void GCS_MAVLINK::send_attitude() const
     if (MAVLINK_MSG_ID_ATTITUDE != 30) {
         hal.console->printf("ERROR: MAVLINK_MSG_ID_ATTITUDE = %d (should be 30)\n", MAVLINK_MSG_ID_ATTITUDE);
     }
+    
+    // Check for stack/memory issues
+    static uint32_t attitude_send_count = 0;
+    attitude_send_count++;
+    if ((attitude_send_count % 1000) == 0) {
+        size_t free_stack = uxTaskGetStackHighWaterMark(NULL);
+        if (free_stack < 512) {
+            hal.console->printf("WARNING: Low stack in send_attitude: %u bytes free\n", (unsigned)free_stack);
+        }
+    }
 #endif
     
     mavlink_msg_attitude_send(
