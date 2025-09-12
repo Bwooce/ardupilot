@@ -85,8 +85,8 @@ def configure(cfg):
                     cfg.fatal(f"hwdef processing failed: {e}")
     
     # Build list of sdkconfig.defaults files: target-level + debug (if --debug) + board-level (if exists)
-    target_sdkconfig = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/targets/{mcu}/esp-idf/sdkconfig.defaults')
-    debug_sdkconfig = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/targets/{mcu}/esp-idf/sdkconfig.debug')
+    target_sdkconfig = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/targets/{mcu.lower()}/esp-idf/sdkconfig.defaults')
+    debug_sdkconfig = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/targets/{mcu.lower()}/esp-idf/sdkconfig.debug')
     board_sdkconfig = os.path.join(cfg.bldnode.abspath(), 'sdkconfig.board')
     
     # Check if we need to include debug configuration
