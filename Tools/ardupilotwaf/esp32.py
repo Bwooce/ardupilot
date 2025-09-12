@@ -48,10 +48,30 @@ def configure(cfg):
     env.APJ_TOOL = srcpath('Tools/scripts/apj_tool.py')
 
     #Check if esp-idf env are loaded, or load it
-    try:
-        env.IDF = os.environ['IDF_PATH']
-    except:
-        env.IDF = cfg.srcnode.abspath()+"/modules/esp_idf"
+    # Force use of local ESP-IDF to avoid mixing system and local installations
+    local_idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
+    env.IDF = local_idf_path
+    
+    # Set IDF_PATH environment variable to ensure consistency
+    os.environ['IDF_PATH'] = local_idf_path
+    
+    # Source ESP-IDF environment to set up all necessary variables
+    export_script = os.path.join(local_idf_path, 'export.sh')
+    if os.path.exists(export_script):
+        try:
+            # Run export.sh and capture environment changes
+            import subprocess
+            result = subprocess.run(['bash', '-c', f'source {export_script} && env'], 
+                                  capture_output=True, text=True, check=True)
+            # Update current environment with ESP-IDF variables
+            for line in result.stdout.splitlines():
+                if '=' in line and not line.startswith('_'):
+                    key, value = line.split('=', 1)
+                    if key.startswith(('IDF_', 'PATH', 'PYTHON')) or 'esp' in key.lower():
+                        os.environ[key] = value
+        except Exception as e:
+            print(f"Warning: Failed to source ESP-IDF environment: {e}")
+    
     print("USING EXPRESSIF IDF:"+str(env.IDF))
     
     # Report ESP32 debug mode status
