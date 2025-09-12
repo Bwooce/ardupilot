@@ -47,6 +47,15 @@
 // MAVLINK_ALIGNED_FIELDS is 0, but these need proper alignment for float/int access
 // We'll handle this per-message for now until MAVLink library is updated
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+// Define aligned buffer macro for ESP32 to ensure proper alignment
+#define MAVLINK_ALIGNED_BUF(name, size) \
+    uint8_t name[size] __attribute__((aligned(4))) = {0}
+#else
+// For other platforms, no special alignment needed
+#define MAVLINK_ALIGNED_BUF(name, size) uint8_t name[size] = {0}
+#endif
+
 /// MAVLink streams used for each telemetry port
 extern AP_HAL::UARTDriver	*mavlink_comm_port[MAVLINK_COMM_NUM_BUFFERS];
 extern bool gcs_alternative_active[MAVLINK_COMM_NUM_BUFFERS];
