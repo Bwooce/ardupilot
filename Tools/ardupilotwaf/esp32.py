@@ -35,7 +35,7 @@ def configure(cfg):
     #define env and location for the cmake esp32 file
     env = cfg.env
     mcu = env.MCU
-    env.AP_HAL_ESP32 = srcpath('libraries/AP_HAL_ESP32/targets/'+mcu+'/esp-idf')
+    env.AP_HAL_ESP32 = srcpath('libraries/AP_HAL_ESP32/targets/'+mcu.lower()+'/esp-idf')
     env.AP_PROGRAM_FEATURES += ['esp32_ap_program']
     env.append_value('DEFINES', 'USE_USER_HELPERS=1')
 
@@ -157,7 +157,7 @@ def pre_build(self):
     esp_idf = self.cmake(
             name='esp-idf',
             cmake_vars=lib_vars,
-            cmake_src='libraries/AP_HAL_ESP32/targets/'+target+'/esp-idf',
+            cmake_src='libraries/AP_HAL_ESP32/targets/'+target.lower()+'/esp-idf',
             cmake_bld='esp-idf_build',
             )
 
