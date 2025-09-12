@@ -49,11 +49,12 @@
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
 // Define aligned buffer macro for ESP32 to ensure proper alignment
+// Use char type to match MAVLink's expectations
 #define MAVLINK_ALIGNED_BUF(name, size) \
-    uint8_t name[size] __attribute__((aligned(4))) = {0}
+    char name[size] __attribute__((aligned(4))) = {0}
 #else
 // For other platforms, no special alignment needed
-#define MAVLINK_ALIGNED_BUF(name, size) uint8_t name[size] = {0}
+#define MAVLINK_ALIGNED_BUF(name, size) char name[size] = {0}
 #endif
 
 /// MAVLink streams used for each telemetry port
