@@ -205,9 +205,9 @@ bool MAVLink_routing::check_and_forward(GCS_MAVLINK &in_link, const mavlink_mess
                              (int)target_component);
 #endif
                     // Use atomic packet assembly to prevent fragmentation
-                    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-                    uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-                    comm_send_buffer(routes[i].channel, buf, len);
+                    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+                    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+                    comm_send_buffer(routes[i].channel, (uint8_t*)buf, len);
                 }
                 sent_to_chan[routes[i].channel] = true;
                 forwarded = true;
@@ -410,9 +410,9 @@ void MAVLink_routing::handle_heartbeat(GCS_MAVLINK &link, const mavlink_message_
                          (unsigned)msg.compid);
 #endif
                 // Use atomic packet assembly to prevent fragmentation
-                uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-                uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-                comm_send_buffer(channel, buf, len);
+                MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+                uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+                comm_send_buffer(channel, (uint8_t*)buf, len);
             }
         }
     }

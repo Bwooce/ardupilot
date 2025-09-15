@@ -135,6 +135,9 @@ private:
 #else
     const uint32_t _free_space_min_avail = 1024 * 256; // bytes
 #endif
+#elif CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 with SPIFFS has limited space, use smaller minimum
+    const uint32_t _free_space_min_avail = 1024 * 512; // 512KB minimum for ESP32
 #else
     const uint32_t _free_space_min_avail = 8388608; // bytes
 #endif

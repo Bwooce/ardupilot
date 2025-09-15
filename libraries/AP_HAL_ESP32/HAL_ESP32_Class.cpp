@@ -215,10 +215,13 @@ void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
     
     // Initialize ESP log redirection to MAVLink if needed
     esp32_log_redirect_init();
+
+    // Set log levels for noisy components
+    esp_log_level_set("system_api", ESP_LOG_WARN);  // Suppress "eFuse MAC_CUSTOM is empty" info message
     
-    // Force a test message to verify redirect is working  
+    // Force a test message to verify redirect is working
     if (ESP32::esp32_params()->log_to_mavlink.get()) {
-        ESP_LOGE("TEST", "ESP32 log redirect ACTIVE");
+        ESP_LOGI("TEST", "ESP32 log redirect ACTIVE");
         // Also send directly as CRITICAL to ensure it gets through
         GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "ESP32: Log redirect enabled=%d", 
                      (int)ESP32::esp32_params()->log_to_mavlink.get());
@@ -227,6 +230,14 @@ void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
         GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "ESP32: Log redirect DISABLED");
     }
     
+    // Initialize SPIFFS filesystem for logging (before scheduler init)
+    #if HAL_LOGGING_FILESYSTEM_ENABLED
+    extern bool esp32_spiffs_init(void);
+    if (!esp32_spiffs_init()) {
+        ESP_LOGW("HAL", "SPIFFS init failed - filesystem logging unavailable");
+    }
+    #endif
+
     // Debug via MAVLink STATUSTEXT - safe from serial contamination
     ESP32_DEBUG_INFO("HAL run starting with callbacks");
     ((ESP32::Scheduler *)hal.scheduler)->set_callbacks(callbacks);

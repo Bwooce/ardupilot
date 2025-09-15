@@ -58,15 +58,12 @@ LOG_REPLAY 1
 # Enable all debug message categories
 SYS_DEBUG 1
 
-# Enable file-based logging to PSRAM filesystem (8MB available)
-LOG_BACKEND_TYPE 1
+# Enable file-based logging to PSRAM/SPIFFS filesystem
+LOG_BACKEND_TYPE 3  # Bit 0=File, Bit 1=MAVLink - both enabled for QGC access
 LOG_DISARMED 1
 LOG_FILE_DSRMROT 1
 LOG_MAX_FILES 5
-
-# Alternative: Use MAVLink-only logging (comment out above, uncomment below)
-# LOG_BACKEND_TYPE 2
-# LOG_MAV_BUFSIZE 16
+LOG_MAV_BUFSIZE 16  # Increase MAVLink buffer size
 
 # Navigation and AHRS Configuration for DroneCAN hub operation
 # Enable minimal EKF for basic attitude estimation

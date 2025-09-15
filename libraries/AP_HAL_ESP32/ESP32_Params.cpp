@@ -124,7 +124,9 @@ void ESP32Params::apply_log_level() {
     esp_log_level_set("GPS", ESP_LOG_INFO);       // GPS detection and status
     esp_log_level_set("GPS_UART", ESP_LOG_INFO);  // GPS UART communication
     esp_log_level_set("STATUSTEXT", ESP_LOG_INFO); // STATUSTEXT corruption debugging
-    
+    esp_log_level_set("AP_FS_ESP32", ESP_LOG_INFO); // Filesystem operations debugging
+    esp_log_level_set("ESP32_SPIFFS", ESP_LOG_INFO); // SPIFFS operations debugging
+
     // CAN/DroneCAN debugging - show only real errors
     esp_log_level_set("CAN", ESP_LOG_ERROR);       // Only show CAN errors
     esp_log_level_set("CAN_RX", ESP_LOG_ERROR);    // Only show RX errors

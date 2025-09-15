@@ -109,7 +109,6 @@ class ESP32HWDef(hwdef.HWDef):
             
         # Record pin assignment
         self.pin_assignments[pin_num] = f"{function} {pin_name}"
-        self.progress(f"GPIO{pin_num}: {function} {pin_name}")
         return True
 
     def _is_pin_assignment_line(self, line):
@@ -257,7 +256,6 @@ class ESP32HWDef(hwdef.HWDef):
                     self.progress(f"Skipping invalid pin assignment: {line.strip()}")
                     return
             
-            self.progress(f"Found pin assignment: {pin_name} = {pin_value}")
             
             # CAN pins
             if pin_name.startswith('CAN_TX_'):
@@ -321,7 +319,6 @@ class ESP32HWDef(hwdef.HWDef):
                             self.rcout_pins.append(None)
                         # Store pin at correct index (channel_num-1 since arrays are 0-indexed)
                         self.rcout_pins[channel_num - 1] = pin_value
-                        self.progress(f"Added RCOUT channel {channel_num}: GPIO {pin_value}")
                     except ValueError:
                         self.progress(f"Invalid RCOUT channel number in {pin_name}")
             
@@ -348,10 +345,8 @@ class ESP32HWDef(hwdef.HWDef):
                         # Store the pin
                         if '_SDA_PIN' in pin_name:
                             bus_entry['sda'] = pin_value
-                            self.progress(f"Added I2C{bus_num} SDA: GPIO {pin_value}")
                         elif '_SCL_PIN' in pin_name:
                             bus_entry['scl'] = pin_value
-                            self.progress(f"Added I2C{bus_num} SCL: GPIO {pin_value}")
                             
                     except ValueError:
                         self.progress(f"Invalid I2C bus number in {pin_name}")
@@ -838,6 +833,16 @@ class ESP32HWDef(hwdef.HWDef):
             # Enable assertions for debugging
             config_lines.append("CONFIG_COMPILER_OPTIMIZATION_ASSERTION_LEVEL=2")
             
+            # Enable core dump to flash for crash analysis (debug builds only)
+            config_lines.append("CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y")
+            config_lines.append("CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y")
+            config_lines.append("CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y")
+            config_lines.append("CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=64")
+            
+            # Enable more verbose panic output for debugging
+            config_lines.append("CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y")
+            config_lines.append("CONFIG_ESP_DEBUG_STUBS_ENABLE=y")
+            
         else:
             self.progress("Using ESP32 performance mode (PRODUCTION) - debugging disabled")
             
@@ -851,6 +856,10 @@ class ESP32HWDef(hwdef.HWDef):
             # Disable stack overflow checking for performance
             config_lines.append("# CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY is not set")
             config_lines.append("CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE=y")
+            
+            # Disable core dump in production for performance
+            config_lines.append("# CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH is not set")
+            config_lines.append("# CONFIG_ESP_DEBUG_STUBS_ENABLE is not set")
             
             # Disable task watchdog for performance
             config_lines.append("CONFIG_ESP_TASK_WDT_INIT=n")
@@ -879,6 +888,36 @@ class ESP32HWDef(hwdef.HWDef):
             config_lines.append("# Enabled conditionally based on SOC_UHCI_SUPPORTED capability")
             config_lines.append("CONFIG_UHCI_ISR_HANDLER_IN_IRAM=y")
             config_lines.append("CONFIG_UHCI_ISR_CACHE_SAFE=y")
+        
+        # SPIFFS filesystem configuration for flash logging
+        # Check if filesystem logging is enabled in the hwdef
+        if hasattr(self, 'intdefines') and self.intdefines.get('HAL_LOGGING_FILESYSTEM_ENABLED') == '1':
+            config_lines.append("# SPIFFS filesystem for internal flash logging - optimized for fast startup")
+            config_lines.append("CONFIG_SPIFFS_SUPPORTED=y")
+            
+            # Enable caching for better performance and faster startup
+            config_lines.append("CONFIG_SPIFFS_CACHE=y") 
+            config_lines.append("CONFIG_SPIFFS_CACHE_WR=y")
+            config_lines.append("CONFIG_SPIFFS_CACHE_STATS=y")
+            
+            # Optimize for faster mounting - reduce consistency checks on boot
+            config_lines.append("CONFIG_SPIFFS_PAGE_CHECK=n")  # Skip page checks for faster mount
+            config_lines.append("CONFIG_SPIFFS_GC_MAX_RUNS=50") # Reduce GC runs during mount
+            config_lines.append("# CONFIG_SPIFFS_GC_STATS is not set")  # Disable GC stats for speed
+            
+            # Use larger page size for better performance with log files
+            config_lines.append("CONFIG_SPIFFS_PAGE_SIZE=512")  # Larger pages = fewer metadata checks
+            config_lines.append("CONFIG_SPIFFS_OBJ_NAME_LEN=32")
+            
+            # Disable expensive features for faster startup
+            config_lines.append("# CONFIG_SPIFFS_USE_MAGIC is not set")       # Skip magic checks
+            config_lines.append("# CONFIG_SPIFFS_USE_MAGIC_LENGTH is not set") # Skip length checks
+            config_lines.append("# CONFIG_SPIFFS_FOLLOW_SYMLINKS is not set")  # No symlinks needed
+            
+            # Essential VFS support only
+            config_lines.append("CONFIG_VFS_SUPPORT_IO=y")
+            config_lines.append("CONFIG_VFS_SUPPORT_DIR=y")
+            config_lines.append("# CONFIG_VFS_SUPPORT_SELECT is not set")  # Not needed for logging
         
         return config_lines
 

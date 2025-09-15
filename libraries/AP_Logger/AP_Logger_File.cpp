@@ -58,6 +58,12 @@ AP_Logger_File::AP_Logger_File(AP_Logger &front,
 
 void AP_Logger_File::ensure_log_directory_exists()
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS doesn't support real directories - paths are flat
+    // Just check if we can access the filesystem at all by trying to list files
+    // The "directory" is just a prefix in the flat namespace
+    return;
+#else
     int ret;
     struct stat st;
 
@@ -69,6 +75,7 @@ void AP_Logger_File::ensure_log_directory_exists()
     if (ret == -1 && errno != EEXIST) {
         GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Failed to create log directory %s : %s", _log_directory, strerror(errno));
     }
+#endif
 }
 
 void AP_Logger_File::Init()
@@ -211,7 +218,12 @@ bool AP_Logger_File::CardInserted(void) const
 // returns -1 on error
 int64_t AP_Logger_File::disk_space_avail()
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS uses flat filesystem
+    return AP::FS().disk_free("/APM");
+#else
     return AP::FS().disk_free(_log_directory);
+#endif
 }
 
 // returns the total amount of disk space (in use + available) in
@@ -219,7 +231,12 @@ int64_t AP_Logger_File::disk_space_avail()
 // returns -1 on error
 int64_t AP_Logger_File::disk_space()
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS uses flat filesystem
+    return AP::FS().disk_space("/APM");
+#else
     return AP::FS().disk_space(_log_directory);
+#endif
 }
 
 /*
@@ -264,7 +281,12 @@ uint16_t AP_Logger_File::find_oldest_log()
     // relying on the min_avail_space_percent feature we could end up
     // doing a *lot* of asprintf()s and stat()s
     EXPECT_DELAY_MS(3000);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS uses flat filesystem - open mount point directly
+    auto *d = AP::FS().opendir("/APM");
+#else
     auto *d = AP::FS().opendir(_log_directory);
+#endif
     if (d == nullptr) {
         // SD card may have died?  On linux someone may have rm-rf-d
         return 0;
@@ -377,9 +399,17 @@ void AP_Logger_File::Prep_MinSpace()
 char *AP_Logger_File::_log_file_name(const uint16_t log_num) const
 {
     char *buf = nullptr;
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS doesn't support directories - use flat naming
+    // Just use the mount point directly without subdirectories
+    if (asprintf(&buf, "/APM/%08u.BIN", (unsigned)log_num) == -1) {
+        return nullptr;
+    }
+#else
     if (asprintf(&buf, "%s/%08u.BIN", _log_directory, (unsigned)log_num) == -1) {
         return nullptr;
     }
+#endif
     return buf;
 }
 
@@ -390,9 +420,16 @@ char *AP_Logger_File::_log_file_name(const uint16_t log_num) const
 char *AP_Logger_File::_lastlog_file_name(void) const
 {
     char *buf = nullptr;
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS doesn't support directories - use flat naming
+    if (asprintf(&buf, "/APM/LASTLOG.TXT") == -1) {
+        return nullptr;
+    }
+#else
     if (asprintf(&buf, "%s/LASTLOG.TXT", _log_directory) == -1) {
         return nullptr;
     }
+#endif
     return buf;
 }
 
@@ -617,8 +654,11 @@ int16_t AP_Logger_File::get_log_data(const uint16_t list_entry, const uint16_t p
         if (_read_fd == -1) {
             _open_error_ms = AP_HAL::millis();
             int saved_errno = errno;
+#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
+            // Avoid printf on ESP32 to prevent stack overflow
             ::printf("Log read open fail for %s - %s\n",
                      fname, strerror(saved_errno));
+#endif
             DEV_PRINTF("Log read open fail for %s - %s\n",
                                 fname, strerror(saved_errno));
             free(fname);
@@ -676,7 +716,12 @@ void AP_Logger_File::get_log_info(const uint16_t list_entry, uint32_t &size, uin
  */
 uint16_t AP_Logger_File::get_num_logs()
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS uses flat filesystem - open mount point directly
+    auto *d = AP::FS().opendir("/APM");
+#else
     auto *d = AP::FS().opendir(_log_directory);
+#endif
     if (d == nullptr) {
         return 0;
     }
@@ -828,17 +873,85 @@ void AP_Logger_File::start_new_log(void)
     ensure_log_directory_exists();
 
     EXPECT_DELAY_MS(3000);
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Debug what's happening with the filesystem
+    static bool test_done = false;
+    if (!test_done) {
+        test_done = true;
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "About to create: %s", _write_filename);
+
+        // Check if file already exists
+        struct stat st;
+        if (::stat(_write_filename, &st) == 0) {
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "File already exists, size=%ld", st.st_size);
+            // Try to delete it first
+            if (::unlink(_write_filename) == 0) {
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Deleted existing file");
+            } else {
+                GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Failed to delete: errno=%d", errno);
+            }
+        }
+
+        // Check how many files exist now
+        DIR* d = ::opendir("/APM");
+        if (d != nullptr) {
+            int count = 0;
+            while (::readdir(d) != nullptr) {
+                count++;
+            }
+            ::closedir(d);
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Files in /APM: %d", count);
+        }
+
+        // Now try direct POSIX create
+        int test_fd = ::open(_write_filename, O_WRONLY|O_CREAT|O_TRUNC, 0666);
+        if (test_fd >= 0) {
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Direct POSIX create worked!");
+            ::close(test_fd);
+            // Leave file for AP_FS to use
+        } else {
+            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Direct POSIX failed: errno=%d", errno);
+        }
+    }
+#endif
+
     _write_fd = AP::FS().open(_write_filename, O_WRONLY|O_CREAT|O_TRUNC);
     _cached_oldest_log = 0;
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Debug logging removed to prevent stack overflow
+    if (_write_fd == -1) {
+        int saved_errno = errno;
+        // Try a direct POSIX open to bypass the AP_Filesystem wrapper
+        int direct_fd = ::open(_write_filename, O_WRONLY|O_CREAT|O_TRUNC, 0666);
+        if (direct_fd >= 0) {
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Direct open worked! AP_FS issue");
+            ::close(direct_fd);
+            ::unlink(_write_filename);
+        } else {
+            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Direct open also failed: errno=%d", errno);
+        }
+        errno = saved_errno; // Restore original errno
+    }
+#endif
 
     if (_write_fd == -1) {
         write_fd_semaphore.give();
         int saved_errno = errno;
         if (open_error_ms_was_zero) {
+#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
+            // Avoid printf on ESP32 to prevent stack overflow
             ::printf("Log open fail for %s - %s\n",
                      _write_filename, strerror(saved_errno));
+#endif
             DEV_PRINTF("Log open fail for %s - %s\n",
                                 _write_filename, strerror(saved_errno));
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            // Brief diagnostic for ESP32
+            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Log open failed: %s errno=%d",
+                         _write_filename, saved_errno);
+#endif
         }
         return;
     }

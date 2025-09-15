@@ -244,7 +244,7 @@ void AP_Logger::init(const AP_Int32 &log_bitmask, const struct LogStructure *str
     } backend_configs[] {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(HAL_ESP32_USE_PSRAM_LOGGING)
         { Backend_Type::FILESYSTEM, AP_Logger_ESP32_PSRAM::probe },
-        // Fallback to file-based logging if PSRAM not available
+        // Note: File backend also registered as fallback - requires LOGGER_MAX_BACKENDS=3
     #if HAL_LOGGING_FILESYSTEM_ENABLED
         { Backend_Type::FILESYSTEM, AP_Logger_File::probe },
     #endif
@@ -860,6 +860,7 @@ uint16_t AP_Logger::get_num_logs(void) {
     if (_next_backend == 0) {
         return 0;
     }
+// Removed verbose debug to prevent logging overflow
     return backends[0]->get_num_logs();
 }
 

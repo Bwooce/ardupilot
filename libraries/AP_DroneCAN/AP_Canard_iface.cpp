@@ -77,7 +77,7 @@ void CanardInterface::init(void* mem_arena, size_t mem_arena_size, uint8_t node_
     initialized = true;
     
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGE("CAN_RX", "CanardInterface initialized with node_id=%d - CAN_RX logging is ENABLED", node_id);
+    ESP_LOGI("CAN_RX", "CanardInterface initialized with node_id=%d - CAN_RX logging is ENABLED", node_id);
     hal.console->printf("ESP32: CanardInterface init - CAN_RX logging enabled (you should see ESP_LOGE above)\n");
 #endif
 }
@@ -649,7 +649,7 @@ void CanardInterface::processRx() {
     static bool first_rx = true;
     
     if (first_rx) {
-        ESP_LOGE("CAN_RX", "processRx first call - debugging CAN frame processing");
+        ESP_LOGD("CAN_RX", "processRx first call - debugging CAN frame processing");
         first_rx = false;
     }
 #endif

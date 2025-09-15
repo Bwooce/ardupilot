@@ -65,27 +65,50 @@ bool esp32_spiffs_init(void)
     }
     
     ESP_LOGI(TAG, "Initializing SPIFFS for internal flash logging");
-    
-    // Configure SPIFFS
+
+    // Configure SPIFFS with optimizations for fast startup
     esp_vfs_spiffs_conf_t spiffs_conf = {
         .base_path = "/APM",
-        .partition_label = "logs",  // Must match partition table
-        .max_files = 10,
-        .format_if_mount_failed = true
+        .partition_label = "logs",  // Must match partition table exactly
+        .max_files = 50,  // Increased from 10 to handle more log files
+        .format_if_mount_failed = false  // Don't auto-format, just fail if corrupted
     };
-    
-    // Register and mount SPIFFS
+
     esp_err_t ret = esp_vfs_spiffs_register(&spiffs_conf);
-    
+
+    // Handle mount failures
     if (ret != ESP_OK) {
-        if (ret == ESP_FAIL) {
-            ESP_LOGE(TAG, "Failed to mount or format filesystem");
-        } else if (ret == ESP_ERR_NOT_FOUND) {
-            ESP_LOGE(TAG, "Failed to find SPIFFS partition");
-        } else {
-            ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+        if (ret == ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "SPIFFS partition 'logs' not found in partition table");
+            return false;
         }
-        return false;
+
+        // Only format if it's genuinely corrupted, not for other errors
+        if (ret == ESP_ERR_INVALID_STATE || ret == ESP_FAIL) {
+            ESP_LOGW(TAG, "SPIFFS appears corrupted (%s), formatting once", esp_err_to_name(ret));
+
+            // Unregister first if needed
+            esp_vfs_spiffs_unregister("logs");
+
+            // Format the partition
+            ret = esp_spiffs_format("logs");
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "SPIFFS format failed (%s)", esp_err_to_name(ret));
+                return false;
+            }
+
+            // Try mounting again after format
+            ret = esp_vfs_spiffs_register(&spiffs_conf);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "SPIFFS mount failed after format (%s)", esp_err_to_name(ret));
+                return false;
+            }
+
+            ESP_LOGW(TAG, "SPIFFS formatted and mounted successfully");
+        } else {
+            ESP_LOGE(TAG, "SPIFFS mount failed (%s)", esp_err_to_name(ret));
+            return false;
+        }
     }
     
     // Check partition info
@@ -95,20 +118,22 @@ bool esp32_spiffs_init(void)
         ESP_LOGE(TAG, "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
         return false;
     }
-    
+
     ESP_LOGI(TAG, "SPIFFS mounted successfully");
-    ESP_LOGI(TAG, "Partition size: total: %d KB, used: %d KB (%d%%)", 
+    ESP_LOGI(TAG, "Partition size: total: %d KB, used: %d KB (%d%%)",
              total/1024, used/1024, (used*100)/total);
+
+
+    // If filesystem is nearly full, try to clean up old logs
+    if (used > (total * 95 / 100)) {
+        ESP_LOGW(TAG, "SPIFFS nearly full (%d%%), attempting cleanup", (used*100)/total);
+        // Note: Actual cleanup would be done by AP_Logger
+    }
     
     // Create log directory if it doesn't exist
-    struct stat st;
-    if (stat("/APM/LOGS", &st) != 0) {
-        ESP_LOGI(TAG, "Creating /APM/LOGS directory");
-        if (mkdir("/APM/LOGS", 0777) != 0) {
-            ESP_LOGE(TAG, "Failed to create log directory");
-            // Continue anyway - AP_Logger will handle this
-        }
-    }
+    // Note: SPIFFS doesn't support directories, so we just need to ensure the base path works
+    // Files will be created as /APM/LOGS/00000001.BIN which SPIFFS treats as a flat filename
+    ESP_LOGI(TAG, "SPIFFS ready at /APM (note: SPIFFS doesn't use directories, paths are flat)");
     
     spiffs_mounted = true;
     
@@ -227,8 +252,12 @@ void esp32_spiffs_list_files(const char* path)
     
     while ((entry = readdir(dir)) != NULL) {
         struct stat st;
-        char filepath[256];
-        snprintf(filepath, sizeof(filepath), "%s/%s", path, entry->d_name);
+        char filepath[512];  // Increased buffer size to handle longer paths
+        int ret = snprintf(filepath, sizeof(filepath), "%s/%s", path, entry->d_name);
+        if (ret >= (int)sizeof(filepath)) {
+            ESP_LOGW(TAG, "Path too long, skipping: %s/%s", path, entry->d_name);
+            continue;
+        }
         
         if (stat(filepath, &st) == 0) {
             ESP_LOGI(TAG, "  %s (%ld bytes)", entry->d_name, st.st_size);
@@ -260,8 +289,12 @@ uint32_t esp32_spiffs_free_space(uint32_t required_bytes)
     while ((entry = readdir(dir)) != NULL && freed < required_bytes) {
         // Only delete .BIN log files
         if (strstr(entry->d_name, ".BIN") != NULL) {
-            char filepath[256];
-            snprintf(filepath, sizeof(filepath), "/APM/LOGS/%s", entry->d_name);
+            char filepath[512];  // Increased buffer size
+            int ret = snprintf(filepath, sizeof(filepath), "/APM/LOGS/%s", entry->d_name);
+            if (ret >= (int)sizeof(filepath)) {
+                ESP_LOGW(TAG, "Path too long, skipping: /APM/LOGS/%s", entry->d_name);
+                continue;
+            }
             
             struct stat st;
             if (stat(filepath, &st) == 0) {

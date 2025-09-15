@@ -440,9 +440,9 @@ void CANIface::tx_task(void *arg)
                 // Only log occasionally to reduce spam when bus is disconnected
                 static uint32_t timeout_count = 0;
                 timeout_count++;
-                if (timeout_count <= 5 || (timeout_count % 100) == 0) {
-                    CAN_DEBUG_WARN("TX timeout on message ID=0x%08X (total timeouts=%lu)", 
-                                   (unsigned)(tx_item.frame.id & AP_HAL::CANFrame::MaskExtID), 
+                if (timeout_count <= 5 || (timeout_count % 1000) == 0) {  // Changed from 100 to 1000
+                    CAN_DEBUG_WARN("TX timeout on message ID=0x%08X (total timeouts=%lu)",
+                                   (unsigned)(tx_item.frame.id & AP_HAL::CANFrame::MaskExtID),
                                    (unsigned long)timeout_count);
                 }
             } else if (result == ESP_FAIL) {

@@ -783,6 +783,8 @@ protected:
 private:
 
     // define the two objects used for parsing incoming messages:
+    // These structures must match the wire format exactly - no padding allowed
+    // Use MAVLINK_ALIGNED_FIELDS macro if alignment is needed
     mavlink_message_t _channel_buffer;
     mavlink_status_t _channel_status;
 

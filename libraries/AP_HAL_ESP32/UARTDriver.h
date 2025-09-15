@@ -80,7 +80,10 @@ private:
     bool _initialized;
     size_t TX_BUF_SIZE = 1024;
     size_t RX_BUF_SIZE = 1024;
-    uint8_t _buffer[280];  // Staging buffer - large enough for complete MAVLink packets (267 bytes + margin)
+    // Staging buffer - large enough for complete MAVLink packets (267 bytes + margin)
+    // ESP32 DMA requires 4-byte alignment, cache operations require cache line alignment
+    // Using 16-byte alignment for safety with both DMA and cache
+    __attribute__((aligned(16))) uint8_t _buffer[280];
     ByteBuffer _readbuf{0};
     ByteBuffer _writebuf{0};
     Semaphore _write_mutex;

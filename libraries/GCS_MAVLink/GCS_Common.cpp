@@ -1493,9 +1493,9 @@ bool GCS_MAVLINK_InProgress::send_ack(MAV_RESULT result)
         requesting_sysid,
         requesting_compid
     );
-    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-    uint16_t len = mavlink_msg_to_send_buffer(buf, &ack_msg);
-    comm_send_buffer(chan, buf, len);
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
 
     return true;
 }
@@ -1764,14 +1764,17 @@ void GCS_MAVLINK::update_send()
     uint32_t now_ms = AP_HAL::millis();
     uint32_t interval_ms = now_ms - last_debug_ms[chan];
     if (interval_ms >= 5000) {  // Report every 5 seconds
-        uint32_t tx_space = txspace();
-        uint16_t pending = pushed_ap_message_ids.count() + bucket_message_ids_to_send.count();
+        // Variables only used in commented debug code below
+        // uint32_t tx_space = txspace();
+        // uint16_t pending = pushed_ap_message_ids.count() + bucket_message_ids_to_send.count();
         
         // Show actual counts for this interval
-        float interval_sec = interval_ms * 0.001f;
-        float msg_rate = messages_sent[chan] / interval_sec;
-        
-        // Calculate oldest message age in queue
+        // Variables only used in commented debug code below
+        // float interval_sec = interval_ms * 0.001f;
+        // float msg_rate = messages_sent[chan] / interval_sec;
+
+        // Calculate oldest message age in queue - commented out with debug output
+        /*
         uint32_t oldest_msg_age_ms = 0;
         uint32_t overdue_count = 0;
         for (uint8_t i=0; i<ARRAY_SIZE(deferred_message); i++) {
@@ -1785,24 +1788,29 @@ void GCS_MAVLINK::update_send()
                 }
             }
         }
-        
+
         // Add more diagnostic info
         static uint32_t report_count[MAVLINK_COMM_NUM_BUFFERS] = {};
         report_count[chan]++;
+        */
         
-        ESP_LOGE("MAVLINK", "Ch%d #%lu [%.3fs] upd=%lu: sent=%lu (%.1f/s) def=%lu buck=%lu timeout=%lu | tx=%lu pend=%u overdue=%lu oldest=%lums",
-                 chan, (unsigned long)report_count[chan], interval_sec, 
-                 (unsigned long)update_count[chan], (unsigned long)messages_sent[chan], msg_rate, 
-                 (unsigned long)deferred_sent[chan], (unsigned long)bucket_sent[chan], 
-                 (unsigned long)out_of_time_count[chan], (unsigned long)tx_space, pending, 
+        // Debug stats disabled - too verbose for normal operation
+        // Uncomment for debugging MAVLink performance issues
+        /*
+        ESP_LOGI("MAVLINK", "Ch%d #%lu [%.3fs] upd=%lu: sent=%lu (%.1f/s) def=%lu buck=%lu timeout=%lu | tx=%lu pend=%u overdue=%lu oldest=%lums",
+                 chan, (unsigned long)report_count[chan], interval_sec,
+                 (unsigned long)update_count[chan], (unsigned long)messages_sent[chan], msg_rate,
+                 (unsigned long)deferred_sent[chan], (unsigned long)bucket_sent[chan],
+                 (unsigned long)out_of_time_count[chan], (unsigned long)tx_space, pending,
                  (unsigned long)overdue_count, (unsigned long)oldest_msg_age_ms);
-        
+
         // Also show cumulative totals to verify counting
         static uint32_t total_messages[MAVLINK_COMM_NUM_BUFFERS] = {};
         total_messages[chan] += messages_sent[chan];
-        ESP_LOGE("MAVLINK", "  Ch%d totals: msgs=%lu updates=%lu (actual_ms=%lu)",
-                 chan, (unsigned long)total_messages[chan], 
+        ESP_LOGI("MAVLINK", "  Ch%d totals: msgs=%lu updates=%lu (actual_ms=%lu)",
+                 chan, (unsigned long)total_messages[chan],
                  (unsigned long)update_count[chan], (unsigned long)interval_ms);
+        */
         
         // Reset counters for next period
         update_count[chan] = 0;
@@ -3199,8 +3207,9 @@ void GCS_MAVLINK::send_vibration() const
     Vector3f vibration = ins.get_vibration_levels();
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // ESP32 workaround: use manual buffer to avoid MAVPACKED alignment issues
-    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MSG_ID_VIBRATION_LEN);
+    // ESP32 workaround: use aligned buffer to avoid stack corruption
+    // Use char array to match MAVLink macro expectations
+    char buf[MAVLINK_MSG_ID_VIBRATION_LEN] __attribute__((aligned(16))) = {0};
     uint64_t time_us = AP_HAL::micros64();
     float vib_x = vibration.x;
     float vib_y = vibration.y;
@@ -3812,9 +3821,9 @@ MAV_RESULT GCS_MAVLINK::handle_preflight_reboot(const mavlink_command_int_t &pac
         msg.sysid,
         msg.compid
     );
-    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-    uint16_t len = mavlink_msg_to_send_buffer(buf, &ack_msg);
-    comm_send_buffer(chan, buf, len);
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
 
     // when packet.param1 == 3 we reboot to hold in bootloader
     const bool hold_in_bootloader = is_equal(packet.param1, 3.0f);
@@ -5667,9 +5676,9 @@ void GCS_MAVLINK::handle_command_long(const mavlink_message_t &msg)
         msg.sysid,
         msg.compid
     );
-    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-    uint16_t len = mavlink_msg_to_send_buffer(buf, &ack_msg);
-    comm_send_buffer(chan, buf, len);
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
 
 #if HAL_LOGGING_ENABLED
     // log the packet:
@@ -5701,9 +5710,9 @@ void GCS_MAVLINK::handle_command_long(const mavlink_message_t &msg)
         msg.sysid,
         msg.compid
     );
-    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-    uint16_t len = mavlink_msg_to_send_buffer(buf, &ack_msg);
-    comm_send_buffer(chan, buf, len);
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
 
 }
 #endif  // AP_MAVLINK_COMMAND_LONG_ENABLED
@@ -6188,9 +6197,9 @@ void GCS_MAVLINK::handle_command_int(const mavlink_message_t &msg)
         msg.sysid,
         msg.compid
     );
-    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-    uint16_t len = mavlink_msg_to_send_buffer(buf, &ack_msg);
-    comm_send_buffer(chan, buf, len);
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
 
 #if HAL_LOGGING_ENABLED
     AP::logger().Write_Command(packet, msg.sysid, msg.compid, result);

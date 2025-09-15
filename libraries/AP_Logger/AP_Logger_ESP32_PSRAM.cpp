@@ -48,13 +48,16 @@ void AP_Logger_ESP32_PSRAM::Init()
     }
 
     _initialised = true;
-    
+
     // Clear any existing logs on startup (optional - could scan for existing logs)
     ESP32_PSRAM_Logger::clear();
     _num_logs = 0;
-    
-    gcs().send_text(MAV_SEVERITY_INFO, "PSRAM Log: Ready (%lu MB)", 
-                   (unsigned long)log_size_mb);
+
+    // Start an initial log for testing
+    start_new_log();
+
+    gcs().send_text(MAV_SEVERITY_INFO, "PSRAM Log: Ready (%lu MB, %u logs)",
+                   (unsigned long)log_size_mb, _num_logs);
 }
 
 // Erase all logs

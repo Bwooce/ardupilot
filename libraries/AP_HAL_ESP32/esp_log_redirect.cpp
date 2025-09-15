@@ -68,6 +68,10 @@ static int esp_log_to_mavlink(const char *fmt, va_list args)
                                                       strstr(buffer, "totals") || strstr(buffer, "upd="))) {
                 // MAVLINK channel stats should be INFO level per user request
                 severity = MAV_SEVERITY_INFO;
+            } else if ((strstr(buffer, "TWAI") || strstr(buffer, "CAN")) && 
+                       (buffer[0] == 'E' && (buffer[1] == ' ' || buffer[1] == '('))) {
+                // TWAI/CAN errors should be WARNING to avoid QGroundControl popup dialogs
+                severity = MAV_SEVERITY_WARNING;
             } else if (buffer[0] == 'E' && (buffer[1] == ' ' || buffer[1] == '(')) {
                 // ESP_LOGE messages should be CRITICAL for visibility
                 severity = MAV_SEVERITY_CRITICAL;

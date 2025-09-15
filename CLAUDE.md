@@ -1,13 +1,21 @@
 ## Development Notes
 
-- The hwdef.dat file is not binary, use the cat tool to inspect it as the Read tool refuses
-- waf build should always be done with -j 8 to use more cores
+- The hwdef.dat file is not binary, use the cat tool to inspect it as the Read tool refuses to read it because of it's assumptions about what files with .dat contain.
+- waf build should always be done with -j 16 to use 16 cores
 - ESP32 logging levels should be controlled via esp_log_level_set() in the HAL init code, not by changing individual log statements
-- Use ESP_LOGE/LOGW/LOGI/LOGD/LOGV consistently and control verbosity centrally
+- Use ESP_LOGE/LOGW/LOGI/LOGD/LOGV consistently and control verbosity centrally in the ESP32 HAL debug configuration
 - DNA allocation encoding issue: Expected 8 bytes but sending 35+ bytes in multi-frame transfer
-- Remote node gets 4 DNA requests before response - investigate timing delays
 - remember that the user will do the build, and it's always ardupilot rover
 - remember to always set a timeout on serial communication scripts.
 - Always cast to (unsigned long) and use %lX or %lu for uint32_t on ESP32
-- ESP32 has different type sizes than x86_64
-- Remember only the user will compile ardupilot, only for rover, and do not initiate this yourself unless requested.////////
+- ESP32 has different type sizes than x86_64, so testing theories locally on intel does not prove anything
+- Only the ardupilot-rover-builder agent will compile ardupilot, only for rover, and do not initiate this in any other agent or context. 
+- **ESP32 Build Fix**: Before running any ESP32 waf commands, source the ESP-IDF environment: `source modules/esp_idf/export.sh`
+- You can, and should prefer, to use the idf serial monitor commands in preference to screen/stty or custom pythong scripts.
+- Do not create duplicate shell or python scripts for functionality that already exists (wholely or in part). Prefer to maintain the existing script and only create a new one after asking the user. 
+- If a user tells you not to do something, remember that, and if you've already done it then undo the action e.g. delete the file you created.
+- regularly commit to git, and never ever revert code without knowing exactly what is being reverted as working code can be lost if not committed.
+- when encouring a stack trace use the IDF tooling to work out what occurred specifically it means before starting further analysis or proposing theories. 
+- try and keep the param and hwdef.dat files from all the esp32 boards roughly aligned with changes, especially the t-2can and t-connect board definitions as they are very similar (both esp32s3, just the t-2can as two can interfaces).
+- always use the build agent to build ardupilot, and the serial monitor agent to check the console logs.
+- Don't use --verbose on anything unless you really need it as it just burns tokens for no gain

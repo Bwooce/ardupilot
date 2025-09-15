@@ -79,9 +79,14 @@ void AP_Logger::handle_log_request_list(GCS_MAVLINK &link, const mavlink_message
 
     _log_num_logs = get_num_logs();
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Debug: Report what backend is being used and log count
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Log list: %u logs found", _log_num_logs);
+#endif
+
     if (_log_num_logs == 0) {
         _log_next_list_entry = 0;
-        _log_last_list_entry = 0;        
+        _log_last_list_entry = 0;
     } else {
         _log_next_list_entry = packet.start;
         _log_last_list_entry = packet.end;

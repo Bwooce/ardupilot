@@ -92,9 +92,9 @@ GCS_MAVLINK::queued_param_send()
             _queued_parameter_count,
             _queued_parameter_index
         );
-        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-        uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-        comm_send_buffer(chan, buf, len);
+        MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+        uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+        comm_send_buffer(chan, (uint8_t*)buf, len);
 
         _queued_parameter = AP_Param::next_scalar(&_queued_parameter_token, &_queued_parameter_type);
         _queued_parameter_index++;
@@ -377,9 +377,9 @@ void GCS_MAVLINK::send_parameter_value(const char *param_name, ap_var_type param
         AP_Param::count_parameters(),
         (uint16_t)-1
     );
-    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-    uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-    comm_send_buffer(chan, buf, len);
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
 }
 
 /*
@@ -405,9 +405,9 @@ void GCS::send_parameter_value(const char *param_name, ap_var_type param_type, f
     for (uint8_t i=0; i<num_gcs(); i++) {
         GCS_MAVLINK *chan = gcs().chan(i);
         if (chan != nullptr) {
-            uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-            uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-            comm_send_buffer(chan->get_chan(), buf, len);
+            MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+            uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+            comm_send_buffer(chan->get_chan(), (uint8_t*)buf, len);
         }
     }
 
@@ -506,9 +506,9 @@ uint8_t GCS_MAVLINK::send_parameter_async_replies()
             reply.count,
             reply.param_index
         );
-        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-        uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-        comm_send_buffer(reply.chan, buf, len);
+        MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+        uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+        comm_send_buffer(reply.chan, (uint8_t*)buf, len);
 
         _queued_parameter_send_time_ms = AP_HAL::millis();
         async_replies_sent_count++;

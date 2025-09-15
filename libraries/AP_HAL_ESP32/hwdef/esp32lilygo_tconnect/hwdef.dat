@@ -76,15 +76,24 @@ define DEFAULT_SERIAL2_PROTOCOL SerialProtocol_GPS
 # Storage configuration - Use PSRAM for in-memory logging
 # PSRAM logging is enabled by default for zero flash wear
 define HAL_ESP32_USE_PSRAM_LOGGING 1
+define HAL_ESP32_USE_SPIFFS 1
 define HAL_ESP32_PSRAM_LOG_SIZE_MB 4
 
-# Disable flash-based logging since we're using PSRAM
+# Enable flash-based filesystem logging for crash diagnostics and persistent data
 define HAL_LOGGING_DATAFLASH_ENABLED 0
-define HAL_LOGGING_FILESYSTEM_ENABLED 0
+define HAL_LOGGING_FILESYSTEM_ENABLED 1
 
 # Enable MAVLink logging for remote access
 define HAL_LOGGING_MAVLINK_ENABLED 1
 define HAL_LOGGING_BACKENDS_DEFAULT 3  # Bit 0=File, Bit 1=MAVLink, both enabled
+
+# SPIFFS Configuration for internal flash logging (16MB flash allows generous space)
+define HAL_ESP32_STORAGE_TYPE 1  # 0=SD, 1=SPIFFS, 2=LittleFS
+define HAL_ESP32_SPIFFS_MOUNT_POINT "/APM"
+define HAL_ESP32_SPIFFS_MAX_FILES 10
+define HAL_ESP32_SPIFFS_FORMAT_IF_FAILED 1
+define HAL_ESP32_SPIFFS_SIZE_MB 8
+define HAL_HAVE_FILESYSTEM_SUPPORT 1
 
 # Storage directories (for compatibility)
 define HAL_BOARD_LOG_DIRECTORY "/APM/LOGS"
@@ -97,7 +106,7 @@ define HAL_LOGGER_WRITE_CHUNK_SIZE 1024  # PSRAM can handle larger chunks
 # Feature configuration for DroneCAN hub
 define HAL_MINIMIZE_FEATURES 0
 define HAL_MINIMIZE_FLASH_SIZE 0
-define HAL_OS_FATFS_IO 1
+define HAL_OS_FATFS_IO 0
 
 # T-Connect Board Pin Configuration
 # CAN Interface (primary function) - VERIFIED WORKING PINS

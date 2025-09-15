@@ -1104,6 +1104,31 @@ class esp32(Board):
         super().__init__()
         self.with_can = True
 
+    def configure(self, cfg):
+        # Set up ESP-IDF environment before toolchain detection
+        import subprocess
+        local_idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
+        os.environ['IDF_PATH'] = local_idf_path
+        
+        # Source ESP-IDF environment to set up all necessary variables
+        export_script = os.path.join(local_idf_path, 'export.sh')
+        if os.path.exists(export_script):
+            try:
+                # Run export.sh and capture environment changes
+                result = subprocess.run(['bash', '-c', f'source {export_script} && env'], 
+                                      capture_output=True, text=True, check=True)
+                # Update current environment with ESP-IDF variables
+                for line in result.stdout.splitlines():
+                    if '=' in line and not line.startswith('_'):
+                        key, value = line.split('=', 1)
+                        if key.startswith(('IDF_', 'PATH', 'PYTHON')) or 'esp' in key.lower():
+                            os.environ[key] = value
+            except Exception as e:
+                print(f"Warning: Failed to source ESP-IDF environment: {e}")
+        
+        # Now call parent configure with ESP-IDF environment available
+        super(esp32, self).configure(cfg)
+
     def configure_env(self, cfg, env):
         env.BOARD_CLASS = "ESP32"
 

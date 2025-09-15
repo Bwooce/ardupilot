@@ -107,6 +107,7 @@ target_include_directories(${elf_file} PRIVATE ${CMAKE_SOURCE_DIR}/../../../../m
 target_link_libraries(${elf_file}
                 idf::freertos
                 idf::fatfs
+                idf::spiffs
                 idf::nvs_flash
                 idf::spi_flash
                 idf::app_update
