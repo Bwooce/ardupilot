@@ -348,7 +348,9 @@ void AP_Logger_File::Prep_MinSpace()
 
     uint16_t count = 0;
     do {
+        last_io_operation = "disk_space_avail";
         int64_t avail = disk_space_avail();
+        last_io_operation = "";
         if (avail == -1) {
             break;
         }
@@ -571,6 +573,12 @@ uint32_t AP_Logger_File::_get_log_size(const uint16_t log_num)
         return 0;
     }
     free(fname);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // SPIFFS can return invalid sizes, sanity check
+    if (st.st_size < 0 || st.st_size > 4194304) { // 4MB max
+        return 0; // Invalid size
+    }
+#endif
     return st.st_size;
 }
 
@@ -836,8 +844,21 @@ void AP_Logger_File::start_new_log(void)
     }
 
     if (disk_space_avail() < _free_space_min_avail && disk_space() > 0) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // On ESP32, try to free up space by deleting old logs
+        DEV_PRINTF("Low space - attempting to delete old logs\n");
+        last_io_operation = "prep_minspace";
+        Prep_MinSpace();
+        last_io_operation = "";
+        // Check again after cleanup
+        if (disk_space_avail() < _free_space_min_avail) {
+            DEV_PRINTF("Still out of space after cleanup\n");
+            return;
+        }
+#else
         DEV_PRINTF("Out of space for logging\n");
         return;
+#endif
     }
 
     uint16_t log_num = find_last_log();
@@ -1063,11 +1084,26 @@ void AP_Logger_File::io_timer(void)
         _free_space_last_check_time = tnow;
         last_io_operation = "disk_space_avail";
         if (disk_space_avail() < _free_space_min_avail && disk_space() > 0) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            // On ESP32, try to free up space by deleting old logs
+            DEV_PRINTF("Low space during logging - attempting cleanup\n");
+            last_io_operation = "prep_minspace";
+            Prep_MinSpace();
+            last_io_operation = "";
+            // Check again after cleanup
+            if (disk_space_avail() < _free_space_min_avail) {
+                DEV_PRINTF("Still out of space after cleanup\n");
+                stop_logging();
+                _open_error_ms = AP_HAL::millis(); // prevent logging starting again for 5s
+                return;
+            }
+#else
             DEV_PRINTF("Out of space for logging\n");
             stop_logging();
             _open_error_ms = AP_HAL::millis(); // prevent logging starting again for 5s
             last_io_operation = "";
             return;
+#endif
         }
         last_io_operation = "";
     }
@@ -1109,10 +1145,26 @@ void AP_Logger_File::io_timer(void)
     last_io_operation = "";
     if (nwritten <= 0) {
         if (errno == ENOSPC) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            // On ESP32, try to free up space by deleting old logs
+            DEV_PRINTF("ENOSPC - attempting to delete old logs\n");
+            last_io_operation = "prep_minspace";
+            Prep_MinSpace();
+            last_io_operation = "write";
+            // Try writing again after cleanup
+            nwritten = AP::FS().write(_write_fd, head, nbytes);
+            last_io_operation = "";
+            if (nwritten <= 0) {
+                DEV_PRINTF("Still out of space after cleanup\n");
+                stop_logging();
+                _open_error_ms = AP_HAL::millis(); // prevent logging starting again for 5s
+            }
+#else
             DEV_PRINTF("Out of space for logging\n");
             stop_logging();
             _open_error_ms = AP_HAL::millis(); // prevent logging starting again for 5s
             last_io_operation = "";
+#endif
         } else if ((tnow - _last_write_ms)/1000U > unsigned(_front._params.file_timeout)) {
             // if we can't write for LOG_FILE_TIMEOUT seconds we give up and close
             // the file. This allows us to cope with temporary write
@@ -1129,6 +1181,18 @@ void AP_Logger_File::io_timer(void)
         _last_write_ms = tnow;
         _write_offset += nwritten;
         _writebuf.advance(nwritten);
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // SPIFFS has a practical file size limit around 4MB
+        // Rotate to a new log file if we exceed 3.5MB to leave some margin
+        const uint32_t max_log_size = 3670016; // 3.5MB in bytes
+        if (_write_offset >= max_log_size) {
+            DEV_PRINTF("Log file size limit reached (%lu bytes), rotating\n", (unsigned long)_write_offset);
+            stop_logging();
+            // Set a flag to start a new log on next opportunity
+            _open_error_ms = 0; // Allow immediate new log creation
+        }
+#endif
 
         // we know nwritten > 0 so we won't sync if bytes_until_fsync == 0
         if ((uint32_t)nwritten == bytes_until_fsync) {
