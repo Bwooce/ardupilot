@@ -135,7 +135,8 @@ void ESP32Params::apply_log_level() {
     esp_log_level_set("DRONECAN", ESP_LOG_ERROR);  // Only critical DroneCAN errors
     esp_log_level_set("CANARD", ESP_LOG_ERROR);    // Only critical Canard errors
     esp_log_level_set("DNA_SERVER", ESP_LOG_ERROR); // Only critical DNA errors
-    
+    esp_log_level_set("DNA_HEX", ESP_LOG_INFO); // Enable DNA hex debugging for manual decode
+
     // Suppress harmless system messages
     esp_log_level_set("system_api", ESP_LOG_NONE);  // eFuse MAC_CUSTOM messages
     

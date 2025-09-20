@@ -384,34 +384,9 @@ void CANIface::tx_task(void *arg)
         //bool is_service = (message.identifier >> 7) & 0x01;  // Unused for now
         //uint8_t source_node = message.identifier & 0x7F;  // Unused after removing type 342 debug
         
-        // Debug: Check if bit 31 is being set (FlagEFF) - this is expected and handled
-        if ((tx_item.frame.id & 0x80000000) != 0) {
-            static uint32_t bit31_warn_count = 0;
-            if (bit31_warn_count++ == 0) {
-                ESP_LOGI("CAN_TX", "FlagEFF (bit 31) detected in frame IDs - this is normal, masking to 29 bits");
-                ESP_LOGI("CAN_TX", "  Example: frame.id=0x%08X → masked=0x%08X",
-                         (unsigned)tx_item.frame.id, (unsigned)message.identifier);
-            }
-            // Only log every 100th occurrence after first explanation
-            else if ((bit31_warn_count % 100) == 0) {
-                ESP_LOGD("CAN_TX", "FlagEFF seen %lu times (working correctly)", bit31_warn_count);
-            }
-        }
+        // FlagEFF (bit 31) is normal for extended frame format - no need to log
         
-        // Debug excessive message sending
-        static uint32_t total_msg_count = 0;
-        static uint32_t last_total_report = 0;
-        total_msg_count++;
-        
-        uint32_t now = AP_HAL::millis();
-        if (now - last_total_report > 5000) { // Report every 5 seconds
-            if (total_msg_count > 1000) {
-                ESP_LOGE("CAN_TX", "ERROR: Sent %lu total CAN messages in 5 sec!", total_msg_count);
-                // Something is flooding the bus
-            }
-            total_msg_count = 0;
-            last_total_report = now;
-        }
+        // CAN message counting disabled - not needed in production
         
         
         // Commented out verbose logging
@@ -437,14 +412,18 @@ void CANIface::tx_task(void *arg)
             // Handle specific TWAI error conditions
             if (result == ESP_ERR_TIMEOUT) {
                 // TX timeout - bus may be congested or disconnected
-                // Only log occasionally to reduce spam when bus is disconnected
+                // Count timeouts but don't log them - stats are tracked elsewhere
                 static uint32_t timeout_count = 0;
                 timeout_count++;
-                if (timeout_count <= 5 || (timeout_count % 1000) == 0) {  // Changed from 100 to 1000
+                // Disabled - CAN stats are available via MAVLink
+                // Only enable for debugging CAN issues
+#if 0
+                if (timeout_count <= 5 || (timeout_count % 1000) == 0) {
                     CAN_DEBUG_WARN("TX timeout on message ID=0x%08X (total timeouts=%lu)",
                                    (unsigned)(tx_item.frame.id & AP_HAL::CANFrame::MaskExtID),
                                    (unsigned long)timeout_count);
                 }
+#endif
             } else if (result == ESP_FAIL) {
                 // TX failed - check bus state
                 twai_status_info_t twai_status;
@@ -632,19 +611,22 @@ void CANIface::collect_hw_stats()
         stats.current_health = 2; // ERROR - not initialized
         return;
     }
-    
+
+    // Periodic stats disabled - available via MAVLink instead
+#if 0
     static uint32_t last_stats_print_ms = 0;
     uint32_t now_ms = AP_HAL::millis();
-    
+
     // Print periodic stats every 10 seconds if there's any activity
     if (now_ms - last_stats_print_ms > 10000) {
         if (stats.tx_success > 0 || stats.rx_received > 0) {
-            CAN_DEBUG_INFO("CAN%d Stats: TX_OK=%u TX_FAIL=%u RX=%u Errors=%u Health=%d", 
+            CAN_DEBUG_INFO("CAN%d Stats: TX_OK=%u TX_FAIL=%u RX=%u Errors=%u Health=%d",
                           instance, (unsigned)stats.tx_success, (unsigned)stats.tx_failed,
                           (unsigned)stats.rx_received, (unsigned)stats.bus_errors, stats.current_health);
         }
         last_stats_print_ms = now_ms;
     }
+#endif
     
     // Collect ESP-IDF TWAI hardware statistics
     twai_status_info_t twai_status;

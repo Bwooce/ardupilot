@@ -12,13 +12,18 @@ from datetime import datetime
 from collections import defaultdict, deque
 import signal
 import argparse
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from serial_port_lock import SerialPortLock
 
 class ESP32ErrorMonitor:
     def __init__(self, port='/dev/ttyACM0', baudrate=115200):
         self.port = port
         self.baudrate = baudrate
         self.serial = None
+        self.port_lock = None
         self.running = True
+        self.graceful_exit = False  # Flag for graceful exit on SIGUSR1
 
         # Error tracking
         self.errors = defaultdict(list)  # category -> list of (timestamp, message)
@@ -70,14 +75,33 @@ class ESP32ErrorMonitor:
         self.summary_interval = 30  # seconds
 
     def connect(self):
-        """Connect to serial port"""
+        """Connect to serial port with lock file coordination"""
         try:
+            # Acquire lock first
+            self.port_lock = SerialPortLock(self.port, "esp32_monitor_agent")
+            if not self.port_lock.acquire(timeout=30):
+                print(f"✗ Could not acquire lock for {self.port} (timeout)")
+                return False
+
             self.serial = serial.Serial(self.port, self.baudrate, timeout=0.1)
-            print(f"✓ Connected to {self.port} at {self.baudrate} baud")
+            print(f"✓ Connected to {self.port} at {self.baudrate} baud (with lock)")
             return True
         except Exception as e:
             print(f"✗ Failed to connect to {self.port}: {e}")
+            if self.port_lock:
+                self.port_lock.release()
+                self.port_lock = None
             return False
+
+    def disconnect(self):
+        """Disconnect and release port lock"""
+        if self.serial:
+            self.serial.close()
+            self.serial = None
+        if self.port_lock:
+            self.port_lock.release()
+            self.port_lock = None
+            print(f"Released lock on {self.port}")
 
     def parse_line(self, line):
         """Parse a line for errors, warnings, and status"""
@@ -251,12 +275,23 @@ class ESP32ErrorMonitor:
         except KeyboardInterrupt:
             print("\n\nMonitoring stopped by user")
         finally:
-            self.print_summary()
-            if self.serial:
-                self.serial.close()
+            if self.graceful_exit:
+                print("\n✓ Gracefully releasing port for upload agent")
+                print("  Monitor will resume automatically after upload completes")
+            else:
+                self.print_summary()
+            self.disconnect()  # Release lock and close serial
 
     def signal_handler(self, sig, frame):
         """Handle Ctrl+C gracefully"""
+        self.running = False
+        self.disconnect()  # Ensure port lock is released
+
+    def release_handler(self, sig, frame):
+        """Handle SIGUSR1 for graceful release request"""
+        print("\n📤 Received release request from upload agent")
+        print("   Gracefully disconnecting to allow firmware upload...")
+        self.graceful_exit = True
         self.running = False
 
 def main():
@@ -271,8 +306,9 @@ def main():
     monitor = ESP32ErrorMonitor(args.port, args.baud)
     monitor.summary_interval = args.interval
 
-    # Set up signal handler
+    # Set up signal handlers
     signal.signal(signal.SIGINT, monitor.signal_handler)
+    signal.signal(signal.SIGUSR1, monitor.release_handler)  # For graceful release requests
 
     # Run monitor
     monitor.monitor(args.duration)

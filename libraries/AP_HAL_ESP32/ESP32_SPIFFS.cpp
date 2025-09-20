@@ -63,7 +63,9 @@ bool esp32_spiffs_init(void)
     if (spiffs_mounted) {
         return true;
     }
-    
+
+    // Use GCS message to avoid stack overflow
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "ESP32: Initializing SPIFFS");
     ESP_LOGI(TAG, "Initializing SPIFFS for internal flash logging");
 
     // Configure SPIFFS with optimizations for fast startup

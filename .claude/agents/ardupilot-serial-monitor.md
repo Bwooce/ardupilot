@@ -56,13 +56,41 @@ You will work with the existing esp32_monitor_agent.py script to:
 
 **Serial Port Coordination:**
 
-Before starting monitoring:
-1. Check if any processes are using /dev/ttyACM0 with `lsof /dev/ttyACM0`
-2. Kill any conflicting processes if needed
-3. Ensure the ardupilot-rover-builder agent is not currently uploading firmware
-4. Use proper serial port locking to prevent conflicts
+IMPORTANT: Always use the lock-enabled monitoring script to prevent conflicts:
 
-No other tooling should generally be required to access the serial port.
+```bash
+# ALWAYS use this command to start monitoring:
+python3 /home/bruce/ardupilot/esp32_monitor_agent.py --port /dev/ttyACM0
+
+# Or for fully detached monitoring (prevents terminal freezing):
+/home/bruce/ardupilot/rover_monitor_detached.sh /dev/ttyACM0
+# View output: tail -f /tmp/rover_monitor.log
+
+# To gracefully stop the monitor (ALWAYS use SIGUSR1):
+# First find the PID:
+ps aux | grep esp32_monitor_agent | grep -v grep
+# Then send SIGUSR1:
+kill -USR1 <PID>
+
+# The script will automatically:
+# - Acquire a lock file at /var/lock/LCK..ttyACM0
+# - Handle SIGUSR1 signals for graceful release
+# - Wait if another process is using the port
+# - Show who has the lock if busy
+# - Release the lock on exit
+
+# NEVER use kill -9 or pkill on the monitor!
+# ALWAYS use kill -USR1 for graceful shutdown
+```
+
+Before starting monitoring:
+1. The script will automatically check for port conflicts
+2. If the port is locked, it will wait up to 30 seconds
+3. The lock prevents conflicts with firmware uploads
+4. On Ctrl+C, SIGUSR1, or exit, the lock is automatically released
+5. Upload scripts can signal the monitor to release with SIGUSR1
+
+DO NOT use raw serial access or other monitoring scripts.
 
 **Special Considerations for Rover:**
 

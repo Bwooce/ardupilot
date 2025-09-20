@@ -22,6 +22,10 @@
 #include "AP_DroneCAN_DNA_Server.h"
 #include <stddef.h>  // for offsetof
 #include "AP_DroneCAN.h"
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include "esp_log.h"
+#endif
 #include <StorageManager/StorageManager.h>
 #include <AP_Math/AP_Math.h>
 #include <GCS_MAVLink/GCS.h>
@@ -820,8 +824,10 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
         // with a particular ID once then switch back to no preference for DNA
         rsp.node_id = db.handle_allocation(rcvd_unique_id);
         
-        // For the final allocation response, always clear first_part flag per spec
-        rsp.first_part_of_unique_id = 0;
+        // For the final allocation response with the echoed UID:
+        // If the UID fits in one frame (≤6 bytes), mark it as first_part=1
+        // If it's a continuation from multi-frame (>6 bytes), keep first_part=0
+        rsp.first_part_of_unique_id = (rcvd_unique_id_offset <= 6) ? 1 : 0;
         
         rcvd_unique_id_offset = 0; // reset state for next allocation
         memset(rcvd_unique_id, 0, sizeof(rcvd_unique_id)); // Clear buffer for next allocation
@@ -1018,7 +1024,45 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     // Make a defensive copy to ensure struct doesn't get modified during broadcast
     struct uavcan_protocol_dynamic_node_id_Allocation rsp_copy;
     memcpy(&rsp_copy, &rsp, sizeof(rsp_copy));
-    
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Log DNA response bytes for manual decoding
+    // Throttle to every 10th response to reduce spam
+    static uint32_t dna_hex_counter = 0;
+    dna_hex_counter++;
+
+    // Only log every 10th response, or if it's an allocation (node_id != 0)
+    if ((dna_hex_counter % 10) == 0 || rsp_copy.node_id != 0) {
+        // Log the response structure using ESP_LOGI for console output
+        ESP_LOGI("DNA_HEX", "DNA RSP: node=%d first=%d uid_len=%d",
+                 rsp_copy.node_id,
+                 rsp_copy.first_part_of_unique_id ? 1 : 0,
+                 rsp_copy.unique_id.len);
+
+        // Log first 8 bytes of UID for manual decode
+        if (rsp_copy.unique_id.len > 0) {
+            ESP_LOGI("DNA_HEX", "DNA UID: %02X %02X %02X %02X %02X %02X %02X %02X",
+                     rsp_copy.unique_id.data[0], rsp_copy.unique_id.data[1],
+                     rsp_copy.unique_id.data[2], rsp_copy.unique_id.data[3],
+                     rsp_copy.unique_id.data[4], rsp_copy.unique_id.data[5],
+                     rsp_copy.unique_id.data[6], rsp_copy.unique_id.data[7]);
+
+            // If more than 8 bytes, log the rest
+            if (rsp_copy.unique_id.len > 8 && rsp_copy.unique_id.len <= 16) {
+                ESP_LOGI("DNA_HEX", "DNA UID2: %02X %02X %02X %02X %02X %02X %02X %02X",
+                         rsp_copy.unique_id.data[8],
+                         (rsp_copy.unique_id.len > 9) ? rsp_copy.unique_id.data[9] : 0,
+                         (rsp_copy.unique_id.len > 10) ? rsp_copy.unique_id.data[10] : 0,
+                         (rsp_copy.unique_id.len > 11) ? rsp_copy.unique_id.data[11] : 0,
+                         (rsp_copy.unique_id.len > 12) ? rsp_copy.unique_id.data[12] : 0,
+                         (rsp_copy.unique_id.len > 13) ? rsp_copy.unique_id.data[13] : 0,
+                         (rsp_copy.unique_id.len > 14) ? rsp_copy.unique_id.data[14] : 0,
+                         (rsp_copy.unique_id.len > 15) ? rsp_copy.unique_id.data[15] : 0);
+            }
+        }
+    }
+#endif
+
     allocation_pub.broadcast(rsp_copy, false); // never publish allocation message with CAN FD
     
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32

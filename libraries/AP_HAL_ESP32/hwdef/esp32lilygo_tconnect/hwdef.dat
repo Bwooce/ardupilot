@@ -247,3 +247,6 @@ define DEFAULT_RSSI_TYPE 5
 # define ESP32_DEBUG_CMD_LONG 1
 # Enable ESP32 log to MAVLink by default for debugging
 define ESP32_LOG_MAV_DEFAULT 1
+
+# Enable ESP32 filesystem backend - CRITICAL for SPIFFS to work!
+define AP_FILESYSTEM_ESP32_ENABLED 1

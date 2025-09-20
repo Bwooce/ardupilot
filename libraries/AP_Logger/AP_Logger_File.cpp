@@ -371,7 +371,9 @@ void AP_Logger_File::Prep_MinSpace()
             DEV_PRINTF("Removing (%s) for minimum-space requirements (%.0fMB < %.0fMB)\n",
                                 filename_to_remove, (double)avail*B_to_MB, (double)target_free*B_to_MB);
             EXPECT_DELAY_MS(2000);
+            last_io_operation = "unlink_minspace";
             if (AP::FS().unlink(filename_to_remove) == -1) {
+                last_io_operation = "";
                 _cached_oldest_log = 0;
                 DEV_PRINTF("Failed to remove %s: %s\n", filename_to_remove, strerror(errno));
                 free(filename_to_remove);
@@ -383,6 +385,7 @@ void AP_Logger_File::Prep_MinSpace()
                     break;
                 }
             } else {
+                last_io_operation = "";
                 free(filename_to_remove);
             }
         }
@@ -716,6 +719,13 @@ void AP_Logger_File::get_log_info(const uint16_t list_entry, uint32_t &size, uin
 
     size = _get_log_size(log_num);
     time_utc = _get_log_time(log_num);
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Extra sanity check for ESP32 SPIFFS
+    if (size > 4194304) { // 4MB is unrealistic
+        size = 0;
+    }
+#endif
 }
 
 
@@ -834,16 +844,22 @@ void AP_Logger_File::start_new_log(void)
     // to open the log...
     _open_error_ms = AP_HAL::millis();
 
+    last_io_operation = "stop_logging";
     stop_logging();
+    last_io_operation = "";
 
     start_new_log_reset_variables();
 
     if (_read_fd != -1) {
+        last_io_operation = "close_read_fd";
         AP::FS().close(_read_fd);
+        last_io_operation = "";
         _read_fd = -1;
     }
 
+    last_io_operation = "disk_space_check";
     if (disk_space_avail() < _free_space_min_avail && disk_space() > 0) {
+        last_io_operation = "";
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         // On ESP32, try to free up space by deleting old logs
         DEV_PRINTF("Low space - attempting to delete old logs\n");
@@ -860,10 +876,16 @@ void AP_Logger_File::start_new_log(void)
         return;
 #endif
     }
+    last_io_operation = "";
 
+    last_io_operation = "find_last_log";
     uint16_t log_num = find_last_log();
+    last_io_operation = "";
+
     // re-use empty logs if possible
+    last_io_operation = "get_log_size";
     if (_get_log_size(log_num) > 0 || log_num == 0) {
+        last_io_operation = "";
         log_num++;
     }
     if (log_num > _front.get_max_num_logs()) {
@@ -891,68 +913,50 @@ void AP_Logger_File::start_new_log(void)
 #endif
 
     // create the log directory if need be
+    last_io_operation = "ensure_log_dir";
     ensure_log_directory_exists();
-
-    EXPECT_DELAY_MS(3000);
+    last_io_operation = "";
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Debug what's happening with the filesystem
-    static bool test_done = false;
-    if (!test_done) {
-        test_done = true;
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "About to create: %s", _write_filename);
+    // SPIFFS can be very slow at file creation, allow more time
+    EXPECT_DELAY_MS(8000);
+#else
+    EXPECT_DELAY_MS(3000);
+#endif
 
-        // Check if file already exists
-        struct stat st;
-        if (::stat(_write_filename, &st) == 0) {
-            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "File already exists, size=%ld", st.st_size);
-            // Try to delete it first
-            if (::unlink(_write_filename) == 0) {
-                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Deleted existing file");
-            } else {
-                GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Failed to delete: errno=%d", errno);
-            }
-        }
+    last_io_operation = "open_log_file";
 
-        // Check how many files exist now
-        DIR* d = ::opendir("/APM");
-        if (d != nullptr) {
-            int count = 0;
-            while (::readdir(d) != nullptr) {
-                count++;
-            }
-            ::closedir(d);
-            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Files in /APM: %d", count);
-        }
-
-        // Now try direct POSIX create
-        int test_fd = ::open(_write_filename, O_WRONLY|O_CREAT|O_TRUNC, 0666);
-        if (test_fd >= 0) {
-            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Direct POSIX create worked!");
-            ::close(test_fd);
-            // Leave file for AP_FS to use
-        } else {
-            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Direct POSIX failed: errno=%d", errno);
-        }
-    }
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Reset heartbeat just before the potentially slow SPIFFS operation
+    _io_timer_heartbeat = AP_HAL::millis();
 #endif
 
     _write_fd = AP::FS().open(_write_filename, O_WRONLY|O_CREAT|O_TRUNC);
+    last_io_operation = "";
     _cached_oldest_log = 0;
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Debug logging removed to prevent stack overflow
     if (_write_fd == -1) {
         int saved_errno = errno;
-        // Try a direct POSIX open to bypass the AP_Filesystem wrapper
-        int direct_fd = ::open(_write_filename, O_WRONLY|O_CREAT|O_TRUNC, 0666);
-        if (direct_fd >= 0) {
-            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Direct open worked! AP_FS issue");
-            ::close(direct_fd);
-            ::unlink(_write_filename);
-        } else {
-            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Direct open also failed: errno=%d", errno);
+
+        // SPIFFS might be fragmented or have issues - try cleanup
+        if (saved_errno == ENOSPC || saved_errno == EIO) {
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "SPIFFS issue, attempting cleanup");
+
+            // Try to delete the oldest log to make room
+            uint16_t oldest = find_oldest_log();
+            if (oldest > 0) {
+                char *oldest_file = _log_file_name(oldest);
+                if (oldest_file != nullptr) {
+                    ::unlink(oldest_file);
+                    free(oldest_file);
+                }
+            }
+
+            // Try opening again
+            _write_fd = AP::FS().open(_write_filename, O_WRONLY|O_CREAT|O_TRUNC);
         }
+
         errno = saved_errno; // Restore original errno
     }
 #endif
@@ -984,9 +988,11 @@ void AP_Logger_File::start_new_log(void)
 
     // now update lastlog.txt with the new log number
     last_log_is_marked_discard = _front._params.log_disarmed == AP_Logger::LogDisarmed::LOG_WHILE_DISARMED_DISCARD;
+    last_io_operation = "write_lastlog_file";
     if (!write_lastlog_file(log_num)) {
         _open_error_ms = AP_HAL::millis();
     }
+    last_io_operation = "";
 }
 
 /*
@@ -1047,13 +1053,17 @@ void AP_Logger_File::io_timer(void)
     _io_timer_heartbeat = tnow;
 
     if (start_new_log_pending) {
+        last_io_operation = "start_new_log";
         start_new_log();
+        last_io_operation = "";
         start_new_log_pending = false;
     }
 
     if (erase.log_num != 0) {
         // continue erase
+        last_io_operation = "erase_next";
         erase_next();
+        last_io_operation = "";
         return;
     }
 
@@ -1063,9 +1073,13 @@ void AP_Logger_File::io_timer(void)
 
     if (last_log_is_marked_discard && hal.util->get_soft_armed()) {
         // time to make the log permanent
+        last_io_operation = "find_last_log";
         const auto log_num = find_last_log();
+        last_io_operation = "";
         last_log_is_marked_discard = false;
+        last_io_operation = "write_lastlog";
         write_lastlog_file(log_num);
+        last_io_operation = "";
     }
 
     uint32_t nbytes = _writebuf.available();
@@ -1272,17 +1286,21 @@ void AP_Logger_File::erase_next(void)
         return;
     }
 
+    last_io_operation = "unlink_log";
     AP::FS().unlink(fname);
+    last_io_operation = "";
     free(fname);
 
     erase.log_num++;
     if (erase.log_num <= _front.get_max_num_logs()) {
         return;
     }
-    
+
     fname = _lastlog_file_name();
     if (fname != nullptr) {
+        last_io_operation = "unlink_lastlog";
         AP::FS().unlink(fname);
+        last_io_operation = "";
         free(fname);
     }
 

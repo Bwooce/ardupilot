@@ -74,21 +74,21 @@ Scheduler::~Scheduler()
 
 void Scheduler::wdt_init(uint32_t timeout, uint32_t core_mask)
 {
+    // Try to reconfigure existing WDT first
     esp_task_wdt_config_t config = {
         .timeout_ms = timeout,
         .idle_core_mask = core_mask,
         .trigger_panic = true
     };
 
+    // First try to deinit if already initialized
+    esp_task_wdt_deinit();
+
+    // Now initialize with our config
     esp_err_t wdt_result = esp_task_wdt_init(&config);
     if (wdt_result != ESP_OK) {
-        if (wdt_result == ESP_ERR_INVALID_STATE) {
-            // This is normal - ESP-IDF may have initialized watchdog during boot
-            // Only print during debug builds to avoid console spam
-            #ifdef SCHEDDEBUG
-            printf("esp_task_wdt_init() - already initialized (normal)\n");
-            #endif
-        } else {
+        // Only print real errors, not expected ones
+        if (wdt_result != ESP_ERR_INVALID_STATE) {
             printf("esp_task_wdt_init() failed with error %d\n", wdt_result);
         }
     }
@@ -884,24 +884,26 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
             // Note: This is a rough approximation, actual PC at WDT would be different
             wdt_info.last_pc = (uint32_t)__builtin_return_address(0);
             
-            // Send periodic confirmation (every 30 seconds)
+            // Send periodic confirmation (every 30 seconds) - disabled for production
+#if 0  // Enable for debugging stack/heap issues
             static uint32_t last_wdt_report = 0;
             if (now - last_wdt_report > 30000) {
                 last_wdt_report = now;
-                
+
                 // Reset WDT before potentially blocking GCS send
                 esp_task_wdt_reset();
-                
-                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "WDT: Saved %s S=%lu H=%lu/%lu MaxLoop=%lu", 
+
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "WDT: Saved %s S=%lu H=%lu/%lu MaxLoop=%lu",
                              wdt_info.task_name,
                              (unsigned long)wdt_info.stack_hwm,
                              (unsigned long)wdt_info.heap_free,
                              (unsigned long)wdt_info.heap_min,
                              (unsigned long)max_loop_time);
-                             
+
                 // Reset WDT after GCS send
                 esp_task_wdt_reset();
             }
+#endif
         };
     }
 }
