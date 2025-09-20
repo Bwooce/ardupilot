@@ -1,7 +1,13 @@
-# DroneCAN Node 1 Protocol Violation Bug Report
+# DroneCAN Node 1 Investigation Report
 
-## Summary
-Node 1 on the CAN bus is transmitting malformed DroneCAN messages containing ASCII text fragments instead of properly formatted binary protocol data. This causes continuous communication errors with the ArduPilot flight controller (Node 10).
+## UPDATE: Node 1 Dev Team Response
+The Node 1 development team has analyzed this report and claims their implementation is CORRECT and compliant with DroneCAN specifications. They assert:
+- Their code sends properly formatted binary NodeStatus messages, NOT ASCII text
+- The frames containing "drone", "can.ebi8" are NOT coming from their implementation
+- Vendor-specific messages (dtype=65500) are allowed by DroneCAN spec
+
+## Original Report Summary
+Node 1 on the CAN bus appears to be transmitting frames containing ASCII text fragments. This causes continuous communication errors with the ArduPilot flight controller (Node 10).
 
 ## Affected System
 - **Flight Controller**: ArduPilot ESP32 (Node 10)
@@ -125,8 +131,21 @@ For ArduPilot users experiencing this issue:
    }
    ```
 
+## Investigation Required
+Given the Node 1 team's assertion that their code is compliant, we need to:
+1. **Check for multiple Node 1 devices** - Another device might be using Node ID 1
+2. **Analyze bus corruption** - Electrical issues could be corrupting valid frames
+3. **Verify node attribution** - Ensure frames are correctly attributed to source nodes
+4. **Examine ArduPilot frame interpretation** - Verify we're correctly parsing the CAN ID fields
+
+## Enhanced Debugging Added
+ArduPilot now includes enhanced CAN frame debugging that:
+- Shows both hex and ASCII representation of error frames
+- Specifically detects ASCII text ("drone", "can", "ebi") in frames
+- Helps identify the true source of problematic frames
+
 ## Severity
-**HIGH** - Prevents proper CAN communication and causes system instability
+**UNDER INVESTIGATION** - Need to identify true source of ASCII frames
 
 ## Attachments
 - Raw CAN trace showing malformed frames

@@ -796,38 +796,45 @@ void CanardInterface::processRx() {
                             case CANARD_ERROR_RX_BAD_CRC: error_name = "BAD_CRC"; break;
                             default: break;
                         }
-                        // Filter out Node 1 errors - it's known to send malformed DroneCAN messages
-                        // See DRONECAN_NODE1_BUG_REPORT.md for details
-                        if (source_node == 1) {
-                            // Silently ignore Node 1 errors - it's sending ASCII text in DroneCAN frames
-                            // Only log periodically as a reminder
-                            static uint32_t node1_error_count = 0;
-                            static uint32_t last_node1_log = 0;
-                            node1_error_count++;
-                            if (now - last_node1_log > 60000) { // Once per minute
-                                ESP_LOGW("CAN_RX", "Node 1 malformed messages suppressed: %lu errors in last minute",
-                                         (unsigned long)node1_error_count);
-                                last_node1_log = now;
-                                node1_error_count = 0;
-                            }
-                        } else {
-                            // Log errors from other nodes normally
-                            ESP_LOGI("CAN_RX", "ERROR %s (%d): dtype=%d, src=%d, dest=%d, our_id=%d",
-                                     error_name, res, data_type, source_node, dest_node,
-                                     canardGetLocalNodeID(&canard));
+                        ESP_LOGI("CAN_RX", "ERROR %s (%d): dtype=%d, src=%d, dest=%d, our_id=%d",
+                                 error_name, res, data_type, source_node, dest_node,
+                                 canardGetLocalNodeID(&canard));
 
-                            // Log the actual frame data for debugging
-                            // Log the actual 29-bit CAN ID without internal flags
-                            ESP_LOGI("CAN_RX", "  Frame ID: 0x%08X, DLC: %d",
-                                     (unsigned)(rx_frame.id & 0x1FFFFFFF), rx_frame.data_len);
+                        // Log the actual frame data for debugging
+                        // Log the actual 29-bit CAN ID without internal flags
+                        ESP_LOGI("CAN_RX", "  Frame ID: 0x%08X, DLC: %d",
+                                 (unsigned)(rx_frame.id & 0x1FFFFFFF), rx_frame.data_len);
 
-                            if (rx_frame.data_len > 0) {
-                                char hex_str[25]; // 8 bytes * 3 chars per byte + null
-                                int offset = 0;
-                                for (int i = 0; i < rx_frame.data_len && i < 8; i++) {
-                                    offset += snprintf(hex_str + offset, sizeof(hex_str) - offset, "%02X ", rx_frame.data[i]);
+                        if (rx_frame.data_len > 0) {
+                            char hex_str[25]; // 8 bytes * 3 chars per byte + null
+                            char ascii_str[9] = {0}; // ASCII representation
+                            int offset = 0;
+                            bool has_ascii = false;
+
+                            for (int i = 0; i < rx_frame.data_len && i < 8; i++) {
+                                uint8_t byte = rx_frame.data[i];
+                                offset += snprintf(hex_str + offset, sizeof(hex_str) - offset, "%02X ", byte);
+
+                                // Check if it's printable ASCII
+                                if (byte >= 0x20 && byte <= 0x7E) {
+                                    ascii_str[i] = (char)byte;
+                                    has_ascii = true;
+                                } else {
+                                    ascii_str[i] = '.';
                                 }
-                                ESP_LOGI("CAN_RX", "  Frame data: %s", hex_str);
+                            }
+
+                            ESP_LOGI("CAN_RX", "  Frame data: %s", hex_str);
+
+                            // If frame contains ASCII text, log it as potential debug string
+                            if (has_ascii) {
+                                ESP_LOGW("CAN_RX", "  ASCII detected: \"%s\" - possible debug string in CAN frame!", ascii_str);
+
+                                // Check for known debug strings that shouldn't be in DroneCAN
+                                if (strstr(ascii_str, "drone") || strstr(ascii_str, "can") || strstr(ascii_str, "ebi")) {
+                                    ESP_LOGE("CAN_RX", "  ALERT: Debug text found in CAN frame from node %d! This is NOT valid DroneCAN!", source_node);
+                                    ESP_LOGE("CAN_RX", "  Possible causes: Another device on bus, bus corruption, or debug output sent to CAN");
+                                }
                             }
                         }
                     }
