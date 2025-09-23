@@ -544,13 +544,15 @@ void AP_DroneCAN::loop(void)
 {
     while (true) {
         if (!_initialized) {
-            hal.scheduler->delay_microseconds(1000);
+            // Use delay() to properly feed watchdog
+            hal.scheduler->delay(1);  // 1ms delay
             continue;
         }
 
         // ensure that the DroneCAN thread cannot completely saturate
         // the CPU, preventing low priority threads from running
-        hal.scheduler->delay_microseconds(100);
+        // Use delay() at least once per loop to feed watchdog
+        hal.scheduler->delay(1);  // 1ms minimum to feed watchdog
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         // Debug: Track how often we're calling process
