@@ -20,6 +20,12 @@
     #include <AC_Fence/AC_Fence.h>
 #endif
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_task_wdt.h"
+#endif
+
 AP_Logger *AP_Logger::_singleton;
 
 extern const AP_HAL::HAL& hal;
@@ -1460,11 +1466,6 @@ void AP_Logger::io_thread(void)
     // On ESP32, register with watchdog using the current task handle
     // We need to do this here instead of at thread creation because
     // the thread needs to be fully running first
-    #include "freertos/FreeRTOS.h"
-    #include "freertos/task.h"
-    #include "esp_task_wdt.h"
-
-    // Get current task handle and register with watchdog
     TaskHandle_t handle = xTaskGetCurrentTaskHandle();
     esp_err_t wdt_result = esp_task_wdt_add(handle);
     if (wdt_result != ESP_OK) {
