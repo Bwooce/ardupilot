@@ -23,7 +23,7 @@
 
 #define ESP32_SCHEDULER_MAX_TIMER_PROCS 10
 #define ESP32_SCHEDULER_MAX_IO_PROCS 10
-#define TWDT_TIMEOUT_MS 3000
+#define TWDT_TIMEOUT_MS 5000  // Increased from 3s to 5s for PSRAM/SPIFFS init
 
 /* Scheduler implementation: */
 class ESP32::Scheduler : public AP_HAL::Scheduler
