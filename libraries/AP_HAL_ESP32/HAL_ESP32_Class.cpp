@@ -215,9 +215,6 @@ void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
     
     // Initialize ESP log redirection to MAVLink if needed
     esp32_log_redirect_init();
-
-    // Set log levels for noisy components
-    esp_log_level_set("system_api", ESP_LOG_NONE);  // Completely suppress "eFuse MAC_CUSTOM is empty" error messages
     
     // Force a test message to verify redirect is working
     if (ESP32::esp32_params()->log_to_mavlink.get()) {

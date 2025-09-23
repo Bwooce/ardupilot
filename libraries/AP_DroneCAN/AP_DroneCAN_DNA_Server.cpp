@@ -425,13 +425,50 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     if (transfer.source_node_id > MAX_NODE_ID || transfer.source_node_id == 0) {
         return;
     }
-    
+
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Log raw data for Node 2 to debug corruption
+    if (transfer.source_node_id == 2) {
+        ESP_LOGW("DRONECAN", "=== PHANTOM NODE 2 DETECTED ===");
+        ESP_LOGW("DRONECAN", "NodeStatus from Node 2 - THIS SHOULD NOT EXIST!");
+        ESP_LOGW("DRONECAN", "Transfer details: priority=%d, data_type_id=%d, payload_len=%d",
+                 transfer.priority, transfer.data_type_id, transfer.payload_len);
+
+        // Log the raw payload bytes
+        if (transfer.payload_head != nullptr && transfer.payload_len > 0) {
+            char hex_str[256] = {0};
+            int offset = 0;
+            for (int i = 0; i < transfer.payload_len && i < 32; i++) {
+                offset += snprintf(hex_str + offset, sizeof(hex_str) - offset, "%02X ",
+                                 ((const uint8_t*)transfer.payload_head)[i]);
+            }
+            ESP_LOGW("DRONECAN", "Raw payload bytes: %s", hex_str);
+        }
+
+        // Log the NodeStatus content
+        ESP_LOGW("DRONECAN", "NodeStatus content: uptime=%lu, health=%d, mode=%d, sub_mode=%d, vssc=%d",
+                 (unsigned long)msg.uptime_sec, msg.health, msg.mode, msg.sub_mode, msg.vendor_specific_status_code);
+    }
+
     static uint32_t last_nodestatus_time[128] = {};
+    static uint32_t nodestatus_count[128] = {};
     uint32_t now = AP_HAL::millis();
     uint32_t dt = now - last_nodestatus_time[transfer.source_node_id];
+
+    nodestatus_count[transfer.source_node_id]++;
+
+    // Log all NodeStatus messages periodically (every 10th message)
+    if (nodestatus_count[transfer.source_node_id] % 10 == 1) {
+        ESP_LOGI("DRONECAN", "Node %d NodeStatus #%lu: uptime=%lus, health=%d, mode=%d, interval=%lums",
+                 transfer.source_node_id,
+                 (unsigned long)nodestatus_count[transfer.source_node_id],
+                 (unsigned long)msg.uptime_sec, msg.health, msg.mode,
+                 (unsigned long)dt);
+    }
+
+    // Warn about irregular intervals
     if (last_nodestatus_time[transfer.source_node_id] != 0 && (dt > 1500 || dt < 50)) {
-        ESP_LOGI("DRONECAN", "Node %d NodeStatus interval %lums (expected ~1000ms)", 
+        ESP_LOGW("DRONECAN", "Node %d NodeStatus IRREGULAR interval %lums (expected ~1000ms)",
                  transfer.source_node_id, (unsigned long)dt);
     }
     last_nodestatus_time[transfer.source_node_id] = now;

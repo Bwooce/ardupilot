@@ -5,10 +5,15 @@ PORT=${1:-/dev/ttyACM1}
 LOG_FILE="/tmp/rover_monitor.log"
 PID_FILE="/tmp/rover_monitor.pid"
 
-# Kill any existing monitor
+# Kill any existing monitor gracefully with SIGUSR1
 if [ -f "$PID_FILE" ]; then
     OLD_PID=$(cat "$PID_FILE")
-    kill $OLD_PID 2>/dev/null
+    # Try graceful shutdown with SIGUSR1 first
+    kill -USR1 $OLD_PID 2>/dev/null && sleep 1
+    # If still running, use SIGTERM
+    kill -TERM $OLD_PID 2>/dev/null && sleep 1
+    # Final resort: SIGKILL
+    kill -KILL $OLD_PID 2>/dev/null
     rm "$PID_FILE"
 fi
 

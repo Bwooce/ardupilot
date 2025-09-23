@@ -198,11 +198,11 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
             
             corruption_count++;
             
-            // Use both ESP-IDF logging AND hal.console to ensure visibility
-            ESP_LOGE("MAVLINK", "=== CORRUPTION #%d (dt=%lums) ===", 
+            // Use WARNING level to avoid QGC error popups, but still show in logs
+            ESP_LOGW("MAVLINK", "=== CORRUPTION #%d (dt=%lums) ===",
                      corruption_count, (unsigned long)(now - last_corrupt_time));
-            ESP_LOGE("MAVLINK", "Channel: %d, Length: %d, Message ID: %lu", chan, len, (unsigned long)msgid);
-            ESP_LOGE("MAVLINK", "Raw header: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+            ESP_LOGW("MAVLINK", "Channel: %d, Length: %d, Message ID: %lu", chan, len, (unsigned long)msgid);
+            ESP_LOGW("MAVLINK", "Raw header: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
                      buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9]);
             
             // Check for specific corruption patterns
@@ -275,6 +275,31 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
             hal.console->printf("Channel: %d, Length: %d, Message ID: %lu\n", chan, len, (unsigned long)msgid);
             hal.console->printf("Raw header bytes: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
                                buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9]);
+
+            // Log more of the message to understand the corruption pattern
+            if (len > 10) {
+                hal.console->printf("Next 20 bytes: ");
+                for (int i = 10; i < 30 && i < len; i++) {
+                    hal.console->printf("%02x ", buf[i]);
+                }
+                hal.console->printf("\n");
+
+                // Check if the rest is zeros, 0xFF, or has a pattern
+                bool all_zeros = true;
+                bool all_ff = true;
+                for (int i = 10; i < len && i < 50; i++) {
+                    if (buf[i] != 0) all_zeros = false;
+                    if (buf[i] != 0xFF) all_ff = false;
+                }
+
+                if (all_zeros) {
+                    hal.console->printf("Rest of message appears to be all zeros\n");
+                } else if (all_ff) {
+                    hal.console->printf("Rest of message appears to be all 0xFF\n");
+                } else {
+                    hal.console->printf("Message contains mixed data\n");
+                }
+            }
             
             // Check heap integrity when corruption is detected
             if (!heap_caps_check_integrity_all(true)) {

@@ -21,14 +21,43 @@ CAN_D2_PROTOCOL 1
 # Configure Battery Monitoring via DroneCAN
 BATT_MONITOR 8
 
+# Servo output function mapping for DroneCAN ESCs
+# For Ackermann steering with 4 hub motors:
+SERVO9_FUNCTION 70   # All motors use throttle function
+SERVO10_FUNCTION 70  # ArduPilot handles differential speed
+SERVO11_FUNCTION 70  # based on steering angle
+SERVO12_FUNCTION 70  # and wheelbase geometry
+# Steering servo (separate actuator):
+SERVO1_FUNCTION 26   # Ground Steering (Ackermann)
+
+# For differential/skid steering (no Ackermann), use:
+# SERVO9_FUNCTION 73   # Left motors
+# SERVO10_FUNCTION 73
+# SERVO11_FUNCTION 74  # Right motors
+# SERVO12_FUNCTION 74
+
+# ESC Telemetry
+ESC_TELEM_TYPE 2    # DroneCAN ESC telemetry
+
 # Configure DroneCAN ESCs starting at servo channel 8
 MOT_PWM_TYPE 0 # Set to None, as we are using DroneCAN ESCs
-CAN_D1_UC_ESC_BM 1 # Enable ESC RPM feedback on CAN1
-CAN_D1_UC_ESC_CM 1 # Enable ESC Motor command output on CAN1
-CAN_D1_ESC_OF 8 # CAN1 ESCs start at servo channel 8
-CAN_D2_UC_ESC_BM 2 # Enable ESC RPM feedback on CAN2
-CAN_D2_UC_ESC_CM 2 # Enable ESC Motor command output on CAN2  
-CAN_D2_ESC_OF 12 # CAN2 ESCs start at servo channel 12
+CAN_D1_UC_ESC_BM 15 # Enable ESC 0-3 RPM feedback (0x0F = bits 0-3)
+CAN_D1_UC_ESC_CM 15 # Enable ESC 0-3 command output (0x0F = bits 0-3)
+CAN_D1_UC_ESC_OF 8 # CAN1 ESCs start at servo channel 8 (maps to SERVO9-12)
+# Optional: Split ESCs across two CAN buses for redundancy
+# CAN_D1_UC_ESC_BM 3 # CAN1: ESC 0-1 (front wheels)
+# CAN_D1_UC_ESC_CM 3 # CAN1: ESC 0-1 command
+# CAN_D2_UC_ESC_BM 12 # CAN2: ESC 2-3 (rear wheels, bits 2-3 = 0x0C)
+# CAN_D2_UC_ESC_CM 12 # CAN2: ESC 2-3 command
+# CAN_D2_UC_ESC_OF 8 # CAN2 ESCs also start at servo channel 8
+
+# Wheel encoder from ESC RPM feedback
+WENC_TYPE 10  # Type 10 = DroneCAN wheel encoder
+# WENC_POS_X 1.0  # Set to your wheelbase in meters
+# WENC_POS_Y 0.5  # Set to half your track width in meters
+
+# Steering-throttle mixing for Ackermann geometry
+MOT_STR_THR_MIX 0.5  # Reduce inner wheel speed in turns (0-1)
 
 # Configure DroneCAN servos starting at servo channel 0
 # CAN1 servos: steering, gimbal, etc. (channels 0-3)

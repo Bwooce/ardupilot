@@ -4522,10 +4522,9 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
     
     // Debug: Log message IDs for received messages
     static uint32_t rx_msg_count = 0;
-    static uint32_t last_rx_report = 0;
     static uint32_t last_param_msg_time = 0;
     rx_msg_count++;
-    
+
     // Always log parameter messages with timing
     if (msgid == MAVLINK_MSG_ID_PARAM_SET ||
         msgid == MAVLINK_MSG_ID_PARAM_REQUEST_READ ||
@@ -4533,12 +4532,16 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
         uint32_t now = AP_HAL::millis();
         uint32_t dt = now - last_param_msg_time;
         last_param_msg_time = now;
-        hal.console->printf("ESP32 RX PARAM MSG: msgid=%lu at t=%lu (dt=%lu ms)\n", 
+        hal.console->printf("ESP32 RX PARAM MSG: msgid=%lu at t=%lu (dt=%lu ms)\n",
                            (unsigned long)msgid, (unsigned long)now, (unsigned long)dt);
     }
-    
+
+    // Removed verbose RX logging - not useful without UART channel info
+    // Only keep summary reporting for debugging if needed
+    #if 0
+    static uint32_t last_rx_report = 0;
     // Log first 20 messages or PARAM messages
-    if (rx_msg_count <= 20 || 
+    if (rx_msg_count <= 20 ||
         msgid == MAVLINK_MSG_ID_PARAM_SET ||
         msgid == MAVLINK_MSG_ID_PARAM_REQUEST_READ ||
         msgid == MAVLINK_MSG_ID_PARAM_REQUEST_LIST) {
@@ -4553,18 +4556,19 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
             case 11: msg_name = "SET_MODE"; break;
             case 76: msg_name = "COMMAND_LONG"; break;
         }
-        hal.console->printf("ESP32 RX[%lu]: msgid=%lu (%s), sysid=%d, compid=%d\n", 
-                           (unsigned long)rx_msg_count, (unsigned long)msgid, 
+        hal.console->printf("ESP32 RX[%lu]: msgid=%lu (%s), sysid=%d, compid=%d\n",
+                           (unsigned long)rx_msg_count, (unsigned long)msgid,
                            msg_name, msg.sysid, msg.compid);
     }
-    
+
     // Print summary every 100 messages
     uint32_t now = AP_HAL::millis();
     if (rx_msg_count % 100 == 0 && (now - last_rx_report) > 1000) {
-        hal.console->printf("ESP32 RX: Received %lu total messages (last 1s)\n", 
+        hal.console->printf("ESP32 RX: Received %lu total messages (last 1s)\n",
                            (unsigned long)rx_msg_count);
         last_rx_report = now;
     }
+    #endif
     
     switch (msgid) {
 #else

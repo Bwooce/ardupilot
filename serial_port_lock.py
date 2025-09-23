@@ -46,6 +46,7 @@ class SerialPortLock:
         atexit.register(self.release)
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGUSR1, self._signal_handler)
 
     def _signal_handler(self, signum, frame):
         """Handle signals by releasing lock and exiting"""

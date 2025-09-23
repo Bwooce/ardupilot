@@ -4,9 +4,11 @@
 #if HAL_NUM_CAN_IFACES > 0
 
 #include <AP_HAL/AP_HAL.h>
+#include "Scheduler.h"           // For register_task_with_watchdog()
 #include "driver/gpio.h"
 #include "driver/twai.h"
 #include "esp_debug_helpers.h"  // For esp_backtrace_print()
+#include "esp_task_wdt.h"       // For esp_task_wdt_add()
 
 extern const AP_HAL::HAL& hal;
 
@@ -37,16 +39,8 @@ CANIface::CANIface(uint8_t instance) :
 
 bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
 {
-    // Set ESP-IDF log level for CAN tag based on CAN_LOGLEVEL
-#if CAN_LOGLEVEL >= 4
-    esp_log_level_set("CAN", ESP_LOG_VERBOSE);
-#elif CAN_LOGLEVEL >= 3  
-    esp_log_level_set("CAN", ESP_LOG_INFO);
-#elif CAN_LOGLEVEL >= 2
-    esp_log_level_set("CAN", ESP_LOG_WARN);
-#else
-    esp_log_level_set("CAN", ESP_LOG_ERROR);
-#endif
+    // Log level is now controlled by ESP32_Params.cpp for consistency
+    // Removed local override to avoid conflicts
     
     CAN_DEBUG_INFO("CAN interface %d initialized - bitrate=%u", instance, (unsigned)bitrate);
     CAN_DEBUG_INFO("CAN debug test - you should see this message!");
@@ -115,24 +109,72 @@ bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
     }
     CAN_DEBUG_INFO("TWAI started successfully");
 
-    CAN_DEBUG_INFO("Creating RX queue...");
-    rx_queue = xQueueCreate(512, sizeof(CanRxItem));  // Increased from 128 to prevent drops
+    // Wait for bus to become ready (needs to see 11 recessive bits)
+    // The TWAI controller may stay in STOPPED state until it detects bus activity
+    twai_status_info_t init_status;
+    uint32_t wait_start_ms = AP_HAL::millis();
+    bool bus_ready = false;
+
+    while ((AP_HAL::millis() - wait_start_ms) < 2000) {  // Wait up to 2 seconds
+        if (twai_get_status_info(&init_status) == ESP_OK) {
+            if (init_status.state == TWAI_STATE_RUNNING) {
+                CAN_DEBUG_INFO("TWAI transitioned to RUNNING state after %lums",
+                              (unsigned long)(AP_HAL::millis() - wait_start_ms));
+                bus_ready = true;
+                break;
+            }
+        }
+        hal.scheduler->delay_microseconds(1000);  // 1ms delay with watchdog feeding
+    }
+
+    if (!bus_ready) {
+        // Log warning but don't fail - the bus might become ready later when other nodes appear
+        if (twai_get_status_info(&init_status) == ESP_OK) {
+            CAN_DEBUG_WARN("TWAI did not reach RUNNING state after 2s (state=%d). Bus may need other nodes.",
+                          init_status.state);
+        } else {
+            CAN_DEBUG_WARN("TWAI did not reach RUNNING state after 2s. Bus may need other nodes.");
+        }
+        // Continue anyway - TX will handle invalid state errors gracefully
+    }
+
+    // Only create queues and tasks if this is the first initialization
+    // For recovery, the tasks keep running and will handle the new TWAI state
     if (rx_queue == NULL) {
-        CAN_DEBUG_ERROR("Failed to create RX queue");
-        return false;
+        CAN_DEBUG_INFO("Creating RX queue...");
+        rx_queue = xQueueCreate(512, sizeof(CanRxItem));  // Increased from 128 to prevent drops
+        if (rx_queue == NULL) {
+            CAN_DEBUG_ERROR("Failed to create RX queue");
+            return false;
+        }
+    } else {
+        // Clear existing queue for fresh start
+        xQueueReset(rx_queue);
     }
 
-    CAN_DEBUG_INFO("Creating TX queue...");
-    tx_queue = xQueueCreate(256, sizeof(CanTxItem));  // Also increased TX queue
     if (tx_queue == NULL) {
-        CAN_DEBUG_ERROR("Failed to create TX queue");
-        return false;
+        CAN_DEBUG_INFO("Creating TX queue...");
+        tx_queue = xQueueCreate(256, sizeof(CanTxItem));  // Also increased TX queue
+        if (tx_queue == NULL) {
+            CAN_DEBUG_ERROR("Failed to create TX queue");
+            vQueueDelete(rx_queue);  // Clean up RX queue on failure
+            rx_queue = NULL;
+            return false;
+        }
+    } else {
+        // Clear existing queue for fresh start
+        xQueueReset(tx_queue);
     }
 
-    CAN_DEBUG_INFO("Creating RX and TX tasks...");
-    xTaskCreate(rx_task, "can_rx", 4096, this, 5, NULL);
-    // Higher priority for TX task to reduce latency in DNA responses
-    xTaskCreate(tx_task, "can_tx", 4096, this, 6, NULL);
+    // Only create tasks on first init, not during recovery
+    if (rx_task_handle == NULL) {
+        CAN_DEBUG_INFO("Creating RX and TX tasks...");
+        xTaskCreate(rx_task, "can_rx", 4096, this, 5, &rx_task_handle);
+        // Higher priority for TX task to reduce latency in DNA responses
+        xTaskCreate(tx_task, "can_tx", 4096, this, 6, &tx_task_handle);
+    } else {
+        CAN_DEBUG_INFO("Tasks already running, continuing with recovery");
+    }
 
     initialized = true;
     CAN_DEBUG_INFO("Interface %d initialization complete!", instance);
@@ -185,12 +227,29 @@ bool CANIface::add_to_rx_queue(const CanRxItem &rx_item)
 void CANIface::rx_task(void *arg)
 {
     CANIface *iface = (CANIface *)arg;
+
+    // Register this task with watchdog
+    ESP32::Scheduler::register_task_with_watchdog("can_rx");
+
     CAN_DEBUG_INFO("CAN RX task started for interface %d", iface->instance);
 
     while (true) {
+        // Check if restart is in progress
+        if (iface->restart_in_progress) {
+            // During restart, just wait without trying to receive
+            // Reset watchdog during the wait to prevent timeout
+            esp_task_wdt_reset();
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
         twai_message_t message;
-        esp_err_t rx_result = twai_receive(&message, portMAX_DELAY);
-        
+        // Use timeout instead of portMAX_DELAY to allow recovery after TWAI restart
+        esp_err_t rx_result = twai_receive(&message, pdMS_TO_TICKS(100));
+
+        // Always reset watchdog after receive attempt (success or timeout)
+        esp_task_wdt_reset();
+
         if (rx_result != ESP_OK) {
             // Handle RX errors with enhanced detection
             if (rx_result == ESP_ERR_TIMEOUT) {
@@ -267,10 +326,10 @@ void CANIface::rx_task(void *arg)
                 break;
             }
         }
-        
+
         if (is_self_tx && !loopback_requested) {
             // Self-transmitted frame without loopback - drop it
-            ESP_LOGW("CAN_RX", "SELF-TX detected! Dropping frame ID=0x%08X", 
+            ESP_LOGW("CAN_RX", "SELF-TX detected! Dropping frame ID=0x%08X",
                      (unsigned)message.identifier);
             continue;
         }
@@ -296,33 +355,44 @@ void CANIface::rx_task(void *arg)
 void CANIface::tx_task(void *arg)
 {
     CANIface *iface = (CANIface *)arg;
+
+    // Register this task with watchdog
+    ESP32::Scheduler::register_task_with_watchdog("can_tx");
+
     CanTxItem tx_item;
 
     while (true) {
-        // Continuously pull frames from queue until we get a non-expired one
-        uint32_t expired_count = 0;
-        do {
-            if (xQueueReceive(iface->tx_queue, &tx_item, portMAX_DELAY) != pdPASS) {
-                continue;
-            }
+        // Check if restart is in progress
+        if (iface->restart_in_progress) {
+            // During restart, just wait without trying to transmit
+            // Reset watchdog during the wait to prevent timeout
+            esp_task_wdt_reset();
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
 
-            uint64_t now_us = AP_HAL::micros64();
-            
-            // Check if this frame has expired
-            if (tx_item.deadline_us != 0 && now_us > tx_item.deadline_us) {
-                expired_count++;
-                // Only log first few expired frames to avoid spam
-                if (expired_count <= 5 || expired_count % 10 == 0) {
-                    CAN_DEBUG_VERBOSE("Dropped expired frame ID=0x%08X (deadline=%llu, now=%llu) [count=%lu]", 
-                           (unsigned)tx_item.frame.id, tx_item.deadline_us, now_us, (unsigned long)expired_count);
-                }
-                continue; // Get next frame
+        // Wait for a frame from the queue
+        if (xQueueReceive(iface->tx_queue, &tx_item, pdMS_TO_TICKS(100)) != pdPASS) {
+            // Reset watchdog after queue wait timeout
+            esp_task_wdt_reset();
+            continue; // No message available, go back to outer loop
+        }
+
+        // Reset watchdog after successful queue receive
+        esp_task_wdt_reset();
+
+        // Check if this frame has expired
+        uint64_t now_us = AP_HAL::micros64();
+        if (tx_item.deadline_us != 0 && now_us > tx_item.deadline_us) {
+            static uint32_t expired_count = 0;
+            expired_count++;
+            // Only log first few expired frames to avoid spam
+            if (expired_count <= 5 || expired_count % 10 == 0) {
+                CAN_DEBUG_VERBOSE("Dropped expired frame ID=0x%08X (deadline=%llu, now=%llu) [count=%lu]",
+                       (unsigned)tx_item.frame.id, tx_item.deadline_us, now_us, (unsigned long)expired_count);
             }
-            
-            // Frame is not expired, break out of loop to transmit it
-            break;
-            
-        } while (true);
+            continue; // Skip expired frame
+        }
 
         // Verbose frame-by-frame TX logging
         char data_str[32] = {0};
@@ -448,23 +518,81 @@ void CANIface::tx_task(void *arg)
                 }
             } else if (result == ESP_ERR_INVALID_STATE) {
                 // TWAI driver in invalid state - likely no other nodes on bus or disconnection
-                // Only log periodically to avoid spam
+                // Continue processing queue to prevent buildup, just can't transmit yet
                 static uint32_t last_invalid_state_log_ms = 0;
                 static uint32_t invalid_state_count = 0;
+                static uint32_t messages_dropped = 0;
                 uint32_t now_ms = AP_HAL::millis();
                 invalid_state_count++;
-                
-                if (now_ms - last_invalid_state_log_ms > 10000) {  // Log at most every 10 seconds
-                    CAN_DEBUG_ERROR("TWAI invalid state (no other nodes?) - count=%lu", (unsigned long)invalid_state_count);
-                    last_invalid_state_log_ms = now_ms;
-                    
-                    // Only attempt restart if we've had persistent errors for a while
-                    if (invalid_state_count > 100) {
-                        iface->update_error_stats(0x08); // Invalid state error
-                        iface->attempt_driver_restart();
-                        invalid_state_count = 0;  // Reset counter after restart attempt
+                messages_dropped++;  // Count this as a dropped message
+
+                // Diagnostic: Check actual TWAI state when we get invalid state error
+                twai_status_info_t diagnostic_status;
+                bool got_status = (twai_get_status_info(&diagnostic_status) == ESP_OK);
+
+                if (got_status) {
+                    // Log the actual state to verify TX invalid state (0=STOPPED, 1=RUNNING, 2=BUS_OFF, 3=RECOVERING)
+                    if (invalid_state_count == 1 || (invalid_state_count % 100) == 0) {
+                        const char* state_str = "UNKNOWN";
+                        switch (diagnostic_status.state) {
+                            case TWAI_STATE_STOPPED: state_str = "STOPPED"; break;
+                            case TWAI_STATE_RUNNING: state_str = "RUNNING"; break;
+                            case TWAI_STATE_BUS_OFF: state_str = "BUS_OFF"; break;
+                            case TWAI_STATE_RECOVERING: state_str = "RECOVERING"; break;
+                        }
+                        CAN_DEBUG_ERROR("TX ESP_ERR_INVALID_STATE: state=%s, tx_err=%u, rx_err=%u, to_tx=%lu, to_rx=%lu",
+                                       state_str,
+                                       (unsigned)diagnostic_status.tx_error_counter,
+                                       (unsigned)diagnostic_status.rx_error_counter,
+                                       (unsigned long)diagnostic_status.msgs_to_tx,
+                                       (unsigned long)diagnostic_status.msgs_to_rx);
                     }
                 }
+
+                // Check for restart more frequently than logging
+                if (invalid_state_count > 100) {  // After 100 failures (~1 second)
+                    iface->update_error_stats(0x08); // Invalid state error
+
+                    // Decide what to do based on actual state
+                    if (got_status) {
+                        if (diagnostic_status.state == TWAI_STATE_STOPPED) {
+                            // Try to start the bus again
+                            CAN_DEBUG_INFO("TWAI is STOPPED, attempting to start");
+                            esp_err_t start_res = twai_start();
+                            if (start_res != ESP_OK) {
+                                CAN_DEBUG_ERROR("Failed to restart TWAI: %d", start_res);
+                                // If start fails, try full restart
+                                iface->attempt_driver_restart();
+                            }
+                        } else if (diagnostic_status.state == TWAI_STATE_BUS_OFF) {
+                            // Need recovery
+                            CAN_DEBUG_INFO("TWAI is BUS_OFF, initiating recovery");
+                            twai_initiate_recovery();
+                        } else if (diagnostic_status.state == TWAI_STATE_RECOVERING) {
+                            // Already recovering, just wait
+                            CAN_DEBUG_INFO("TWAI is RECOVERING, waiting...");
+                        } else if (diagnostic_status.state == TWAI_STATE_RUNNING) {
+                            // This shouldn't happen - RUNNING but getting invalid state?
+                            CAN_DEBUG_ERROR("TWAI reports RUNNING but TX returns INVALID_STATE - possible driver bug");
+                        }
+                    } else {
+                        // Couldn't get status, try full restart
+                        iface->attempt_driver_restart();
+                    }
+                    invalid_state_count = 0;  // Reset counter after action
+                }
+
+                // Log less frequently to avoid spam
+                if (now_ms - last_invalid_state_log_ms > 10000) {  // Log at most every 10 seconds
+                    CAN_DEBUG_ERROR("TWAI invalid state (no other nodes?) - count=%lu, dropped=%lu",
+                                   (unsigned long)invalid_state_count, (unsigned long)messages_dropped);
+                    last_invalid_state_log_ms = now_ms;
+                    messages_dropped = 0;  // Reset dropped count after logging
+                }
+
+                // Important: Continue loop to process next message instead of blocking
+                // This prevents TX queue from filling up during invalid state
+                continue;
             } else if (result == ESP_ERR_INVALID_ARG) {
                 // Invalid argument - possibly corrupted message data
                 // Rate limit this error to avoid spam
@@ -764,25 +892,23 @@ void CANIface::attempt_driver_restart()
     static uint32_t last_restart_ms = 0;
     static uint32_t restart_count = 0;
     uint32_t now_ms = AP_HAL::millis();
-    
+
     // Rate limit restarts to prevent restart loops
-    if (now_ms - last_restart_ms < 30000) {  // Minimum 30 seconds between restarts
+    if (now_ms - last_restart_ms < 5000) {  // Minimum 5 seconds between restarts (reduced from 30s)
         // Only log periodically to avoid spam
         static uint32_t last_log_ms = 0;
-        if (now_ms - last_log_ms > 5000) {  // Log at most every 5 seconds
+        if (now_ms - last_log_ms > 2000) {  // Log at most every 2 seconds
             CAN_DEBUG_INFO("Driver restart rate-limited (last restart %lu ms ago)", (unsigned long)(now_ms - last_restart_ms));
             last_log_ms = now_ms;
         }
         return;
     }
-    
+
     // Prevent multiple simultaneous restart attempts
-    static bool restart_in_progress = false;
     if (restart_in_progress) {
         CAN_DEBUG_INFO("Driver restart already in progress, skipping");
         return;
     }
-    restart_in_progress = true;
     
     restart_count++;
     last_restart_ms = now_ms;
@@ -796,21 +922,39 @@ void CANIface::attempt_driver_restart()
     uint32_t saved_bitrate = current_bitrate;
     
     // Stop and uninstall driver (may fail if in invalid state, but continue anyway)
-    esp_err_t result = twai_stop();
-    if (result != ESP_OK) {
-        CAN_DEBUG_WARN("TWAI stop failed (error %d), forcing uninstall", result);
+    // Set a flag to signal RX/TX tasks to pause during restart
+    restart_in_progress = true;
+
+    // Give RX/TX tasks time to see the flag and exit any blocking calls
+    // Feed watchdog during this delay
+    hal.scheduler->delay(150); // 150ms to ensure RX task sees timeout, with watchdog feeding
+
+    // Now attempt to stop TWAI - use non-blocking approach
+    esp_err_t result = ESP_OK;
+
+    // Check current state first
+    twai_status_info_t status;
+    if (twai_get_status_info(&status) == ESP_OK) {
+        CAN_DEBUG_INFO("TWAI state before stop: %d, msgs_to_tx: %lu, msgs_to_rx: %lu",
+                       status.state, (unsigned long)status.msgs_to_tx, (unsigned long)status.msgs_to_rx);
+
+        // Only try to stop if not already stopped
+        if (status.state != TWAI_STATE_STOPPED) {
+            result = twai_stop();
+            if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) {
+                CAN_DEBUG_WARN("TWAI stop failed (error %d), forcing uninstall", result);
+            }
+        }
     }
-    
+
+    // Always try to uninstall, even if stop failed
     result = twai_driver_uninstall();
     if (result != ESP_OK) {
         CAN_DEBUG_WARN("TWAI uninstall failed (error %d), continuing anyway", result);
     }
-    
-    // Brief delay to let hardware settle, but feed watchdog
-    // Split into smaller delays to avoid WDT timeout
-    for (int i = 0; i < 10; i++) {
-        hal.scheduler->delay_microseconds(1000); // 1ms at a time
-    }
+
+    // Brief delay to let hardware settle
+    hal.scheduler->delay(10); // 10ms with watchdog feeding
     
     // Clear queues (they should be empty after stop/uninstall, but be safe)
     if (rx_queue) {
@@ -822,14 +966,23 @@ void CANIface::attempt_driver_restart()
     
     // Reinitialize with saved configuration
     initialized = false;
-    if (init(saved_bitrate, NormalMode)) {
+    bool reinit_ok = init(saved_bitrate, NormalMode);
+
+    if (reinit_ok) {
+        // Give TWAI driver time to fully stabilize before allowing tasks to resume
+        hal.scheduler->delay(50); // 50ms for TWAI to stabilize, with watchdog feeding
+
+        // Now clear the restart flag to allow tasks to resume
+        restart_in_progress = false;
+
         CAN_DEBUG_INFO("TWAI driver restart successful after %lu restarts", (unsigned long)restart_count);
         update_error_stats(0x00); // Clear error state
     } else {
+        // Clear flag even on failure to prevent permanent task blocking
+        restart_in_progress = false;
+
         CAN_DEBUG_ERROR("TWAI driver restart failed - interface may be unusable");
     }
-    
-    restart_in_progress = false;
 }
 
 #endif // HAL_NUM_CAN_IFACES > 0

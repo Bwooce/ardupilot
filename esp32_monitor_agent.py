@@ -308,6 +308,7 @@ def main():
 
     # Set up signal handlers
     signal.signal(signal.SIGINT, monitor.signal_handler)
+    signal.signal(signal.SIGTERM, monitor.signal_handler)
     signal.signal(signal.SIGUSR1, monitor.release_handler)  # For graceful release requests
 
     # Run monitor

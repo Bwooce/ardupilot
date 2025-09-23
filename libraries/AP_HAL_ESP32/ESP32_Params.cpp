@@ -127,18 +127,17 @@ void ESP32Params::apply_log_level() {
     esp_log_level_set("AP_FS_ESP32", ESP_LOG_INFO); // Filesystem operations debugging
     esp_log_level_set("ESP32_SPIFFS", ESP_LOG_INFO); // SPIFFS operations debugging
 
-    // CAN/DroneCAN debugging - show only real errors
-    esp_log_level_set("CAN", ESP_LOG_ERROR);       // Only show CAN errors
-    esp_log_level_set("CAN_RX", ESP_LOG_ERROR);    // Only show RX errors
-    esp_log_level_set("CAN_TX", ESP_LOG_ERROR);    // Only show TX errors
-    esp_log_level_set("CAN_SEND", ESP_LOG_ERROR);  // Only show send queue errors
-    esp_log_level_set("DRONECAN", ESP_LOG_ERROR);  // Only critical DroneCAN errors
+    // CAN/DroneCAN debugging - temporarily increased for debugging
+    esp_log_level_set("CAN", ESP_LOG_INFO);        // Show CAN info for debugging
+    esp_log_level_set("CAN_RX", ESP_LOG_INFO);     // Show RX info for debugging
+    esp_log_level_set("CAN_TX", ESP_LOG_INFO);     // Show TX info for debugging
+    esp_log_level_set("CAN_SEND", ESP_LOG_INFO);   // Show send queue info
+    esp_log_level_set("DRONECAN", ESP_LOG_INFO);   // Show DroneCAN info
     esp_log_level_set("CANARD", ESP_LOG_ERROR);    // Only critical Canard errors
     esp_log_level_set("DNA_SERVER", ESP_LOG_ERROR); // Only critical DNA errors
     esp_log_level_set("DNA_HEX", ESP_LOG_INFO); // Enable DNA hex debugging for manual decode
 
-    // Suppress harmless system messages
-    esp_log_level_set("system_api", ESP_LOG_NONE);  // eFuse MAC_CUSTOM messages
+    // Note: eFuse MAC_CUSTOM error was fixed by skipping custom MAC check in Util.cpp
     
     // Apply global default for any unspecified tags
     esp_log_level_set("*", level);
@@ -150,9 +149,9 @@ void ESP32Params::apply_log_level() {
     esp_log_level_set("STORAGE", ESP_LOG_WARN);
     esp_log_level_set("PARAM", ESP_LOG_WARN);
     
-    // MAVLink debugging - keep stats but at INFO level, not ERROR
-    esp_log_level_set("MAVLINK", ESP_LOG_INFO);     // Channel stats as info, not errors
-    esp_log_level_set("MAVLINK_RX", ESP_LOG_ERROR); // Keep RX errors for corruption detection
+    // MAVLink debugging - use INFO level to see warnings but avoid ERROR popups in QGC
+    esp_log_level_set("MAVLINK", ESP_LOG_INFO);     // Show info and warnings
+    esp_log_level_set("MAVLINK_RX", ESP_LOG_INFO);  // Show RX info and warnings
     
     // Debug: verify the logging configuration is applied
     printf("ESP32: ESP32_DEBUG_LVL param=%d (configured=%d) -> ESP-IDF level=%d (%s)\n", 

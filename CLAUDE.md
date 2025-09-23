@@ -9,13 +9,22 @@
 - remember to always set a timeout on serial communication scripts.
 - Always cast to (unsigned long) and use %lX or %lu for uint32_t on ESP32
 - ESP32 has different type sizes than x86_64, so testing theories locally on intel does not prove anything
-- Only the ardupilot-rover-builder agent will compile ardupilot, only for rover, and do not initiate this in any other agent or context. 
-- **ESP32 Build Fix**: Before running any ESP32 waf commands, source the ESP-IDF environment: `source modules/esp_idf/export.sh`
-- You can, and should prefer, to use the idf serial monitor commands in preference to screen/stty or custom pythong scripts.
+- Only the ardupilot-rover-builder agent will compile ardupilot, only for rover, and do not initiate this in any other agent or context.
+- **ESP32 Build Commands**: ALWAYS use `./agent_build_wrapper.sh` for waf commands to ensure proper ESP-IDF environment:
+  - `./agent_build_wrapper.sh configure --board esp32lilygo_tconnect --debug`
+  - `./agent_build_wrapper.sh rover -j 16`
+  - `./agent_build_wrapper.sh clean` or `distclean` when needed
+- **Serial Port Coordination**: All scripts use lock files via SerialPortLock class. They respond to SIGUSR1 for graceful release.
+- **Upload Process**: Always use `python3 esp32_upload_with_lock.py` which handles port locking automatically
+- You can, and should prefer, to use the idf serial monitor commands in preference to screen/stty or custom python scripts.
 - Do not create duplicate shell or python scripts for functionality that already exists (wholely or in part). Prefer to maintain the existing script and only create a new one after asking the user. 
 - If a user tells you not to do something, remember that, and if you've already done it then undo the action e.g. delete the file you created.
 - regularly commit to git, and never ever revert code without knowing exactly what is being reverted as working code can be lost if not committed.
 - when encouring a stack trace use the IDF tooling to work out what occurred specifically it means before starting further analysis or proposing theories. 
 - try and keep the param and hwdef.dat files from all the esp32 boards roughly aligned with changes, especially the t-2can and t-connect board definitions as they are very similar (both esp32s3, just the t-2can as two can interfaces).
-- always use the build agent to build ardupilot, and the serial monitor agent to check the console logs.
+- **ALWAYS use agents for builds and monitoring**:
+  - Build/upload: Use the `ardupilot-rover-builder` agent (it uses agent_build_wrapper.sh internally)
+  - Serial monitoring: Use the `ardupilot-serial-monitor` agent (handles lock files automatically)
+  - These agents coordinate via SIGUSR1 signals - no manual intervention needed
 - Don't use --verbose on anything unless you really need it as it just burns tokens for no gain
+- UART2 is currently the GPS at 4800 baud

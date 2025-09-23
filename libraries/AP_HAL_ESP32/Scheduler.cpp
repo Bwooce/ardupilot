@@ -72,6 +72,38 @@ Scheduler::~Scheduler()
 
 #define WDT_INFO_MAGIC 0xDEADBEEF
 
+// Helper function to register a task with watchdog and report any errors
+void Scheduler::register_task_with_watchdog(const char* task_name)
+{
+    esp_err_t wdt_result = esp_task_wdt_add(NULL);
+    if (wdt_result != ESP_OK) {
+        // Report different error types
+        const char* error_desc = "unknown error";
+        switch (wdt_result) {
+            case ESP_ERR_INVALID_ARG:
+                error_desc = "invalid argument";
+                break;
+            case ESP_ERR_NO_MEM:
+                error_desc = "out of memory";
+                break;
+            case ESP_ERR_NOT_FOUND:
+                error_desc = "watchdog not initialized";
+                break;
+            case ESP_ERR_INVALID_STATE:
+                error_desc = "already registered";
+                break;
+            default:
+                break;
+        }
+
+        ESP_LOGE("WDT", "Failed to register task '%s' with watchdog: %s (%d)",
+                 task_name, error_desc, wdt_result);
+        hal.console->printf("WDT: Failed to register '%s': %s\n", task_name, error_desc);
+    } else {
+        ESP_LOGI("WDT", "Successfully registered task '%s' with watchdog", task_name);
+    }
+}
+
 void Scheduler::wdt_init(uint32_t timeout, uint32_t core_mask)
 {
     // Try to reconfigure existing WDT first
@@ -96,7 +128,7 @@ void Scheduler::wdt_init(uint32_t timeout, uint32_t core_mask)
     if (ESP_OK != esp_task_wdt_add(NULL)) {
         printf("esp_task_wdt_add(NULL) failed");
     }
-    
+
     // Note: ESP-IDF v5.x removed the user callback API
     // WDT info will be captured via panic handler or coredump instead
 }
@@ -214,6 +246,9 @@ void Scheduler::init()
 #ifdef SCHEDDEBUG
     printf("%s:%d \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
+
+    // Suppress task_wdt errors during startup - tasks aren't registered yet
+    esp_log_level_set("task_wdt", ESP_LOG_NONE);
 
     // Debug via MAVLink STATUSTEXT - safe from serial contamination
     ESP32_DEBUG_INFO("Starting ESP32 Scheduler initialization");
@@ -369,6 +404,17 @@ bool Scheduler::thread_create(AP_HAL::MemberProc proc, const char *name, uint32_
         free(tproc);
         return false;
     }
+
+    // Auto-register dynamically created tasks with watchdog
+    // This fixes tasks like "FTP" that are created at runtime
+    // Note: Registration happens in the creating task's context, not the new task
+    esp_err_t wdt_result = esp_task_wdt_add(xhandle);
+    if (wdt_result == ESP_OK) {
+        ESP_LOGI("SCHED", "Auto-registered task '%s' with watchdog", name);
+    } else {
+        ESP_LOGW("SCHED", "Failed to auto-register task '%s' with watchdog: %d", name, wdt_result);
+    }
+
     return true;
 }
 
@@ -391,6 +437,35 @@ void IRAM_ATTR Scheduler::delay_microseconds(uint16_t us)
         esp_rom_delay_us(us);
     } else { // Minimum delay for FreeRTOS is 1ms
         uint32_t tick = portTICK_PERIOD_MS * 1000;
+
+        // For delays >= 1ms, feed the watchdog to prevent timeout
+        // Only reset watchdog for longer delays to avoid overhead
+        if (us >= 1000) {
+            esp_err_t wdt_err = esp_task_wdt_reset();
+
+            // Debug unregistered tasks trying to reset watchdog
+            if (wdt_err == ESP_ERR_NOT_FOUND) {
+                static uint32_t last_report_ms = 0;
+                uint32_t now_ms = AP_HAL::millis();
+
+                // Report which task is failing (limit to once per second per task)
+                if (now_ms - last_report_ms > 1000) {
+                    TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+                    const char* task_name = pcTaskGetName(current_task);
+
+                    // Get task details for debugging
+                    TaskStatus_t task_status;
+                    vTaskGetInfo(current_task, &task_status, pdTRUE, eInvalid);
+
+                    ESP_LOGE("SCHED_WDT", "Task '%s' (handle=%p, stack_hwm=%lu) not registered with watchdog",
+                             task_name ? task_name : "UNKNOWN",
+                             current_task,
+                             (unsigned long)task_status.usStackHighWaterMark);
+
+                    last_report_ms = now_ms;
+                }
+            }
+        }
 
         vTaskDelay((us+tick-1)/tick);
     }
@@ -479,6 +554,9 @@ void IRAM_ATTR Scheduler::_timer_thread(void *arg)
 #endif
     Scheduler *sched = (Scheduler *)arg;
 
+    // Register this task with watchdog
+    register_task_with_watchdog("APM_TIMER");
+
 #if HAL_INS_DEFAULT != HAL_INS_NONE
     // wait to ensure INS system inits unless using HAL_INS_NONE
     while (!_initialized) {
@@ -502,6 +580,10 @@ void IRAM_ATTR Scheduler::_timer_thread(void *arg)
 void IRAM_ATTR Scheduler::_rcout_thread(void* arg)
 {
     Scheduler *sched = (Scheduler *)arg;
+
+    // Register this task with watchdog
+    register_task_with_watchdog("APM_RCOUT");
+
     while (!_initialized) {
         sched->delay_microseconds(1000);
     }
@@ -550,6 +632,10 @@ void IRAM_ATTR Scheduler::_run_timers()
 void IRAM_ATTR Scheduler::_rcin_thread(void *arg)
 {
     Scheduler *sched = (Scheduler *)arg;
+
+    // Register this task with watchdog
+    register_task_with_watchdog("APM_RCIN");
+
     while (!_initialized) {
         sched->delay_microseconds(20000);
     }
@@ -591,6 +677,9 @@ void IRAM_ATTR Scheduler::_io_thread(void* arg)
 #ifdef SCHEDDEBUG
     printf("%s:%d start \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
+    // Register this task with watchdog
+    register_task_with_watchdog("APM_IO");
+
     mount_sdcard();
     Scheduler *sched = (Scheduler *)arg;
     while (!sched->_initialized) {
@@ -624,6 +713,9 @@ void Scheduler::_storage_thread(void* arg)
     printf("%s:%d start \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
     Scheduler *sched = (Scheduler *)arg;
+
+    // Register this task with watchdog
+    register_task_with_watchdog("APM_STORAGE");
     while (!sched->_initialized) {
         sched->delay_microseconds(10000);
     }
@@ -658,6 +750,9 @@ void IRAM_ATTR Scheduler::_uart_thread(void *arg)
     printf("%s:%d start \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
     Scheduler *sched = (Scheduler *)arg;
+
+    // Register this task with watchdog
+    register_task_with_watchdog("APM_UART");
     while (!sched->_initialized) {
         sched->delay_microseconds(2000);
     }
@@ -758,9 +853,12 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
         ESP_LOGE("SCHEDULER", "ERROR: callbacks is NULL!");
     }
     ESP_LOGI("MAIN", "ArduPilot setup completed successfully");
-    
+
     // Re-apply ESP-IDF log levels after parameter loading in setup()
     ESP32::esp32_params()->update_log_levels();
+
+    // Re-enable task_wdt logging to catch real issues
+    esp_log_level_set("task_wdt", ESP_LOG_WARN);
 
     sched->set_system_initialized();
 

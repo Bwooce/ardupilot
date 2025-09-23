@@ -105,4 +105,6 @@ class RoverMonitor:
 if __name__ == '__main__':
     monitor = RoverMonitor()
     signal.signal(signal.SIGINT, monitor.signal_handler)
+    signal.signal(signal.SIGTERM, monitor.signal_handler)
+    signal.signal(signal.SIGUSR1, monitor.signal_handler)
     monitor.monitor()

@@ -1463,11 +1463,18 @@ void AP_Logger::io_thread(void)
     while (true) {
         uint32_t now = AP_HAL::micros();
 
-        uint32_t delay = 250U; // always have some delay
+        uint32_t delay_us = 250U; // always have some delay
         if (now - last_run_us < 1000) {
-            delay = MAX(1000 - (now - last_run_us), delay);
+            delay_us = MAX(1000 - (now - last_run_us), delay_us);
         }
-        hal.scheduler->delay_microseconds(delay);
+
+        // Use delay() for delays >= 1ms to properly yield and feed watchdog
+        // Use delay_microseconds() only for sub-millisecond delays
+        if (delay_us >= 1000) {
+            hal.scheduler->delay(delay_us / 1000);
+        } else {
+            hal.scheduler->delay_microseconds(delay_us);
+        }
 
         last_run_us = AP_HAL::micros();
 

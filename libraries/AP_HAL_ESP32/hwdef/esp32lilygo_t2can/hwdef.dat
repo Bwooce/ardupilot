@@ -205,3 +205,7 @@ define HAL_ESP32_USE_USB_CONSOLE 1
 # Output format: "ESP32: CMD_LONG #N: cmd=X from sys=Y comp=Z (p1=A p2=B)"
 # Note: This can be verbose with GCS that send frequent commands (e.g., REQUEST_MESSAGE)
 # define ESP32_DEBUG_CMD_LONG 1
+
+# Increase logging thread stack size to prevent overflow
+# Default may be too small for ESP32, causing stack canary watchpoint triggers
+define HAL_LOGGING_STACK_SIZE 8192

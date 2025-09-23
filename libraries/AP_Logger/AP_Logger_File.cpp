@@ -405,9 +405,9 @@ char *AP_Logger_File::_log_file_name(const uint16_t log_num) const
 {
     char *buf = nullptr;
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // ESP32 SPIFFS doesn't support directories - use flat naming
-    // Just use the mount point directly without subdirectories
-    if (asprintf(&buf, "/APM/%08u.BIN", (unsigned)log_num) == -1) {
+    // ESP32 SPIFFS treats paths as flat names - directories are simulated
+    // Use the full path including simulated directory structure
+    if (asprintf(&buf, "%s/%08u.BIN", _log_directory, (unsigned)log_num) == -1) {
         return nullptr;
     }
 #else
@@ -1187,7 +1187,22 @@ void AP_Logger_File::io_timer(void)
             AP::FS().close(_write_fd);
             last_io_operation = "";
             _write_fd = -1;
-            printf("Failed to write to File: %s\n", strerror(errno));
+            // Determine storage type from path
+            const char* storage_type = "unknown";
+            if (_write_filename) {
+                if (strncmp(_write_filename, "/APM", 4) == 0) {
+                    storage_type = "SPIFFS";
+                } else if (strncmp(_write_filename, "/sdcard", 7) == 0 ||
+                          strncmp(_write_filename, "/mnt", 4) == 0) {
+                    storage_type = "SD Card";
+                } else if (strncmp(_write_filename, "/logs", 5) == 0) {
+                    storage_type = "Flash/SPIFFS";
+                }
+            }
+            printf("Failed to write to %s log file '%s': %s (fd=%d)\n",
+                   storage_type,
+                   _write_filename ? _write_filename : "unknown",
+                   strerror(errno), _write_fd);
         }
         _last_write_failed = true;
     } else {
@@ -1203,8 +1218,10 @@ void AP_Logger_File::io_timer(void)
         if (_write_offset >= max_log_size) {
             DEV_PRINTF("Log file size limit reached (%lu bytes), rotating\n", (unsigned long)_write_offset);
             stop_logging();
-            // Set a flag to start a new log on next opportunity
+            // Immediately start a new log file to avoid write failures
             _open_error_ms = 0; // Allow immediate new log creation
+            // Start new log right away instead of waiting for periodic check
+            start_new_log();
         }
 #endif
 

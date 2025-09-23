@@ -330,7 +330,14 @@ void CanardInterface::onTransferReception(CanardInstance* ins, CanardRxTransfer*
     // Log LogMessage transfers at DEBUG level (only visible when debugging)
     if (transfer->data_type_id == 16383) { // uavcan.protocol.debug.LogMessage
         logmsg_count++;
-        ESP_LOGD("CAN_RX", "LogMessage RX: src_node=%d, len=%d", 
+
+        // Special logging for Node 2 LogMessages (phantom node)
+        if (transfer->source_node_id == 2) {
+            ESP_LOGW("CAN_RX", "=== LogMessage from PHANTOM NODE 2 ===");
+            ESP_LOGW("CAN_RX", "This should be from your real node but has corrupted source ID!");
+        }
+
+        ESP_LOGD("CAN_RX", "LogMessage RX: src_node=%d, len=%d",
                  transfer->source_node_id, transfer->payload_len);
         
         // Only log payload in verbose debug mode
@@ -349,8 +356,8 @@ void CanardInterface::onTransferReception(CanardInstance* ins, CanardRxTransfer*
         // Try to decode it manually to check for errors
         struct uavcan_protocol_debug_LogMessage test_msg;
         bool decode_result = uavcan_protocol_debug_LogMessage_decode(transfer, &test_msg);
-        if (decode_result) {
-            ESP_LOGE("CAN_RX", "ERROR: Failed to decode LogMessage from node %d! Payload len=%d", 
+        if (!decode_result) {  // Fixed logic - decode_result is false on failure
+            ESP_LOGE("CAN_RX", "ERROR: Failed to decode LogMessage from node %d! Payload len=%d",
                      transfer->source_node_id, transfer->payload_len);
             // Log full payload for analysis
             ESP_LOGE("CAN_RX", "  Full payload dump:");
@@ -709,7 +716,61 @@ void CanardInterface::processRx() {
             rx_frame.canfd = rxmsg.canfd;
 #endif
             rx_frame.id = rxmsg.id;
-            
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            // Check if this frame appears to be from Node 2 (which shouldn't exist)
+            uint32_t masked_id = rxmsg.id & CANARD_CAN_EXT_ID_MASK;
+            uint8_t source_node = extractSourceNodeID(masked_id);
+
+            if (source_node == 2) {
+                // Log detailed info about this phantom frame
+                bool is_service = (masked_id >> 7) & 0x1;
+                uint16_t msg_type = is_service ? ((masked_id >> 16) & 0xFF) : ((masked_id >> 8) & 0x7FFF);
+                uint8_t priority = (masked_id >> 24) & 0x1F;
+
+                ESP_LOGW("CAN_RX", "=== PHANTOM NODE 2 CAN FRAME ===");
+                ESP_LOGW("CAN_RX", "Raw CAN ID: 0x%08X, Masked: 0x%08X", rxmsg.id, masked_id);
+                ESP_LOGW("CAN_RX", "Decoded: Priority=%d, MsgType=%d, Service=%d, SrcNode=%d",
+                         priority, msg_type, is_service, source_node);
+                ESP_LOGW("CAN_RX", "DLC=%d, Data bytes:", rxmsg.dlc);
+
+                // Log raw data bytes
+                char hex_str[64] = {0};
+                int offset = 0;
+                for (int j = 0; j < rxmsg.dlc && j < 8; j++) {
+                    offset += snprintf(hex_str + offset, sizeof(hex_str) - offset, "%02X ", rxmsg.data[j]);
+                }
+                ESP_LOGW("CAN_RX", "  %s", hex_str);
+
+                // Check for ASCII text in data
+                bool has_ascii = false;
+                for (int j = 0; j < rxmsg.dlc && j < 8; j++) {
+                    if (rxmsg.data[j] >= 0x20 && rxmsg.data[j] <= 0x7E) {
+                        has_ascii = true;
+                        break;
+                    }
+                }
+
+                if (has_ascii) {
+                    char ascii_str[32] = {0};
+                    int ascii_offset = 0;
+                    for (int j = 0; j < rxmsg.dlc && j < 8; j++) {
+                        if (rxmsg.data[j] >= 0x20 && rxmsg.data[j] <= 0x7E) {
+                            ascii_str[ascii_offset++] = rxmsg.data[j];
+                        } else {
+                            ascii_str[ascii_offset++] = '.';
+                        }
+                    }
+                    ESP_LOGW("CAN_RX", "  ASCII: '%s'", ascii_str);
+                }
+
+                // Check if this looks like a NodeStatus message (type 341)
+                if (msg_type == 341 && !is_service) {
+                    ESP_LOGW("CAN_RX", "  This appears to be a NodeStatus message!");
+                }
+            }
+#endif
+
 #if CANARD_MULTI_IFACE
             rx_frame.iface_id = i;
 #endif

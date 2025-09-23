@@ -53,6 +53,9 @@ public:
     void     print_main_loop_rate(void);
     void     report_reset_reason(void);
 
+    // Helper to register current task with watchdog and report any errors
+    static void register_task_with_watchdog(const char* task_name);
+
     uint16_t get_loop_rate_hz(void);
     AP_Int16 _active_loop_rate_hz;
     AP_Int16 _loop_rate_hz;
@@ -86,16 +89,16 @@ public:
     static const int IO_PRIO      = 5;
     static const int STORAGE_PRIO = 4;
 
-    static const int TIMER_SS     = 1024*3;
-    static const int MAIN_SS      = 1024*8;  // Increased from 5KB to 8KB
-    static const int RCIN_SS      = 1024*3;
-    static const int RCOUT_SS     = 1024*1.5;
-    static const int WIFI_SS1     = 1024*2.25;
-    static const int WIFI_SS2     = 1024*2.25;
-    static const int UART_SS      = 1024*2.25;
-    static const int DEVICE_SS    = 1024*4;     // DEVICEBUS/s
-    static const int IO_SS        = 1024*3.5;   // APM_IO
-    static const int STORAGE_SS   = 1024*2;     // APM_STORAGE
+    static const int TIMER_SS     = 1024*3.5;   // Increased from 3KB to 3.5KB for watchdog
+    static const int MAIN_SS      = 1024*8;     // Already 8KB
+    static const int RCIN_SS      = 1024*3.5;   // Increased from 3KB to 3.5KB for watchdog
+    static const int RCOUT_SS     = 1024*3;     // Increased from 1.5KB to 3KB for watchdog
+    static const int WIFI_SS1     = 1024*3;     // Increased from 2.25KB to 3KB for watchdog
+    static const int WIFI_SS2     = 1024*3;     // Increased from 2.25KB to 3KB for watchdog
+    static const int UART_SS      = 1024*3;     // Increased from 2.25KB to 3KB for watchdog
+    static const int DEVICE_SS    = 1024*4;     // Already 4KB
+    static const int IO_SS        = 1024*4;     // Increased from 3.5KB to 4KB for watchdog
+    static const int STORAGE_SS   = 1024*3;     // Increased from 2KB to 3KB for watchdog
 
 private:
     AP_HAL::HAL::Callbacks *callbacks;

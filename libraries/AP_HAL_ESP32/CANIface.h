@@ -54,7 +54,11 @@ private:
 
     QueueHandle_t rx_queue;
     QueueHandle_t tx_queue;
-    
+
+    // Task handles for cleanup on re-init
+    TaskHandle_t rx_task_handle = NULL;
+    TaskHandle_t tx_task_handle = NULL;
+
     // Track transmitted frames to filter self-reception
     struct TxTracker {
         uint32_t can_id;
@@ -64,6 +68,9 @@ private:
     static constexpr uint8_t TX_TRACKER_SIZE = 32;
     TxTracker tx_tracker[TX_TRACKER_SIZE];
     uint8_t tx_tracker_index = 0;
+
+    // Flag to indicate driver restart in progress
+    volatile bool restart_in_progress = false;
 };
 
 } // namespace ESP32

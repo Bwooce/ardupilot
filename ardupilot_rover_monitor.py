@@ -304,8 +304,12 @@ class ArduPilotRoverMonitor:
             self.disconnect()
 
     def signal_handler(self, sig, frame):
-        """Handle Ctrl+C gracefully"""
+        """Handle signals gracefully"""
+        print(f"\nReceived signal {sig}, stopping monitor...")
         self.running = False
+        # Release lock immediately on signal
+        if self.port_lock:
+            self.port_lock.release()
 
 def main():
     parser = argparse.ArgumentParser(description='ArduPilot Rover Monitor Agent')
@@ -321,6 +325,8 @@ def main():
 
     # Set up signal handlers
     signal.signal(signal.SIGINT, monitor.signal_handler)
+    signal.signal(signal.SIGTERM, monitor.signal_handler)
+    signal.signal(signal.SIGUSR1, monitor.signal_handler)
 
     # Run monitor
     monitor.monitor(args.duration)
