@@ -1463,8 +1463,8 @@ void AP_Logger::io_thread(void)
     bool done_crash_dump_save = false;
 
     while (true) {
-        // Reset watchdog for this thread
-        hal.scheduler->watchdog_reset();
+        // Pat watchdog for this thread
+        hal.scheduler->watchdog_pat();
 
         uint32_t now = AP_HAL::micros();
 

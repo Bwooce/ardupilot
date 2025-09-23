@@ -54,7 +54,7 @@ public:
     void     register_timer_failsafe(AP_HAL::Proc, uint32_t period_us) override;
     void     reboot(bool hold_in_bootloader) override;
     bool     in_main_thread() const override;
-    void     watchdog_reset() override;  // Reset watchdog for current thread
+    void     watchdog_pat() override;  // Pat watchdog for current thread
     // check and set the startup state
     void     set_system_initialized() override;
     bool     is_system_initialized() override;

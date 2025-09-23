@@ -147,11 +147,8 @@ public:
      */
     bool thread_create(AP_HAL::MemberProc, const char *name, uint32_t stack_size, priority_base base, int8_t priority) override;
 
-    // HAL interface for watchdog reset
-    void watchdog_reset() override { watchdog_pat(); }
-
-    // pat the watchdog (ChibiOS-specific name kept for compatibility)
-    void watchdog_pat(void);
+    // pat the watchdog
+    void watchdog_pat(void) override;
 
 private:
     bool _initialized;
