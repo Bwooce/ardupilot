@@ -840,6 +840,10 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
 #endif
     hal.rcout->init();
 
+    // Register main thread with watchdog BEFORE calling setup()
+    // This prevents "task not found" errors during initialization
+    register_task_with_watchdog("APM_MAIN");
+
     ESP_LOGI("MAIN", "Calling ArduPilot setup() - this may take a while...");
     ESP_LOGI("SCHEDULER", "========================================");
     ESP_LOGI("SCHEDULER", "About to call callbacks->setup()");
@@ -861,9 +865,6 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
     esp_log_level_set("task_wdt", ESP_LOG_WARN);
 
     sched->set_system_initialized();
-
-    // Register main thread with watchdog using the standard mechanism
-    register_task_with_watchdog("APM_MAIN");
 
 #ifdef SCHEDDEBUG
     printf("%s:%d initialised\n", __PRETTY_FUNCTION__, __LINE__);
