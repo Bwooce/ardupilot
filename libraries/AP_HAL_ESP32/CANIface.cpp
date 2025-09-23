@@ -522,6 +522,8 @@ void CANIface::tx_task(void *arg)
                 static uint32_t last_invalid_state_log_ms = 0;
                 static uint32_t invalid_state_count = 0;
                 static uint32_t messages_dropped = 0;
+                static uint32_t last_recovery_attempt_ms = 0;
+                static uint32_t recovery_backoff_ms = 100;  // Start with 100ms backoff
                 uint32_t now_ms = AP_HAL::millis();
                 invalid_state_count++;
                 messages_dropped++;  // Count this as a dropped message
@@ -549,20 +551,33 @@ void CANIface::tx_task(void *arg)
                     }
                 }
 
-                // Check for restart more frequently than logging
-                if (invalid_state_count > 100) {  // After 100 failures (~1 second)
+                // Check for restart with exponential backoff to avoid hammering the bus
+                bool should_attempt_recovery = false;
+                if (now_ms - last_recovery_attempt_ms >= recovery_backoff_ms) {
+                    should_attempt_recovery = true;
+                    last_recovery_attempt_ms = now_ms;
+
+                    // Exponential backoff: double the delay each time, max 5 seconds
+                    recovery_backoff_ms = MIN(recovery_backoff_ms * 2, 5000);
+                }
+
+                if (should_attempt_recovery) {
                     iface->update_error_stats(0x08); // Invalid state error
 
                     // Decide what to do based on actual state
                     if (got_status) {
                         if (diagnostic_status.state == TWAI_STATE_STOPPED) {
-                            // Try to start the bus again
-                            CAN_DEBUG_INFO("TWAI is STOPPED, attempting to start");
+                            // Try to start the bus again, but with backoff
+                            CAN_DEBUG_INFO("TWAI is STOPPED, attempting to start (backoff=%lums)",
+                                          (unsigned long)recovery_backoff_ms);
                             esp_err_t start_res = twai_start();
                             if (start_res != ESP_OK) {
                                 CAN_DEBUG_ERROR("Failed to restart TWAI: %d", start_res);
                                 // If start fails, try full restart
                                 iface->attempt_driver_restart();
+                            } else {
+                                // Reset backoff on successful start
+                                recovery_backoff_ms = 100;
                             }
                         } else if (diagnostic_status.state == TWAI_STATE_BUS_OFF) {
                             // Need recovery
@@ -574,6 +589,8 @@ void CANIface::tx_task(void *arg)
                         } else if (diagnostic_status.state == TWAI_STATE_RUNNING) {
                             // This shouldn't happen - RUNNING but getting invalid state?
                             CAN_DEBUG_ERROR("TWAI reports RUNNING but TX returns INVALID_STATE - possible driver bug");
+                            // Reset backoff since we're supposedly running
+                            recovery_backoff_ms = 100;
                         }
                     } else {
                         // Couldn't get status, try full restart
