@@ -1057,6 +1057,8 @@ void AP_Logger_File::io_timer(void)
         start_new_log();
         last_io_operation = "";
         start_new_log_pending = false;
+        // Feed watchdog after potentially long operation
+        hal.scheduler->delay(1);
     }
 
     if (erase.log_num != 0) {
@@ -1076,10 +1078,14 @@ void AP_Logger_File::io_timer(void)
         last_io_operation = "find_last_log";
         const auto log_num = find_last_log();
         last_io_operation = "";
+        // Feed watchdog after find_last_log
+        hal.scheduler->delay(1);
         last_log_is_marked_discard = false;
         last_io_operation = "write_lastlog";
         write_lastlog_file(log_num);
         last_io_operation = "";
+        // Feed watchdog after write_lastlog_file
+        hal.scheduler->delay(1);
     }
 
     uint32_t nbytes = _writebuf.available();
@@ -1097,6 +1103,8 @@ void AP_Logger_File::io_timer(void)
     if (tnow - _free_space_last_check_time > _free_space_check_interval) {
         _free_space_last_check_time = tnow;
         last_io_operation = "disk_space_avail";
+        // Feed watchdog before potentially slow disk operation
+        hal.scheduler->delay(1);
         if (disk_space_avail() < _free_space_min_avail && disk_space() > 0) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
             // On ESP32, try to free up space by deleting old logs
