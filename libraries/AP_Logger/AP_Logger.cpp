@@ -1454,11 +1454,17 @@ bool AP_Logger::check_crash_dump_save(void)
 // thread for processing IO - in general IO involves a long blocking DMA write to an SPI device
 // and the thread will sleep while this completes preventing other tasks from running, it therefore
 // is necessary to run the IO in it's own thread
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+// External function from ESP32 HAL for watchdog registration
+extern "C" {
+    void esp32_register_thread_with_watchdog(const char* name);
+}
+#endif
+
 void AP_Logger::io_thread(void)
 {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     // Register with watchdog on ESP32
-    extern "C" void esp32_register_thread_with_watchdog(const char* name);
     esp32_register_thread_with_watchdog("log_io");
 #endif
 
