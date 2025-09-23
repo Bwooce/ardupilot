@@ -20,11 +20,6 @@
     #include <AC_Fence/AC_Fence.h>
 #endif
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_task_wdt.h"
-#endif
 
 AP_Logger *AP_Logger::_singleton;
 
@@ -1462,21 +1457,14 @@ bool AP_Logger::check_crash_dump_save(void)
 // is necessary to run the IO in it's own thread
 void AP_Logger::io_thread(void)
 {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Note: thread_create already registers us with watchdog
-    // We just need to reset it periodically
-#endif
-
     uint32_t last_run_us = AP_HAL::micros();
     uint32_t last_stack_us = last_run_us;
     uint32_t last_crash_check_us = last_run_us;
     bool done_crash_dump_save = false;
 
     while (true) {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         // Reset watchdog for this thread
-        esp_task_wdt_reset();
-#endif
+        hal.scheduler->watchdog_reset();
 
         uint32_t now = AP_HAL::micros();
 

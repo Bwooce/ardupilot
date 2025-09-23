@@ -22,7 +22,6 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_system.h"
-#include "esp_task_wdt.h"
 #include <string.h>
 
 // Use heap_caps API which is always available
@@ -69,14 +68,14 @@ bool ESP32_PSRAM_Logger::init(uint32_t buffer_size_mb)
     
     // Allocate buffer in PSRAM
     // Feed watchdog before potentially slow allocation
-    esp_task_wdt_reset();
+    hal.scheduler->watchdog_reset();
     buffer_start = (uint8_t *)heap_caps_malloc(buffer_size, MALLOC_CAP_SPIRAM);
     if (buffer_start == nullptr) {
         ESP_LOGE(TAG, "Failed to allocate %lu bytes in PSRAM", (unsigned long)buffer_size);
         return false;
     }
     // Feed watchdog after allocation
-    esp_task_wdt_reset();
+    hal.scheduler->watchdog_reset();
     
     ESP_LOGI(TAG, "Allocated %lu MB at 0x%08lX for logging", 
             (unsigned long)(buffer_size / (1024 * 1024)),

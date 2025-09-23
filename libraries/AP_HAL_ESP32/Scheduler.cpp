@@ -536,6 +536,17 @@ bool IRAM_ATTR Scheduler::in_main_thread() const
     return _main_task_handle == xTaskGetCurrentTaskHandle();
 }
 
+void Scheduler::watchdog_reset()
+{
+    // Reset the watchdog timer for the current thread
+    // This is safe to call from any thread that has been registered with the watchdog
+    esp_err_t result = esp_task_wdt_reset();
+    if (result != ESP_OK && result != ESP_ERR_NOT_FOUND) {
+        // Only log real errors, not "not registered" which is expected for some threads
+        ESP_LOGE("WDT", "Failed to reset watchdog: %d", result);
+    }
+}
+
 void Scheduler::set_system_initialized()
 {
 #ifdef SCHEDDEBUG
