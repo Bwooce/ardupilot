@@ -1454,15 +1454,30 @@ bool AP_Logger::check_crash_dump_save(void)
 // thread for processing IO - in general IO involves a long blocking DMA write to an SPI device
 // and the thread will sleep while this completes preventing other tasks from running, it therefore
 // is necessary to run the IO in it's own thread
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-#include <AP_HAL_ESP32/Scheduler.h>
-#endif
-
 void AP_Logger::io_thread(void)
 {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Register with watchdog on ESP32
-    esp32_register_thread_with_watchdog("log_io");
+    // On ESP32, register with watchdog using the current task handle
+    // We need to do this here instead of at thread creation because
+    // the thread needs to be fully running first
+    #include "freertos/FreeRTOS.h"
+    #include "freertos/task.h"
+    #include "esp_task_wdt.h"
+
+    // Get current task handle and register with watchdog
+    TaskHandle_t handle = xTaskGetCurrentTaskHandle();
+    esp_err_t wdt_result = esp_task_wdt_add(handle);
+    if (wdt_result != ESP_OK) {
+        // Log the error but continue - logging is more important than watchdog
+        const char* error_desc = "unknown";
+        switch(wdt_result) {
+            case ESP_ERR_INVALID_ARG: error_desc = "invalid arg"; break;
+            case ESP_ERR_NO_MEM: error_desc = "no mem"; break;
+            case ESP_ERR_NOT_FOUND: error_desc = "not found"; break;
+            default: break;
+        }
+        hal.console->printf("log_io: WDT registration failed: %s\n", error_desc);
+    }
 #endif
 
     uint32_t last_run_us = AP_HAL::micros();
