@@ -244,10 +244,9 @@ void AP_Logger::init(const AP_Int32 &log_bitmask, const struct LogStructure *str
     } backend_configs[] {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(HAL_ESP32_USE_PSRAM_LOGGING)
         { Backend_Type::FILESYSTEM, AP_Logger_ESP32_PSRAM::probe },
-        // Note: File backend also registered as fallback - requires LOGGER_MAX_BACKENDS=3
-    #if HAL_LOGGING_FILESYSTEM_ENABLED
-        { Backend_Type::FILESYSTEM, AP_Logger_File::probe },
-    #endif
+        // File backend disabled on ESP32 - SPIFFS causes SPI flash cache deadlocks
+        // Every SPIFFS write requires disabling cache on both CPUs which fails
+        // when other tasks don't yield quickly enough, causing watchdog timeouts
 #elif HAL_LOGGING_FILESYSTEM_ENABLED
         { Backend_Type::FILESYSTEM, AP_Logger_File::probe },
 #endif
@@ -259,23 +258,10 @@ void AP_Logger::init(const AP_Int32 &log_bitmask, const struct LogStructure *str
 #endif
 };
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(HAL_ESP32_USE_PSRAM_LOGGING)
-    bool psram_logger_active = false;
-#endif
-
     for (const auto &backend_config : backend_configs) {
         if ((_params.backend_types & uint8_t(backend_config.type)) == 0) {
             continue;
         }
-
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(HAL_ESP32_USE_PSRAM_LOGGING)
-        // Skip File backend if PSRAM logger is already active
-        // This prevents SPIFFS operations that cause SPI flash cache deadlocks
-        if (psram_logger_active && backend_config.probe_fn == AP_Logger_File::probe) {
-            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Skipping File backend - PSRAM active");
-            continue;
-        }
-#endif
 
         if (_next_backend == LOGGER_MAX_BACKENDS) {
             AP_BoardConfig::config_error("Too many backends");
@@ -300,14 +286,6 @@ void AP_Logger::init(const AP_Int32 &log_bitmask, const struct LogStructure *str
             AP_BoardConfig::allocation_error("logger backend");
 #endif
         }
-
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(HAL_ESP32_USE_PSRAM_LOGGING)
-        // Mark PSRAM logger as active if successfully probed
-        if (backend_config.probe_fn == AP_Logger_ESP32_PSRAM::probe && backends[_next_backend] != nullptr) {
-            psram_logger_active = true;
-            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "PSRAM logger active - disabling File backend");
-        }
-#endif
 
         _next_backend++;
     }
