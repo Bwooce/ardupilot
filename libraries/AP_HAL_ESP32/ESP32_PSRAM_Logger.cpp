@@ -22,6 +22,7 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
 #include <string.h>
 
 // Use heap_caps API which is always available
