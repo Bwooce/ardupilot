@@ -9,4 +9,5 @@ ota_0,    app,  ota_0,   ,        2M
 ota_1,    app,  ota_1,   ,        2M
 ota_data, data, ota,     ,        0x2000
 storage,  0x45, 0x0,     ,        16K
-logs,     data, spiffs,  ,        9M
+# OTA storage only - NEVER for logging (causes cache deadlocks)
+ota_storage, data, spiffs,  ,        9M

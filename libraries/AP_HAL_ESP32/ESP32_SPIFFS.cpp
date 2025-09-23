@@ -165,7 +165,7 @@ bool esp32_spiffs_healthy(void)
     
     // Check if we can still access the filesystem
     size_t total = 0, used = 0;
-    esp_err_t ret = esp_spiffs_info("logs", &total, &used);
+    esp_err_t ret = esp_spiffs_info("ota_storage", &total, &used);
     
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "SPIFFS health check failed");
@@ -199,7 +199,7 @@ uint32_t esp32_spiffs_available_bytes(void)
     }
     
     size_t total = 0, used = 0;
-    esp_err_t ret = esp_spiffs_info("logs", &total, &used);
+    esp_err_t ret = esp_spiffs_info("ota_storage", &total, &used);
     
     if (ret != ESP_OK) {
         return 0;
@@ -219,7 +219,7 @@ bool esp32_spiffs_format(void)
     
     // Unmount first if mounted
     if (spiffs_mounted) {
-        esp_vfs_spiffs_unregister("logs");
+        esp_vfs_spiffs_unregister("ota_storage");
         spiffs_mounted = false;
     }
     
