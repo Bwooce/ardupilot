@@ -79,17 +79,17 @@ define HAL_ESP32_USE_PSRAM_LOGGING 1
 define HAL_ESP32_USE_SPIFFS 1
 define HAL_ESP32_PSRAM_LOG_SIZE_MB 4
 
-# Enable flash-based filesystem logging for crash diagnostics and persistent data
+# Filesystem logging disabled to prevent SPI flash cache deadlocks
 define HAL_LOGGING_DATAFLASH_ENABLED 0
-# File logging disabled - SPIFFS causes SPI flash cache deadlocks on ESP32
-# SPIFFS still available for OTA updates but not for continuous logging
+# NEVER enable - causes watchdog timeouts from cache synchronization failures
+
 define HAL_LOGGING_FILESYSTEM_ENABLED 0
 
 # Enable MAVLink logging for remote access
 define HAL_LOGGING_MAVLINK_ENABLED 1
 define HAL_LOGGING_BACKENDS_DEFAULT 3  # Bit 0=File, Bit 1=MAVLink, both enabled
 
-# SPIFFS Configuration for internal flash logging (16MB flash allows generous space)
+# SPIFFS Configuration for OTA updates only
 define HAL_ESP32_STORAGE_TYPE 1  # 0=SD, 1=SPIFFS, 2=LittleFS
 define HAL_ESP32_SPIFFS_MOUNT_POINT "/APM"
 define HAL_ESP32_SPIFFS_MAX_FILES 10

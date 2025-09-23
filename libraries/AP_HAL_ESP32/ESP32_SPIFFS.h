@@ -11,7 +11,7 @@
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
 
-// Initialize SPIFFS filesystem for internal flash logging
+// Initialize SPIFFS filesystem for OTA updates only (NOT for logging)
 bool esp32_spiffs_init(void);
 
 // Check if SPIFFS is mounted and healthy

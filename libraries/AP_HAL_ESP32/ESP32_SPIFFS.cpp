@@ -6,8 +6,13 @@
 */
 
 /*
-  ESP32 SPIFFS/LittleFS filesystem support for internal flash logging
-  Uses ESP32's internal flash memory for log storage when no SD card is available
+  ESP32 SPIFFS/LittleFS filesystem support for OTA updates ONLY
+
+  WARNING: NEVER use SPIFFS for logging - causes SPI flash cache deadlocks!
+  Every SPIFFS write requires disabling cache on both CPUs, which fails
+  when other tasks don't yield, causing watchdog timeouts.
+
+  This filesystem is ONLY for OTA firmware storage.
 */
 
 #include <AP_HAL/AP_HAL.h>
@@ -66,12 +71,12 @@ bool esp32_spiffs_init(void)
 
     // Use GCS message to avoid stack overflow
     GCS_SEND_TEXT(MAV_SEVERITY_INFO, "ESP32: Initializing SPIFFS");
-    ESP_LOGI(TAG, "Initializing SPIFFS for internal flash logging");
+    ESP_LOGI(TAG, "Initializing SPIFFS for OTA updates only");
 
     // Configure SPIFFS with optimizations for fast startup
     esp_vfs_spiffs_conf_t spiffs_conf = {
         .base_path = "/APM",
-        .partition_label = "logs",  // Must match partition table exactly
+        .partition_label = "ota_storage",  // For OTA firmware updates only
         .max_files = 50,  // Increased from 10 to handle more log files
         .format_if_mount_failed = false  // Don't auto-format, just fail if corrupted
     };
@@ -81,7 +86,7 @@ bool esp32_spiffs_init(void)
     // Handle mount failures
     if (ret != ESP_OK) {
         if (ret == ESP_ERR_NOT_FOUND) {
-            ESP_LOGE(TAG, "SPIFFS partition 'logs' not found in partition table");
+            ESP_LOGE(TAG, "SPIFFS partition not found in partition table");
             return false;
         }
 
@@ -90,10 +95,10 @@ bool esp32_spiffs_init(void)
             ESP_LOGW(TAG, "SPIFFS appears corrupted (%s), formatting once", esp_err_to_name(ret));
 
             // Unregister first if needed
-            esp_vfs_spiffs_unregister("logs");
+            esp_vfs_spiffs_unregister("ota_storage");
 
             // Format the partition
-            ret = esp_spiffs_format("logs");
+            ret = esp_spiffs_format("ota_storage");
             if (ret != ESP_OK) {
                 ESP_LOGE(TAG, "SPIFFS format failed (%s)", esp_err_to_name(ret));
                 return false;
@@ -115,7 +120,7 @@ bool esp32_spiffs_init(void)
     
     // Check partition info
     size_t total = 0, used = 0;
-    ret = esp_spiffs_info("logs", &total, &used);
+    ret = esp_spiffs_info("ota_storage", &total, &used);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
         return false;
@@ -126,7 +131,7 @@ bool esp32_spiffs_init(void)
              total/1024, used/1024, (used*100)/total);
 
 
-    // If filesystem is nearly full, try to clean up old logs
+    // If filesystem is nearly full, warn about OTA space
     if (used > (total * 95 / 100)) {
         ESP_LOGW(TAG, "SPIFFS nearly full (%d%%), attempting cleanup", (used*100)/total);
         // Note: Actual cleanup would be done by AP_Logger
@@ -140,7 +145,7 @@ bool esp32_spiffs_init(void)
     spiffs_mounted = true;
     
     // Report to GCS
-    gcs().send_text(MAV_SEVERITY_INFO, "SPIFFS: %d MB available for logs", 
+    gcs().send_text(MAV_SEVERITY_INFO, "SPIFFS: %d MB available for OTA", 
                    (total - used) / (1024 * 1024));
     
     return true;
@@ -175,7 +180,7 @@ bool esp32_spiffs_healthy(void)
         uint32_t now = AP_HAL::millis();
         if (now - last_warning > 30000) { // Warn every 30 seconds
             last_warning = now;
-            gcs().send_text(MAV_SEVERITY_WARNING, "SPIFFS: %d%% full, logs may stop", percent_used);
+            gcs().send_text(MAV_SEVERITY_WARNING, "SPIFFS: %d%% full, OTA may fail", percent_used);
         }
     }
     
@@ -219,7 +224,7 @@ bool esp32_spiffs_format(void)
     }
     
     // Format the partition
-    esp_err_t ret = esp_spiffs_format("logs");
+    esp_err_t ret = esp_spiffs_format("ota_storage");
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to format SPIFFS (%s)", esp_err_to_name(ret));
         return false;

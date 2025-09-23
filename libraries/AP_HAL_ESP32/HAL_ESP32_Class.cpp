@@ -227,14 +227,13 @@ void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
         GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "ESP32: Log redirect DISABLED");
     }
     
-    // Initialize SPIFFS filesystem (needed for OTA updates even if not used for logging)
-    // Note: SPIFFS logging is disabled due to SPI flash cache deadlocks on dual-core ESP32
-    // but we still mount the filesystem for other uses like OTA firmware storage
+    // Initialize SPIFFS filesystem for OTA updates only
+    // NEVER use SPIFFS for logging - causes SPI flash cache deadlocks
     extern bool esp32_spiffs_init(void);
     if (!esp32_spiffs_init()) {
         ESP_LOGW("HAL", "SPIFFS init failed - OTA updates will not work");
     } else {
-        ESP_LOGI("HAL", "SPIFFS mounted for OTA (logging uses PSRAM instead)");
+        ESP_LOGI("HAL", "SPIFFS mounted for OTA updates only");
     }
 
     // Debug via MAVLink STATUSTEXT - safe from serial contamination
