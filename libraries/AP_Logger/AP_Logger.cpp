@@ -1463,22 +1463,8 @@ bool AP_Logger::check_crash_dump_save(void)
 void AP_Logger::io_thread(void)
 {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // On ESP32, register with watchdog using the current task handle
-    // We need to do this here instead of at thread creation because
-    // the thread needs to be fully running first
-    TaskHandle_t handle = xTaskGetCurrentTaskHandle();
-    esp_err_t wdt_result = esp_task_wdt_add(handle);
-    if (wdt_result != ESP_OK) {
-        // Log the error but continue - logging is more important than watchdog
-        const char* error_desc = "unknown";
-        switch(wdt_result) {
-            case ESP_ERR_INVALID_ARG: error_desc = "invalid arg"; break;
-            case ESP_ERR_NO_MEM: error_desc = "no mem"; break;
-            case ESP_ERR_NOT_FOUND: error_desc = "not found"; break;
-            default: break;
-        }
-        hal.console->printf("log_io: WDT registration failed: %s\n", error_desc);
-    }
+    // Note: thread_create already registers us with watchdog
+    // We just need to reset it periodically
 #endif
 
     uint32_t last_run_us = AP_HAL::micros();
@@ -1487,6 +1473,11 @@ void AP_Logger::io_thread(void)
     bool done_crash_dump_save = false;
 
     while (true) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // Reset watchdog for this thread
+        esp_task_wdt_reset();
+#endif
+
         uint32_t now = AP_HAL::micros();
 
         uint32_t delay_us = 250U; // always have some delay
