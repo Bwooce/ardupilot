@@ -1458,7 +1458,7 @@ void AP_Logger::io_thread(void)
 {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     // Register with watchdog on ESP32
-    extern void esp32_register_thread_with_watchdog(const char* name);
+    extern "C" void esp32_register_thread_with_watchdog(const char* name);
     esp32_register_thread_with_watchdog("log_io");
 #endif
 
