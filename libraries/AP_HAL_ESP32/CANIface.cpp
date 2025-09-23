@@ -551,11 +551,15 @@ void CANIface::tx_task(void *arg)
                     }
                 }
 
+                // Track recovery attempts for escalation
+                static uint32_t consecutive_failures = 0;
+
                 // Check for restart with exponential backoff to avoid hammering the bus
                 bool should_attempt_recovery = false;
                 if (now_ms - last_recovery_attempt_ms >= recovery_backoff_ms) {
                     should_attempt_recovery = true;
                     last_recovery_attempt_ms = now_ms;
+                    consecutive_failures++;
 
                     // Exponential backoff: double the delay each time, max 5 seconds
                     recovery_backoff_ms = MIN(recovery_backoff_ms * 2, 5000);
@@ -564,37 +568,44 @@ void CANIface::tx_task(void *arg)
                 if (should_attempt_recovery) {
                     iface->update_error_stats(0x08); // Invalid state error
 
-                    // Decide what to do based on actual state
-                    if (got_status) {
+                    // After 10 consecutive failures, escalate to full driver restart
+                    if (consecutive_failures > 10) {
+                        CAN_DEBUG_ERROR("TWAI recovery failed %lu times, attempting full driver restart",
+                                       (unsigned long)consecutive_failures);
+                        iface->attempt_driver_restart();
+                        consecutive_failures = 0;
+                        recovery_backoff_ms = 100;  // Reset backoff after full restart
+                    } else if (got_status) {
+                        // Try recovery based on current state
                         if (diagnostic_status.state == TWAI_STATE_STOPPED) {
                             // Try to start the bus again, but with backoff
-                            CAN_DEBUG_INFO("TWAI is STOPPED, attempting to start (backoff=%lums)",
+                            CAN_DEBUG_INFO("TWAI is STOPPED, attempting to start (attempt %lu, backoff=%lums)",
+                                          (unsigned long)consecutive_failures,
                                           (unsigned long)recovery_backoff_ms);
                             esp_err_t start_res = twai_start();
                             if (start_res != ESP_OK) {
                                 CAN_DEBUG_ERROR("Failed to restart TWAI: %d", start_res);
-                                // If start fails, try full restart
-                                iface->attempt_driver_restart();
-                            } else {
-                                // Reset backoff on successful start
-                                recovery_backoff_ms = 100;
                             }
                         } else if (diagnostic_status.state == TWAI_STATE_BUS_OFF) {
                             // Need recovery
-                            CAN_DEBUG_INFO("TWAI is BUS_OFF, initiating recovery");
+                            CAN_DEBUG_INFO("TWAI is BUS_OFF, initiating recovery (attempt %lu)",
+                                          (unsigned long)consecutive_failures);
                             twai_initiate_recovery();
                         } else if (diagnostic_status.state == TWAI_STATE_RECOVERING) {
                             // Already recovering, just wait
                             CAN_DEBUG_INFO("TWAI is RECOVERING, waiting...");
                         } else if (diagnostic_status.state == TWAI_STATE_RUNNING) {
-                            // This shouldn't happen - RUNNING but getting invalid state?
-                            CAN_DEBUG_ERROR("TWAI reports RUNNING but TX returns INVALID_STATE - possible driver bug");
-                            // Reset backoff since we're supposedly running
+                            // Success! Reset everything
+                            CAN_DEBUG_INFO("TWAI recovered to RUNNING state");
+                            consecutive_failures = 0;
                             recovery_backoff_ms = 100;
                         }
                     } else {
                         // Couldn't get status, try full restart
+                        CAN_DEBUG_ERROR("Can't get TWAI status, attempting full restart");
                         iface->attempt_driver_restart();
+                        consecutive_failures = 0;
+                        recovery_backoff_ms = 100;
                     }
                     invalid_state_count = 0;  // Reset counter after action
                 }
