@@ -1455,10 +1455,7 @@ bool AP_Logger::check_crash_dump_save(void)
 // and the thread will sleep while this completes preventing other tasks from running, it therefore
 // is necessary to run the IO in it's own thread
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-// External function from ESP32 HAL for watchdog registration
-extern "C" {
-    void esp32_register_thread_with_watchdog(const char* name);
-}
+#include <AP_HAL_ESP32/Scheduler.h>
 #endif
 
 void AP_Logger::io_thread(void)

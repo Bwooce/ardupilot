@@ -25,6 +25,15 @@
 #define ESP32_SCHEDULER_MAX_IO_PROCS 10
 #define TWDT_TIMEOUT_MS 5000  // Increased from 3s to 5s for PSRAM/SPIFFS init
 
+// External C function for registering threads with watchdog
+#ifdef __cplusplus
+extern "C" {
+#endif
+void esp32_register_thread_with_watchdog(const char* name);
+#ifdef __cplusplus
+}
+#endif
+
 /* Scheduler implementation: */
 class ESP32::Scheduler : public AP_HAL::Scheduler
 {
