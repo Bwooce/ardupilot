@@ -1456,6 +1456,12 @@ bool AP_Logger::check_crash_dump_save(void)
 // is necessary to run the IO in it's own thread
 void AP_Logger::io_thread(void)
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Register with watchdog on ESP32
+    extern void esp32_register_thread_with_watchdog(const char* name);
+    esp32_register_thread_with_watchdog("log_io");
+#endif
+
     uint32_t last_run_us = AP_HAL::micros();
     uint32_t last_stack_us = last_run_us;
     uint32_t last_crash_check_us = last_run_us;

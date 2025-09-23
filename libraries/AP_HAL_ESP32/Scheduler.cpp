@@ -104,6 +104,12 @@ void Scheduler::register_task_with_watchdog(const char* task_name)
     }
 }
 
+// External C function for use by other components like AP_Logger
+extern "C" void esp32_register_thread_with_watchdog(const char* name)
+{
+    ESP32::Scheduler::register_task_with_watchdog(name);
+}
+
 void Scheduler::wdt_init(uint32_t timeout, uint32_t core_mask)
 {
     // Try to reconfigure existing WDT first
