@@ -22,6 +22,9 @@ MAV1_OPTIONS 4
 # Enable DroneCAN on CAN port 1
 CAN_P1_DRIVER 1
 CAN_D1_PROTOCOL 1
+# Set CAN bitrate to 1Mbps (default) - change if your nodes use different rate
+# Common rates: 125000, 250000, 500000, 1000000
+# CAN_P1_BITRATE 1000000
 
 # Configure Battery Monitoring via DroneCAN
 BATT_MONITOR 8
