@@ -259,10 +259,24 @@ void AP_Logger::init(const AP_Int32 &log_bitmask, const struct LogStructure *str
 #endif
 };
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(HAL_ESP32_USE_PSRAM_LOGGING)
+    bool psram_logger_active = false;
+#endif
+
     for (const auto &backend_config : backend_configs) {
         if ((_params.backend_types & uint8_t(backend_config.type)) == 0) {
             continue;
         }
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(HAL_ESP32_USE_PSRAM_LOGGING)
+        // Skip File backend if PSRAM logger is already active
+        // This prevents SPIFFS operations that cause SPI flash cache deadlocks
+        if (psram_logger_active && backend_config.probe_fn == AP_Logger_File::probe) {
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Skipping File backend - PSRAM active");
+            continue;
+        }
+#endif
+
         if (_next_backend == LOGGER_MAX_BACKENDS) {
             AP_BoardConfig::config_error("Too many backends");
             return;
@@ -277,7 +291,7 @@ void AP_Logger::init(const AP_Int32 &log_bitmask, const struct LogStructure *str
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
             // ESP32: Don't panic if specific backend not available, try next one
             // This allows fallback from PSRAM -> File -> MAVLink
-            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Logger backend %d not available", 
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Logger backend %d not available",
                          (int)backend_config.type);
             // Don't delete message_writer here - let backend handle cleanup
             // Some backends may still use it even if probe returns nullptr
@@ -286,6 +300,15 @@ void AP_Logger::init(const AP_Int32 &log_bitmask, const struct LogStructure *str
             AP_BoardConfig::allocation_error("logger backend");
 #endif
         }
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(HAL_ESP32_USE_PSRAM_LOGGING)
+        // Mark PSRAM logger as active if successfully probed
+        if (backend_config.probe_fn == AP_Logger_ESP32_PSRAM::probe && backends[_next_backend] != nullptr) {
+            psram_logger_active = true;
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "PSRAM logger active - disabling File backend");
+        }
+#endif
+
         _next_backend++;
     }
 
