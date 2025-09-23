@@ -49,12 +49,19 @@ public:
     };
     void     delay(uint16_t ms) override;
     void     delay_microseconds(uint16_t us) override;
+    void     delay_microseconds_boost(uint16_t us) override;
+    void     boost_end(void) override;
     void     register_timer_process(AP_HAL::MemberProc) override;
     void     register_io_process(AP_HAL::MemberProc) override;
     void     register_timer_failsafe(AP_HAL::Proc, uint32_t period_us) override;
     void     reboot(bool hold_in_bootloader) override;
     bool     in_main_thread() const override;
     void     watchdog_pat() override;  // Pat watchdog for current thread
+
+    // Expected delay support - prevents watchdog panics during long operations
+    void     expect_delay_ms(uint32_t ms) override;
+    bool     in_expected_delay(void) const override;
+
     // check and set the startup state
     void     set_system_initialized() override;
     bool     is_system_initialized() override;
@@ -154,4 +161,11 @@ private:
     bool _in_io_proc;
     void _run_io();
     Semaphore _io_sem;
+
+    // Expected delay tracking
+    uint32_t _expected_delay_start_ms;
+    uint32_t _expected_delay_duration_ms;
+
+    // Priority boost tracking
+    bool _priority_boosted;
 };

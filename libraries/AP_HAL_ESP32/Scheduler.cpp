@@ -58,6 +58,9 @@ bool Scheduler::_initialized = true;
 Scheduler::Scheduler()
 {
     _initialized = false;
+    _expected_delay_start_ms = 0;
+    _expected_delay_duration_ms = 0;
+    _priority_boosted = false;
 }
 
 Scheduler::~Scheduler()
@@ -475,6 +478,56 @@ void IRAM_ATTR Scheduler::delay_microseconds(uint16_t us)
 
         vTaskDelay((us+tick-1)/tick);
     }
+}
+
+void IRAM_ATTR Scheduler::delay_microseconds_boost(uint16_t us)
+{
+    // For ESP32, boost just means we should try to be more accurate
+    // by avoiding task switches when possible
+    if (!_priority_boosted) {
+        _priority_boosted = true;
+        // Could potentially increase task priority here if needed
+        // vTaskPrioritySet(NULL, configMAX_PRIORITIES - 1);
+    }
+
+    if (us < 100) {
+        // For very short delays, use busy wait for accuracy
+        esp_rom_delay_us(us);
+    } else {
+        // For longer delays, use normal delay
+        delay_microseconds(us);
+    }
+}
+
+void Scheduler::boost_end(void)
+{
+    if (_priority_boosted) {
+        _priority_boosted = false;
+        // Restore normal priority if we changed it
+        // vTaskPrioritySet(NULL, original_priority);
+    }
+}
+
+void Scheduler::expect_delay_ms(uint32_t ms)
+{
+    if (ms == 0) {
+        // Cancel expected delay
+        _expected_delay_duration_ms = 0;
+        _expected_delay_start_ms = 0;
+    } else {
+        _expected_delay_start_ms = AP_HAL::millis();
+        _expected_delay_duration_ms = ms;
+    }
+}
+
+bool Scheduler::in_expected_delay(void) const
+{
+    if (_expected_delay_duration_ms == 0) {
+        return false;
+    }
+
+    uint32_t now = AP_HAL::millis();
+    return (now - _expected_delay_start_ms) < _expected_delay_duration_ms;
 }
 
 void IRAM_ATTR Scheduler::register_timer_process(AP_HAL::MemberProc proc)
