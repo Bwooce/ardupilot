@@ -73,7 +73,14 @@ void AP_Logger_File::ensure_log_directory_exists()
         ret = AP::FS().mkdir(_log_directory);
     }
     if (ret == -1 && errno != EEXIST) {
-        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Failed to create log directory %s : %s", _log_directory, strerror(errno));
+        const char* storage_type = "Filesystem";
+        if (strncmp(_log_directory, "/APM", 4) == 0) {
+            storage_type = "SPIFFS";
+        } else if (strncmp(_log_directory, "/SDCARD", 7) == 0) {
+            storage_type = "SD Card";
+        }
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Failed to create %s log directory %s : %s",
+                      storage_type, _log_directory, strerror(errno));
     }
 #endif
 }
@@ -939,9 +946,15 @@ void AP_Logger_File::start_new_log(void)
     if (_write_fd == -1) {
         int saved_errno = errno;
 
-        // SPIFFS might be fragmented or have issues - try cleanup
+        // Filesystem might be fragmented or have issues - try cleanup
         if (saved_errno == ENOSPC || saved_errno == EIO) {
-            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "SPIFFS issue, attempting cleanup");
+            const char* storage_type = "Filesystem";
+            if (_write_filename && strncmp(_write_filename, "/APM", 4) == 0) {
+                storage_type = "SPIFFS";
+            } else if (_write_filename && strncmp(_write_filename, "/SDCARD", 7) == 0) {
+                storage_type = "SD Card";
+            }
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "%s issue, attempting cleanup", storage_type);
 
             // Try to delete the oldest log to make room
             uint16_t oldest = find_oldest_log();
@@ -965,17 +978,28 @@ void AP_Logger_File::start_new_log(void)
         write_fd_semaphore.give();
         int saved_errno = errno;
         if (open_error_ms_was_zero) {
+            // Determine storage type from path
+            const char* storage_type = "unknown";
+            if (_write_filename) {
+                if (strncmp(_write_filename, "/APM", 4) == 0) {
+                    storage_type = "SPIFFS";
+                } else if (strncmp(_write_filename, "/SDCARD", 7) == 0) {
+                    storage_type = "SD Card";
+                } else if (strncmp(_write_filename, "/logs", 5) == 0) {
+                    storage_type = "Flash";
+                }
+            }
 #if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
             // Avoid printf on ESP32 to prevent stack overflow
-            ::printf("Log open fail for %s - %s\n",
-                     _write_filename, strerror(saved_errno));
+            ::printf("%s Log open fail for %s - %s\n",
+                     storage_type, _write_filename, strerror(saved_errno));
 #endif
-            DEV_PRINTF("Log open fail for %s - %s\n",
-                                _write_filename, strerror(saved_errno));
+            DEV_PRINTF("%s Log open fail for %s - %s\n",
+                                storage_type, _write_filename, strerror(saved_errno));
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            // Brief diagnostic for ESP32
-            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Log open failed: %s errno=%d",
-                         _write_filename, saved_errno);
+            // Brief diagnostic for ESP32 with storage type
+            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "%s Log open failed: errno=%d",
+                         storage_type, saved_errno);
 #endif
         }
         return;
