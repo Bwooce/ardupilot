@@ -86,6 +86,11 @@ uint16_t comm_get_txspace(mavlink_channel_t chan);
 #define MAVLINK_USE_CONVENIENCE_FUNCTIONS
 #include "include/mavlink/v2.0/all/mavlink.h"
 
+// ESP32 fix: Override message IDs with explicit casts after MAVLink headers
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include "include/esp32_msgid_fix.h"
+#endif
+
 // Verify ESP32 MAVLink override was applied
 #ifdef ESP32_MAVLINK_OVERRIDE_APPLIED
 #if MAVLINK_ALIGNED_FIELDS != 0

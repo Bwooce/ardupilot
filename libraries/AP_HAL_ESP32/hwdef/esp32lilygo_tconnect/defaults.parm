@@ -124,7 +124,8 @@ RNGFND2_TYPE 0
 # LCD1602 I2C Display Configuration
 # Enable HD44780 16x2 LCD display on I2C address 0x27 (PCF8574 backpack)
 NTF_DISPLAY_TYPE 3
-NTF_LED_TYPES 256
+# APA102 LED configuration (bit 20 = 1048576)
+NTF_LED_TYPES 1048576
 
 # GCS Compatibility Parameters - Prevent "missing parameters" warnings
 # Explicitly disable components to avoid QGroundControl parameter errors

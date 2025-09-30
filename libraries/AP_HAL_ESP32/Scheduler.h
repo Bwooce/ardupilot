@@ -66,6 +66,10 @@ public:
     void     set_system_initialized() override;
     bool     is_system_initialized() override;
 
+    // interrupt save/restore
+    void     *disable_interrupts_save(void) override;
+    void     restore_interrupts(void *state) override;
+
     void     print_stats(void) ;
     void     print_main_loop_rate(void);
     void     report_reset_reason(void);

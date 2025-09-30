@@ -14,13 +14,13 @@ extern const AP_HAL::HAL& hal;
 
 // LED color definitions
 const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_OFF(0, 0, 0);
-const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_RED(255, 0, 0);
-const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_GREEN(0, 255, 0);
-const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_BLUE(0, 0, 255);
-const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_YELLOW(255, 255, 0);
-const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_ORANGE(255, 165, 0);
-const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_PURPLE(128, 0, 128);
-const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_WHITE(255, 255, 255);
+const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_RED(128, 0, 0);
+const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_GREEN(0, 128, 0);
+const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_BLUE(0, 0, 128);
+const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_YELLOW(128, 128, 0);
+const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_ORANGE(128, 82, 0);
+const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_PURPLE(64, 0, 64);
+const AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::COLOR_WHITE(128, 128, 128);
 
 AP_Notify_APA102_LED::AP_Notify_APA102_LED() :
     data_pin(nullptr),
@@ -60,13 +60,25 @@ bool AP_Notify_APA102_LED::init()
         return false;
     }
 
-    // Initialize all LEDs to blue (initializing state)
+    // Initialize all LEDs to off first
     for (uint8_t i = 0; i < num_leds; i++) {
-        led_colors[i] = COLOR_BLUE;
+        led_colors[i] = COLOR_OFF;
         last_led_colors[i] = COLOR_OFF;
     }
-    
+
+    // Send all LEDs off to ensure clean state
     update_leds();
+
+    hal.console->printf("APA102: Initialized %d LEDs\n", num_leds);
+
+    // Debug initial notify flag states
+    hal.console->printf("APA102: Initial flags - init:%d prearm:%d gyro:%d gps_st:%d armed:%d\n",
+                        AP_Notify::flags.initialising,
+                        AP_Notify::flags.pre_arm_check,
+                        AP_Notify::flags.gyro_calibrated,
+                        AP_Notify::flags.gps_status,
+                        AP_Notify::flags.armed);
+
     initialized = true;
     return true;
 }
@@ -86,7 +98,7 @@ void AP_Notify_APA102_LED::update()
     if (use_multi_led_mode()) {
         // Multi-LED mode: each LED shows different status
         if (num_leds >= 1) led_colors[0] = get_system_status_color();  // System Status
-        if (num_leds >= 2) led_colors[1] = get_can_status_color();     // CAN Status  
+        if (num_leds >= 2) led_colors[1] = get_can_status_color();     // CAN Status
         if (num_leds >= 3) led_colors[2] = get_gps_status_color();     // GPS Status
         if (num_leds >= 4) led_colors[3] = get_armed_status_color();   // Armed Status
         
@@ -111,6 +123,24 @@ void AP_Notify_APA102_LED::update()
         }
     }
 
+    // Debug output on changes or every 10 minutes
+    static uint32_t debug_counter = 0;
+    debug_counter++;
+
+    // Log immediately on change, or every 600 seconds (6000 * 100ms)
+    if (needs_update || (debug_counter % 6000) == 0) {
+        hal.console->printf("APA102: Status - ");
+        hal.console->printf("init:%d prearm:%d gps:%d armed:%d | Colors: ",
+                            AP_Notify::flags.initialising,
+                            AP_Notify::flags.pre_arm_check,
+                            AP_Notify::flags.gps_status,
+                            AP_Notify::flags.armed);
+        for (uint8_t i = 0; i < num_leds; i++) {
+            hal.console->printf("[%d]R%d,G%d,B%d ", i, led_colors[i].r, led_colors[i].g, led_colors[i].b);
+        }
+        hal.console->printf("%s\n", needs_update ? "(changed)" : "(periodic)");
+    }
+
     if (needs_update) {
         update_leds();
         for (uint8_t i = 0; i < num_leds; i++) {
@@ -128,35 +158,48 @@ bool AP_Notify_APA102_LED::use_multi_led_mode() const
 void AP_Notify_APA102_LED::send_led_data(uint8_t r, uint8_t g, uint8_t b)
 {
     // APA102 requires a start byte of 0b11100000 + 5 bits of brightness
-    uint8_t brightness = 0b00011111; // Full brightness
+    // Reduced from 31 (max) to 4 (much dimmer) for comfortable viewing
+    uint8_t brightness = 0b00000100; // ~13% brightness
     uint8_t header = 0b11100000 | brightness;
 
     // Send header
     for (int8_t i=7; i>=0; i--) {
         clock_pin->write(0);
+        hal.scheduler->delay_microseconds(1);
         data_pin->write((header >> i) & 1);
+        hal.scheduler->delay_microseconds(1);
         clock_pin->write(1);
+        hal.scheduler->delay_microseconds(1);
     }
 
     // Send blue
     for (int8_t i=7; i>=0; i--) {
         clock_pin->write(0);
+        hal.scheduler->delay_microseconds(1);
         data_pin->write((b >> i) & 1);
+        hal.scheduler->delay_microseconds(1);
         clock_pin->write(1);
+        hal.scheduler->delay_microseconds(1);
     }
 
     // Send green
     for (int8_t i=7; i>=0; i--) {
         clock_pin->write(0);
+        hal.scheduler->delay_microseconds(1);
         data_pin->write((g >> i) & 1);
+        hal.scheduler->delay_microseconds(1);
         clock_pin->write(1);
+        hal.scheduler->delay_microseconds(1);
     }
 
     // Send red
     for (int8_t i=7; i>=0; i--) {
         clock_pin->write(0);
+        hal.scheduler->delay_microseconds(1);
         data_pin->write((r >> i) & 1);
+        hal.scheduler->delay_microseconds(1);
         clock_pin->write(1);
+        hal.scheduler->delay_microseconds(1);
     }
 }
 
@@ -190,28 +233,28 @@ void AP_Notify_APA102_LED::update_leds()
 AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::get_system_status_color()
 {
     // Priority order: Errors > Warnings > Normal
-    
+
     // Critical errors - Red
-    if (AP_Notify::flags.failsafe_radio || 
-        AP_Notify::flags.failsafe_battery || 
+    if (AP_Notify::flags.failsafe_radio ||
+        AP_Notify::flags.failsafe_battery ||
         AP_Notify::flags.failsafe_gcs ||
         AP_Notify::flags.failsafe_ekf ||
         AP_Notify::flags.ekf_bad) {
         return COLOR_RED;
     }
-    
+
     // Warnings - Yellow/Orange
-    if (!AP_Notify::flags.pre_arm_check || 
+    if (!AP_Notify::flags.pre_arm_check ||
         !AP_Notify::flags.gyro_calibrated ||
         AP_Notify::flags.gps_glitching) {
         return COLOR_YELLOW;
     }
-    
+
     // Initializing - Blue
     if (AP_Notify::flags.initialising) {
         return COLOR_BLUE;
     }
-    
+
     // Normal operation - Green
     return COLOR_GREEN;
 }

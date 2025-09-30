@@ -28,6 +28,70 @@ This provides some support code and variables for MAVLink enabled sketches
 #include "GCS_MAVLink.h"
 
 #include <AP_Common/AP_Common.h>
+
+
+// Permanent static asserts for all platforms to catch packing issues
+// These check for obviously wrong sizes that indicate struct packing problems
+// Rather than exact sizes, we check for reasonable ranges
+
+// Message structs should never be larger than their wire format + reasonable padding
+static_assert(sizeof(mavlink_heartbeat_t) <= 12, "mavlink_heartbeat_t too large - packing issue!");
+static_assert(sizeof(mavlink_attitude_t) <= 32, "mavlink_attitude_t too large - packing issue!");
+static_assert(sizeof(mavlink_sys_status_t) <= 36, "mavlink_sys_status_t too large - packing issue!");
+
+// Message structs should never be smaller than their minimum wire size
+static_assert(sizeof(mavlink_heartbeat_t) >= 9, "mavlink_heartbeat_t too small - missing fields!");
+static_assert(sizeof(mavlink_attitude_t) >= 28, "mavlink_attitude_t too small - missing fields!");
+
+// The main message container should be within a reasonable range
+// On most platforms it's 280 bytes, but ESP32 may add padding
+// The critical thing is that the payload and header offsets are correct
+static_assert(sizeof(mavlink_message_t) >= 280 && sizeof(mavlink_message_t) <= 300,
+              "mavlink_message_t size out of expected range - possible struct definition error!");
+
+// More important than total size is that the payload array is at the right offset
+static_assert(offsetof(mavlink_message_t, payload64) <= 32,
+              "mavlink_message_t payload offset wrong - will corrupt messages!");
+
+// Verify critical field offsets - these MUST be exact for wire format compatibility
+// ATTITUDE message (ID 30) - the one we know is getting corrupted
+static_assert(offsetof(mavlink_attitude_t, time_boot_ms) == 0, "attitude time_boot_ms offset wrong!");
+static_assert(offsetof(mavlink_attitude_t, roll) == 4, "attitude roll offset wrong!");
+static_assert(offsetof(mavlink_attitude_t, pitch) == 8, "attitude pitch offset wrong!");
+static_assert(offsetof(mavlink_attitude_t, yaw) == 12, "attitude yaw offset wrong!");
+static_assert(offsetof(mavlink_attitude_t, rollspeed) == 16, "attitude rollspeed offset wrong!");
+static_assert(offsetof(mavlink_attitude_t, pitchspeed) == 20, "attitude pitchspeed offset wrong!");
+static_assert(offsetof(mavlink_attitude_t, yawspeed) == 24, "attitude yawspeed offset wrong!");
+
+// HEARTBEAT message (ID 0) - most frequently sent
+static_assert(offsetof(mavlink_heartbeat_t, custom_mode) == 0, "heartbeat custom_mode offset wrong!");
+static_assert(offsetof(mavlink_heartbeat_t, type) == 4, "heartbeat type offset wrong!");
+static_assert(offsetof(mavlink_heartbeat_t, autopilot) == 5, "heartbeat autopilot offset wrong!");
+static_assert(offsetof(mavlink_heartbeat_t, base_mode) == 6, "heartbeat base_mode offset wrong!");
+static_assert(offsetof(mavlink_heartbeat_t, system_status) == 7, "heartbeat system_status offset wrong!");
+static_assert(offsetof(mavlink_heartbeat_t, mavlink_version) == 8, "heartbeat mavlink_version offset wrong!");
+
+// IMPORTANT: The mavlink_message_t structure is NOT in wire format order!
+// The structure has checksum FIRST for efficiency, not wire format
+// Actual structure order (from mavlink_types.h):
+//   uint16_t checksum;      // offset 0
+//   uint8_t magic;          // offset 2
+//   uint8_t len;            // offset 3
+//   uint8_t incompat_flags; // offset 4
+//   uint8_t compat_flags;   // offset 5
+//   uint8_t seq;            // offset 6
+//   uint8_t sysid;          // offset 7
+//   uint8_t compid;         // offset 8
+//   uint32_t msgid:24;      // offset 9 (bitfield)
+//   uint64_t payload64[...];// offset 12
+// Wire format is different - magic comes first!
+
+static_assert(offsetof(mavlink_message_t, checksum) == 0, "checksum should be at offset 0");
+static_assert(offsetof(mavlink_message_t, magic) == 2, "magic should be at offset 2");
+static_assert(offsetof(mavlink_message_t, sysid) == 7, "sysid should be at offset 7");
+static_assert(offsetof(mavlink_message_t, compid) == 8, "compid should be at offset 8");
+static_assert(offsetof(mavlink_message_t, payload64) >= 12 && offsetof(mavlink_message_t, payload64) <= 16,
+              "payload should be around offset 12-16");
 #include <AP_HAL/AP_HAL.h>
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
@@ -272,9 +336,55 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
             last_corrupt_time = now;
             
             hal.console->printf("\n=== ESP32: CORRUPTED MAVLink MESSAGE DETECTED ===\n");
-            hal.console->printf("Channel: %d, Length: %d, Message ID: %lu\n", chan, len, (unsigned long)msgid);
+            hal.console->printf("Channel: %d, Length: %d, Message ID: %lu (0x%06lX)\n",
+                               chan, len, (unsigned long)msgid, (unsigned long)msgid);
+
+            // Decode what message this was supposed to be
+            const char* expected_msg = "UNKNOWN";
+            if (msgid == 0x03E2B5) {
+                // This pattern appears to be ATTITUDE (30) with corruption
+                expected_msg = "Likely ATTITUDE (30/0x1E) corrupted to 0x03E2B5";
+            } else if (msgid == 0x9B76B6) {
+                // Another corruption pattern
+                expected_msg = "Likely ATTITUDE (30/0x1E) corrupted to 0x9B76B6";
+            }
+            hal.console->printf("Expected: %s\n", expected_msg);
+
             hal.console->printf("Raw header bytes: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
                                buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9]);
+
+            // Show where message ID bytes should be in MAVLink v2
+            // Bytes 7-9 are the message ID in MAVLink v2
+            hal.console->printf("Message ID bytes [7-9]: %02x %02x %02x", buf[7], buf[8], buf[9]);
+
+            // Decode what the message ID should have been based on length
+            if (len == 28) {
+                hal.console->printf(" (28 bytes = likely ATTITUDE or GLOBAL_POSITION_INT)\n");
+                if (buf[7] == 0xC0) {
+                    hal.console->printf("ERROR: 0xC0 byte contamination detected at msgid position!\n");
+                    hal.console->printf("0xC0 is SLIP protocol END marker - possible serial framing issue\n");
+                }
+            } else {
+                hal.console->printf(" (expected 1E 00 00 for ATTITUDE)\n");
+            }
+
+            // Check what's at the offsets where msgid MIGHT be if packing is wrong
+            hal.console->printf("Alternate locations - [10-12]: %02x %02x %02x, [13-15]: %02x %02x %02x\n",
+                               buf[10], buf[11], buf[12], buf[13], buf[14], buf[15]);
+
+            // Check if this looks like memory from elsewhere (pointer values?)
+            // B5 E2 03 looks suspiciously like part of an ESP32 address (0x403E2B5)
+            // B6 76 9B could be part of 0x409B76B6
+            if ((msgid & 0xFF0000) == 0x030000 || (msgid & 0xFF0000) == 0x9B0000) {
+                hal.console->printf("WARNING: Message ID looks like ESP32 memory address fragment!\n");
+                hal.console->printf("Could be buffer overrun or uninitialized memory\n");
+
+                // Try to decode what we're actually seeing
+                uint32_t seen_at_7 = buf[7] | (buf[8] << 8) | (buf[9] << 16);
+                uint32_t seen_at_10 = buf[10] | (buf[11] << 8) | (buf[12] << 16);
+                hal.console->printf("Value at offset 7: 0x%06lX, at offset 10: 0x%06lX\n",
+                                   (unsigned long)seen_at_7, (unsigned long)seen_at_10);
+            }
 
             // Log more of the message to understand the corruption pattern
             if (len > 10) {

@@ -28,3 +28,4 @@
   - These agents coordinate via SIGUSR1 signals - no manual intervention needed
 - Don't use --verbose on anything unless you really need it as it just burns tokens for no gain
 - UART2 is currently the GPS at 4800 baud
+- use the ESP or HAL debugging only, and if the ESP ensure that the tag is configured on in the ESP HAL debug code configuration.

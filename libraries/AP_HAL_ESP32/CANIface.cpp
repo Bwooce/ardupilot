@@ -244,11 +244,59 @@ void CANIface::rx_task(void *arg)
         }
 
         twai_message_t message;
-        // Use timeout instead of portMAX_DELAY to allow recovery after TWAI restart
-        esp_err_t rx_result = twai_receive(&message, pdMS_TO_TICKS(100));
+        // Try to receive with zero timeout first to drain any waiting messages
+        // If no messages, then wait with 1ms timeout
+        esp_err_t rx_result = twai_receive(&message, 0);
 
-        // Always reset watchdog after receive attempt (success or timeout)
-        esp_task_wdt_reset();
+        // If no message available immediately, wait a bit
+        if (rx_result == ESP_ERR_TIMEOUT) {
+            rx_result = twai_receive(&message, pdMS_TO_TICKS(1));
+        }
+
+        // Reset watchdog periodically, not on every iteration
+        static uint32_t last_wdt_reset = 0;
+        uint32_t now = xTaskGetTickCount();
+        if (now - last_wdt_reset > pdMS_TO_TICKS(100)) {
+            esp_task_wdt_reset();
+            last_wdt_reset = now;
+        }
+
+        // Check again if restart happened while we were blocked in receive
+        if (iface->restart_in_progress) {
+            // Discard any received message and wait for restart to complete
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // Check what TWAI received for GetNodeInfo responses
+        if (rx_result == ESP_OK && (message.flags & TWAI_MSG_FLAG_EXTD)) {
+            // Check if this looks like a GetNodeInfo response (service type 1)
+            if ((message.identifier & 0xFF80) == 0x0180) { // Service frame, type 1
+                bool is_response = ((message.identifier >> 15) & 1) == 0;
+                if (is_response) {
+                    uint8_t dest = (message.identifier >> 8) & 0x7F;
+                    uint8_t src = message.identifier & 0x7F;
+                    static uint32_t rx_resp_count = 0;
+                    rx_resp_count++;
+                    if (rx_resp_count <= 20) {
+                        ESP_LOGI("TWAI_RX", "Received GetNodeInfo response #%lu: TWAI ID=0x%08lX",
+                                 (unsigned long)rx_resp_count, (unsigned long)message.identifier);
+                        ESP_LOGI("TWAI_RX", "  From node %d to node %d",
+                                 src, dest);
+
+                        // Log first few data bytes
+                        if (message.data_length_code >= 4) {
+                            ESP_LOGI("TWAI_RX", "  Data: %02X %02X %02X %02X ... %02X",
+                                     message.data[0], message.data[1], message.data[2], message.data[3],
+                                     message.data[message.data_length_code - 1]);
+                        }
+                    }
+                }
+            }
+        }
+#endif
 
         if (rx_result != ESP_OK) {
             // Handle RX errors with enhanced detection
@@ -256,19 +304,10 @@ void CANIface::rx_task(void *arg)
                 // Normal timeout - no action needed
                 continue;
             } else if (rx_result == ESP_FAIL) {
-                // RX failure - check bus state
-                twai_status_info_t twai_status;
-                if (twai_get_status_info(&twai_status) == ESP_OK) {
-                    if (twai_status.state == TWAI_STATE_BUS_OFF) {
-                        CAN_DEBUG_ERROR("Bus-off detected during receive");
-                        iface->update_error_stats(0x01); // Bus-off error
-                    } else if (twai_status.state == TWAI_STATE_STOPPED) {
-                        CAN_DEBUG_ERROR("TWAI stopped unexpectedly");
-                        iface->update_error_stats(0x02); // Stopped error
-                    }
-                }
+                // RX failure - update stats without logging in hot path
+                iface->update_error_stats(0x03); // RX fail error
             } else {
-                // Other RX errors
+                // Other RX errors - just update stats
                 iface->update_error_stats(rx_result);
             }
             continue;
@@ -315,9 +354,12 @@ void CANIface::rx_task(void *arg)
         rx_item.flags = 0;
         
         // Check if this is a self-transmitted frame
+        // Use hash of CAN ID to start search for better cache locality
         bool is_self_tx = false;
         bool loopback_requested = false;
-        for (uint8_t i = 0; i < TX_TRACKER_SIZE; i++) {
+        uint8_t start_idx = (message.identifier & 0xFF) % TX_TRACKER_SIZE;
+        for (uint8_t j = 0; j < TX_TRACKER_SIZE; j++) {
+            uint8_t i = (start_idx + j) % TX_TRACKER_SIZE;
             if (iface->tx_tracker[i].can_id == message.identifier &&
                 iface->tx_tracker[i].timestamp_us != 0) {
                 is_self_tx = true;
@@ -328,9 +370,7 @@ void CANIface::rx_task(void *arg)
         }
 
         if (is_self_tx && !loopback_requested) {
-            // Self-transmitted frame without loopback - drop it
-            ESP_LOGW("CAN_RX", "SELF-TX detected! Dropping frame ID=0x%08X",
-                     (unsigned)message.identifier);
+            // Self-transmitted frame without loopback - drop it silently
             continue;
         }
         
@@ -342,12 +382,8 @@ void CANIface::rx_task(void *arg)
         iface->update_rx_stats();
 
         if (!iface->add_to_rx_queue(rx_item)) {
-            // Queue full - frame dropped
-            static uint32_t drop_count = 0;
-            drop_count++;
-            if ((drop_count % 100) == 1) {  // Log every 100 drops to avoid spam
-                ESP_LOGW("CAN_RX", "RX queue full! Dropped %lu frames", (unsigned long)drop_count);
-            }
+            // Queue full - frame dropped silently to avoid slowing down RX
+            iface->update_error_stats(0x04); // Queue full error
         }
     }
 }
@@ -464,8 +500,52 @@ void CANIface::tx_task(void *arg)
         // Single transmission attempt for DroneCAN compliance
         // DroneCAN handles reliability at protocol layer, HAL retries violate timing assumptions
         const TickType_t timeout_ms = 10; // Allow sufficient time for transmission
-        
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // Check if this is a GetNodeInfo response and log what we're sending
+        if ((message.flags & TWAI_MSG_FLAG_EXTD) &&
+            ((message.identifier & 0xFF80) == 0x0180)) { // Service frame, type 1
+            bool is_response = ((message.identifier >> 15) & 1) == 0;
+            if (is_response) {
+                uint8_t dest = (message.identifier >> 8) & 0x7F;
+                uint8_t src = message.identifier & 0x7F;
+                static uint32_t resp_count = 0;
+                resp_count++;
+                if (resp_count <= 20) {
+                    ESP_LOGI("TWAI_TX", "Sending GetNodeInfo response #%lu: CAN ID=0x%08lX",
+                             (unsigned long)resp_count, (unsigned long)message.identifier);
+                    ESP_LOGI("TWAI_TX", "  From node %d to node %d", src, dest);
+
+                    // Log the actual bytes being sent to TWAI
+                    ESP_LOGI("TWAI_TX", "  TWAI msg: id=0x%08lX, flags=0x%02X, dlc=%d",
+                             (unsigned long)message.identifier, message.flags, message.data_length_code);
+                }
+            }
+        }
+#endif
+
+        // Special debug for GetNodeInfo responses
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        if ((message.identifier & 0xFF80) == 0x0180 && ((message.identifier >> 15) & 1) == 0) {
+            uint8_t dest_before = (message.identifier >> 8) & 0x7F;
+            ESP_LOGW("TWAI_BUG", "About to transmit GetNodeInfo response to node %d, ID=0x%08lX",
+                     dest_before, (unsigned long)message.identifier);
+        }
+#endif
+
         esp_err_t result = twai_transmit(&message, pdMS_TO_TICKS(timeout_ms));
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        if ((message.identifier & 0xFF80) == 0x0180 && ((message.identifier >> 15) & 1) == 0) {
+            uint8_t dest_after = (message.identifier >> 8) & 0x7F;
+            ESP_LOGW("TWAI_BUG", "After transmit GetNodeInfo response: dest=%d, result=%d",
+                     dest_after, result);
+            // Check if TWAI modified the message
+            if (dest_after != ((message.identifier >> 8) & 0x7F)) {
+                ESP_LOGE("TWAI_BUG", "TWAI MODIFIED THE CAN ID DURING TRANSMISSION!");
+            }
+        }
+#endif
         
         if (result == ESP_OK) {
             // Track for self-reception filtering
@@ -587,10 +667,14 @@ void CANIface::tx_task(void *arg)
                                 CAN_DEBUG_ERROR("Failed to restart TWAI: %d", start_res);
                             }
                         } else if (diagnostic_status.state == TWAI_STATE_BUS_OFF) {
-                            // Need recovery
-                            CAN_DEBUG_INFO("TWAI is BUS_OFF, initiating recovery (attempt %lu)",
+                            // Need recovery - but let it recover naturally first
+                            CAN_DEBUG_INFO("TWAI is BUS_OFF, waiting for auto-recovery (attempt %lu)",
                                           (unsigned long)consecutive_failures);
-                            twai_initiate_recovery();
+                            // Don't call twai_initiate_recovery() immediately - let TWAI handle it
+                            // Only force recovery after multiple attempts
+                            if (consecutive_failures > 3) {
+                                twai_initiate_recovery();
+                            }
                         } else if (diagnostic_status.state == TWAI_STATE_RECOVERING) {
                             // Already recovering, just wait
                             CAN_DEBUG_INFO("TWAI is RECOVERING, waiting...");
@@ -954,8 +1038,9 @@ void CANIface::attempt_driver_restart()
     restart_in_progress = true;
 
     // Give RX/TX tasks time to see the flag and exit any blocking calls
+    // The RX timeout is 100ms, so wait at least that long
     // Feed watchdog during this delay
-    hal.scheduler->delay(150); // 150ms to ensure RX task sees timeout, with watchdog feeding
+    hal.scheduler->delay(200); // 200ms to ensure RX task sees timeout and checks flag, with watchdog feeding
 
     // Now attempt to stop TWAI - use non-blocking approach
     esp_err_t result = ESP_OK;
@@ -972,6 +1057,8 @@ void CANIface::attempt_driver_restart()
             if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) {
                 CAN_DEBUG_WARN("TWAI stop failed (error %d), forcing uninstall", result);
             }
+            // Give driver time to fully stop
+            hal.scheduler->delay(50); // Allow TWAI to fully stop
         }
     }
 

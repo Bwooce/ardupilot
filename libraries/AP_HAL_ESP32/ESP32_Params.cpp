@@ -136,6 +136,10 @@ void ESP32Params::apply_log_level() {
     esp_log_level_set("CANARD", ESP_LOG_ERROR);    // Only critical Canard errors
     esp_log_level_set("DNA_SERVER", ESP_LOG_ERROR); // Only critical DNA errors
     esp_log_level_set("DNA_HEX", ESP_LOG_INFO); // Enable DNA hex debugging for manual decode
+    esp_log_level_set("TWAI_RX", ESP_LOG_INFO);    // TWAI receive debugging
+    esp_log_level_set("TWAI_TX", ESP_LOG_INFO);    // TWAI transmit debugging
+    esp_log_level_set("TWAI_BUG", ESP_LOG_INFO);   // TWAI bug detection
+    esp_log_level_set("GETNODEINFO", ESP_LOG_INFO); // GetNodeInfo multi-frame debugging
 
     // Note: eFuse MAC_CUSTOM error was fixed by skipping custom MAC check in Util.cpp
     

@@ -589,6 +589,21 @@ bool IRAM_ATTR Scheduler::in_main_thread() const
     return _main_task_handle == xTaskGetCurrentTaskHandle();
 }
 
+// disable interrupts and save state for later restoration
+void* Scheduler::disable_interrupts_save(void)
+{
+    // Use FreeRTOS critical section which disables interrupts
+    // and returns the interrupt mask to restore later
+    return (void*)(uintptr_t)portSET_INTERRUPT_MASK_FROM_ISR();
+}
+
+// restore interrupt state from disable_interrupts_save()
+void Scheduler::restore_interrupts(void* state)
+{
+    // Restore the interrupt mask that was saved
+    portCLEAR_INTERRUPT_MASK_FROM_ISR((UBaseType_t)(uintptr_t)state);
+}
+
 void Scheduler::watchdog_pat()
 {
     // Pat the watchdog timer for the current thread
