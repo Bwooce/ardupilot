@@ -153,7 +153,7 @@ void GCS_FTP::Session::push_reply(Transaction &reply)
     }
 
     if (reply.req_opcode == FTP_OP::TerminateSession) {
-        ftp.last_send_ms = 0;
+        ftp->last_send_ms = 0;
     }
     /*
       provide same banner we would give with old param download
@@ -161,8 +161,8 @@ void GCS_FTP::Session::push_reply(Transaction &reply)
       on slow links to avoid GCS timeout.  The slowdown of normal streams in
       get_reschedule_interval_ms() should help for subsequent responses.
     */
-    if (ftp.need_banner_send_mask & (1U<<reply.chan)) {
-        ftp.need_banner_send_mask &= ~(1U<<reply.chan);
+    if (ftp->need_banner_send_mask & (1U<<reply.chan)) {
+        ftp->need_banner_send_mask &= ~(1U<<reply.chan);
         send_banner();
     }
 }
@@ -175,7 +175,7 @@ void GCS_MAVLINK::ftp_worker(void) {
     while (true) {
         bool skip_push_reply = false;
 
-        while (ftp.requests == nullptr || !ftp.requests->pop(request)) {
+        while (ftp->requests == nullptr || !ftp->requests->pop(request)) {
             // nothing to handle, delay ourselves a bit then check again. Ideally we'd use conditional waits here
             hal.scheduler->delay(2);
         }
@@ -206,25 +206,25 @@ void GCS_MAVLINK::ftp_worker(void) {
         uint32_t now = AP_HAL::millis();
 
         // check for session termination
-        if (request.session != ftp.current_session &&
+        if (request.session != ftp->current_session &&
             (request.opcode == FTP_OP::TerminateSession || request.opcode == FTP_OP::ResetSessions)) {
             // terminating a different session, just ack
             reply.opcode = FTP_OP::Ack;
-        } else if (ftp.fd != -1 && request.session != ftp.current_session &&
-                   now - ftp.last_send_ms < FTP_SESSION_TIMEOUT) {
+        } else if (ftp->fd != -1 && request.session != ftp->current_session &&
+                   now - ftp->last_send_ms < FTP_SESSION_TIMEOUT) {
             // if we have an open file and the session isn't right
             // then reject. This prevents IO on the wrong file
             ftp_error(reply, FTP_ERROR::InvalidSession);
         } else {
-            if (ftp.fd != -1 &&
-                request.session != ftp.current_session &&
-                now - ftp.last_send_ms >= FTP_SESSION_TIMEOUT) {
+            if (ftp->fd != -1 &&
+                request.session != ftp->current_session &&
+                now - ftp->last_send_ms >= FTP_SESSION_TIMEOUT) {
                 // if a new session appears and the old session has
                 // been idle for more than the timeout then force
                 // close the old session
-                AP::FS().close(ftp.fd);
-                ftp.fd = -1;
-                ftp.current_session = -1;
+                AP::FS().close(ftp->fd);
+                ftp->fd = -1;
+                ftp->current_session = -1;
             }
             // dispatch the command as needed
             switch (request.opcode) {
@@ -235,7 +235,7 @@ void GCS_MAVLINK::ftp_worker(void) {
                 case FTP_OP::ResetSessions:
                     // Handle session termination for different file modes
                     #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-                    if (ftp.mode == FTP_FILE_MODE::OTA_Write) {
+                    if (ftp->mode == FTP_FILE_MODE::OTA_Write) {
                         // Complete ESP32 OTA update and reboot
                         if (!esp32_ota_end()) {
                             ftp_error(reply, FTP_ERROR::Fail);
@@ -243,14 +243,14 @@ void GCS_MAVLINK::ftp_worker(void) {
                         }
                         // esp32_ota_end() reboots the system, so this won't be reached
                         // but handle it gracefully anyway
-                        ftp.mode = FTP_FILE_MODE::Write;  // reset mode
+                        ftp->mode = FTP_FILE_MODE::Write;  // reset mode
                     } else
                     #endif
-                    if (ftp.fd != -1) {
-                        AP::FS().close(ftp.fd);
-                        ftp.fd = -1;
+                    if (ftp->fd != -1) {
+                        AP::FS().close(ftp->fd);
+                        ftp->fd = -1;
                     }
-                    ftp.current_session = -1;
+                    ftp->current_session = -1;
                     reply.opcode = FTP_OP::Ack;
                     break;
                 case FTP_OP::ListDirectory:
@@ -259,15 +259,15 @@ void GCS_MAVLINK::ftp_worker(void) {
                 case FTP_OP::OpenFileRO:
                     {
                         // only allow one file to be open per session
-                        if (ftp.fd != -1 && now - ftp.last_send_ms > FTP_SESSION_TIMEOUT) {
+                        if (ftp->fd != -1 && now - ftp->last_send_ms > FTP_SESSION_TIMEOUT) {
                             // no activity for 3s, assume client has
                             // timed out receiving open reply, close
                             // the file
-                            AP::FS().close(ftp.fd);
-                            ftp.fd = -1;
-                            ftp.current_session = -1;
+                            AP::FS().close(ftp->fd);
+                            ftp->fd = -1;
+                            ftp->current_session = -1;
                         }
-                        if (ftp.fd != -1) {
+                        if (ftp->fd != -1) {
                             ftp_error(reply, FTP_ERROR::Fail);
                             break;
                         }
@@ -289,13 +289,13 @@ void GCS_MAVLINK::ftp_worker(void) {
                         const size_t file_size = st.st_size;
 
                         // actually open the file
-                        ftp.fd = AP::FS().open((char *)request.data, O_RDONLY);
-                        if (ftp.fd == -1) {
+                        ftp->fd = AP::FS().open((char *)request.data, O_RDONLY);
+                        if (ftp->fd == -1) {
                             ftp_error(reply, FTP_ERROR::FailErrno);
                             break;
                         }
-                        ftp.mode = FTP_FILE_MODE::Read;
-                        ftp.current_session = request.session;
+                        ftp->mode = FTP_FILE_MODE::Read;
+                        ftp->current_session = request.session;
 
                         reply.opcode = FTP_OP::Ack;
                         reply.size = sizeof(uint32_t);
@@ -303,32 +303,32 @@ void GCS_MAVLINK::ftp_worker(void) {
 
                         // provide compatibility with old protocol banner download
                         if (strncmp((const char *)request.data, "@PARAM/param.pck", 16) == 0) {
-                            ftp.need_banner_send_mask |= 1U<<reply.chan;
+                            ftp->need_banner_send_mask |= 1U<<reply.chan;
                         }
                         break;
                     }
                 case FTP_OP::ReadFile:
                     {
                         // must actually be working on a file
-                        if (ftp.fd == -1) {
+                        if (ftp->fd == -1) {
                             ftp_error(reply, FTP_ERROR::FileNotFound);
                             break;
                         }
 
                         // must have the file in read mode
-                        if ((ftp.mode != FTP_FILE_MODE::Read)) {
+                        if ((ftp->mode != FTP_FILE_MODE::Read)) {
                             ftp_error(reply, FTP_ERROR::Fail);
                             break;
                         }
 
                         // seek to requested offset
-                        if (AP::FS().lseek(ftp.fd, request.offset, SEEK_SET) == -1) {
+                        if (AP::FS().lseek(ftp->fd, request.offset, SEEK_SET) == -1) {
                             ftp_error(reply, FTP_ERROR::FailErrno);
                             break;
                         }
 
                         // fill the buffer
-                        const ssize_t read_bytes = AP::FS().read(ftp.fd, reply.data, MIN(sizeof(reply.data),request.size));
+                        const ssize_t read_bytes = AP::FS().read(ftp->fd, reply.data, MIN(sizeof(reply.data),request.size));
                         if (read_bytes == -1) {
                             ftp_error(reply, FTP_ERROR::FailErrno);
                             break;
@@ -352,7 +352,7 @@ void GCS_MAVLINK::ftp_worker(void) {
                 case FTP_OP::CreateFile:
                     {
                         // only allow one file to be open per session
-                        if (ftp.fd != -1) {
+                        if (ftp->fd != -1) {
                             ftp_error(reply, FTP_ERROR::Fail);
                             break;
                         }
@@ -378,8 +378,8 @@ void GCS_MAVLINK::ftp_worker(void) {
                                 ftp_error(reply, FTP_ERROR::Fail);
                                 break;
                             }
-                            ftp.mode = FTP_FILE_MODE::OTA_Write;  // ArduPilot-internal routing
-                            ftp.current_session = request.session;
+                            ftp->mode = FTP_FILE_MODE::OTA_Write;  // ArduPilot-internal routing
+                            ftp->current_session = request.session;
                             
                             reply.opcode = FTP_OP::Ack;
                             break;
@@ -387,14 +387,14 @@ void GCS_MAVLINK::ftp_worker(void) {
                         #endif
 
                         // Normal filesystem path
-                        ftp.fd = AP::FS().open((char *)request.data,
+                        ftp->fd = AP::FS().open((char *)request.data,
                                                (request.opcode == FTP_OP::CreateFile) ? O_WRONLY|O_CREAT|O_TRUNC : O_WRONLY);
-                        if (ftp.fd == -1) {
+                        if (ftp->fd == -1) {
                             ftp_error(reply, FTP_ERROR::FailErrno);
                             break;
                         }
-                        ftp.mode = FTP_FILE_MODE::Write;
-                        ftp.current_session = request.session;
+                        ftp->mode = FTP_FILE_MODE::Write;
+                        ftp->current_session = request.session;
 
                         reply.opcode = FTP_OP::Ack;
                         break;
@@ -402,7 +402,7 @@ void GCS_MAVLINK::ftp_worker(void) {
                 case FTP_OP::WriteFile:
                     {
                         #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-                        if (ftp.mode == FTP_FILE_MODE::OTA_Write) {
+                        if (ftp->mode == FTP_FILE_MODE::OTA_Write) {
                             // Write to ESP32 OTA partition instead of filesystem
                             if (!esp32_ota_write(request.data, request.size, request.offset)) {
                                 ftp_error(reply, FTP_ERROR::Fail);
@@ -416,25 +416,25 @@ void GCS_MAVLINK::ftp_worker(void) {
 
                         // Normal filesystem write path
                         // must actually be working on a file
-                        if (ftp.fd == -1) {
+                        if (ftp->fd == -1) {
                             ftp_error(reply, FTP_ERROR::FileNotFound);
                             break;
                         }
 
                         // must have the file in write mode
-                        if ((ftp.mode != FTP_FILE_MODE::Write)) {
+                        if ((ftp->mode != FTP_FILE_MODE::Write)) {
                             ftp_error(reply, FTP_ERROR::Fail);
                             break;
                         }
 
                         // seek to requested offset
-                        if (AP::FS().lseek(ftp.fd, request.offset, SEEK_SET) == -1) {
+                        if (AP::FS().lseek(ftp->fd, request.offset, SEEK_SET) == -1) {
                             ftp_error(reply, FTP_ERROR::FailErrno);
                             break;
                         }
 
                         // fill the buffer
-                        const ssize_t write_bytes = AP::FS().write(ftp.fd, request.data, request.size);
+                        const ssize_t write_bytes = AP::FS().write(ftp->fd, request.data, request.size);
                         if (write_bytes == -1) {
                             ftp_error(reply, FTP_ERROR::FailErrno);
                             break;
@@ -510,19 +510,19 @@ void GCS_MAVLINK::ftp_worker(void) {
                     {
                         const uint16_t max_read = (request.size == 0?sizeof(reply.data):request.size);
                         // must actually be working on a file
-                        if (ftp.fd == -1) {
+                        if (ftp->fd == -1) {
                             ftp_error(reply, FTP_ERROR::FileNotFound);
                             break;
                         }
 
                         // must have the file in read mode
-                        if ((ftp.mode != FTP_FILE_MODE::Read)) {
+                        if ((ftp->mode != FTP_FILE_MODE::Read)) {
                             ftp_error(reply, FTP_ERROR::Fail);
                             break;
                         }
 
                         // seek to requested offset
-                        if (AP::FS().lseek(ftp.fd, request.offset, SEEK_SET) == -1) {
+                        if (AP::FS().lseek(ftp->fd, request.offset, SEEK_SET) == -1) {
                             ftp_error(reply, FTP_ERROR::FailErrno);
                             break;
                         }
@@ -549,7 +549,7 @@ void GCS_MAVLINK::ftp_worker(void) {
                         const uint32_t transfer_size = 500;
                         for (uint32_t i = 0; (i < transfer_size); i++) {
                             // fill the buffer
-                            const ssize_t read_bytes = AP::FS().read(ftp.fd, reply.data, MIN(sizeof(reply.data), max_read));
+                            const ssize_t read_bytes = AP::FS().read(ftp->fd, reply.data, MIN(sizeof(reply.data), max_read));
                             if (read_bytes == -1) {
                                 ftp_error(reply, FTP_ERROR::FailErrno);
                                 break;
