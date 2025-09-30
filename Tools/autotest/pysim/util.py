@@ -425,6 +425,7 @@ def start_SITL(binary,
                disable_breakpoints=False,
                customisations=[],
                lldb=False,
+               strace=False,
                enable_fgview=False,
                supplementary=False,
                stdout_prefix=None,
@@ -489,6 +490,10 @@ def start_SITL(binary,
                         '-m',
                         '-S', 'ardupilot-gdb',
                         'gdb', '--cd', os.getcwd(), '-x', '/tmp/x.gdb', binary, '--args'])
+    elif strace:
+        cmd.append("strace")
+        strace_options = ['-f', '-o', binary + '.strace', '-s', '8000', '-ttt']
+        cmd.extend(strace_options)
     elif lldb:
         f = open("/tmp/x.lldb", "w")
         for breakingpoint in breakpoints:
@@ -813,23 +818,17 @@ def constrain(value, minv, maxv):
 def load_local_module(fname):
     """load a python module from within the ardupilot tree"""
     fname = os.path.join(topdir(), fname)
-    if sys.version_info.major >= 3:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("local_module", fname)
-        ret = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(ret)
-    else:
-        import imp
-        ret = imp.load_source("local_module", fname)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("local_module", fname)
+    ret = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ret)
     return ret
 
 
 def get_git_hash(short=False):
     short_v = "--short=8 " if short else ""
     githash = run_cmd(f'git rev-parse {short_v}HEAD', output=True, directory=reltopdir('.')).strip()
-    if sys.version_info.major >= 3:
-        githash = githash.decode('utf-8')
-    return githash
+    return githash.decode('utf-8')
 
 
 if __name__ == "__main__":

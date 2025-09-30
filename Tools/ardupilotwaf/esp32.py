@@ -15,12 +15,25 @@ from collections import OrderedDict
 import os
 import shutil
 import sys
+import traceback
 import re
 import pickle
 import subprocess
 
+import hal_common
+
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../libraries/AP_HAL_ESP32/hwdef/scripts'))
-import esp32_hwdef
+import esp32_hwdef  # noqa:501
+
+@feature('esp32_ap_library', 'esp32_ap_program')
+@before_method('process_source')
+def esp32_dynamic_env(self):
+    hal_common.common_dynamic_env(self)
+
+
+def load_env_vars(env):
+    '''optionally load extra environment variables from env.py in the build directory'''
+    hal_common.load_env_vars(env)
 
 def configure(cfg):
     bldnode = cfg.bldnode.make_node(cfg.variant)
@@ -84,13 +97,13 @@ def configure(cfg):
 
     # setup cmake
     cfg.env['IDF_TARGET'] = mcu
-    
-    # Process hwdef files to generate board-specific configuration
+
+    # Process hwdef files to generate board-specific configuration with upstream error handling
     board_name = getattr(cfg.options, 'board', '').replace('esp32', '')
     if board_name:
         hwdef_dir = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/hwdef/{cfg.options.board}')
         hwdef_file = os.path.join(hwdef_dir, 'hwdef.dat')
-        
+
         if os.path.exists(hwdef_file):
             # Run the ESP32 hwdef processor
             hwdef_script = os.path.join(cfg.srcnode.abspath(), 'libraries/AP_HAL_ESP32/hwdef/scripts/esp32_hwdef.py')
@@ -103,28 +116,35 @@ def configure(cfg):
                     subprocess.run(cmd, check=True, cwd=cfg.srcnode.abspath())
                 except subprocess.CalledProcessError as e:
                     cfg.fatal(f"hwdef processing failed: {e}")
-    
+
+    # Also try upstream hwdef generation method for completeness
+    try:
+        generate_hwdef_h(env)
+    except Exception as e:
+        print(get_exception_stacktrace(e))
+        cfg.fatal("Failed to generate hwdef")
+
     # Build list of sdkconfig.defaults files: target-level + debug (if --debug) + board-level (if exists)
     target_sdkconfig = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/targets/{mcu.lower()}/esp-idf/sdkconfig.defaults')
     debug_sdkconfig = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/targets/{mcu.lower()}/esp-idf/sdkconfig.debug')
     board_sdkconfig = os.path.join(cfg.bldnode.abspath(), 'sdkconfig.board')
-    
+
     # Check if we need to include debug configuration
     include_debug = cfg.options.debug and os.path.exists(debug_sdkconfig)
-    
+
     sdkconfig_list = [target_sdkconfig]
     if os.path.exists(board_sdkconfig) or include_debug:
         # Create a combined sdkconfig.defaults that includes target, debug (if applicable), and board configs
         combined_sdkconfig = os.path.join(cfg.bldnode.abspath(), 'sdkconfig.combined')
         print(f"Creating combined ESP-IDF config: {combined_sdkconfig}")
-        
+
         with open(combined_sdkconfig, 'w') as combined_file:
             # Include target-level configuration
             with open(target_sdkconfig, 'r') as target_file:
                 combined_file.write(f"# Target-level configuration from {target_sdkconfig}\n")
                 combined_file.write(target_file.read())
                 combined_file.write("\n")
-            
+
             # Include debug configuration if --debug was specified
             if include_debug:
                 with open(debug_sdkconfig, 'r') as debug_file:
@@ -132,13 +152,13 @@ def configure(cfg):
                     combined_file.write(debug_file.read())
                     combined_file.write("\n")
                 print(f"Including ESP32 debug config with stack protection")
-            
+
             # Include board-specific configuration
             if os.path.exists(board_sdkconfig):
                 with open(board_sdkconfig, 'r') as board_file:
                     combined_file.write(f"# Board-specific configuration from {board_sdkconfig}\n")
                     combined_file.write(board_file.read())
-        
+
         cfg.env['ESP_IDF_SDKCONFIG_DEFAULTS'] = combined_sdkconfig
         print(f"Using combined ESP-IDF config: {combined_sdkconfig}")
     else:
@@ -146,6 +166,35 @@ def configure(cfg):
     cfg.env['PROJECT_DIR'] = cfg.bldnode.abspath()
     cfg.env['SDKCONFIG'] = os.path.join(cfg.bldnode.abspath(), 'esp-idf_build/sdkconfig')
     cfg.env['PYTHON'] = cfg.env.get_flat('PYTHON')
+
+    load_env_vars(cfg.env)
+
+def get_exception_stacktrace(e):
+    ret = "%s\n" % e
+    ret += ''.join(traceback.format_exception(type(e),
+                                              e,
+                                              tb=e.__traceback__))
+    return ret
+
+def generate_hwdef_h(env):
+    '''run esp32_hwdef.py'''
+    hwdef_dir = os.path.join(env.SRCROOT, 'libraries/AP_HAL_ESP32/hwdef')
+
+    if len(env.HWDEF) == 0:
+        env.HWDEF = os.path.join(hwdef_dir, env.BOARD, 'hwdef.dat')
+    hwdef_out = env.BUILDROOT
+    if not os.path.exists(hwdef_out):
+        os.mkdir(hwdef_out)
+    hwdef = [env.HWDEF]
+    if env.HWDEF_EXTRA:
+        hwdef.append(env.HWDEF_EXTRA)
+    eh = esp32_hwdef.ESP32HWDef(
+        outdir=hwdef_out,
+        hwdef=hwdef,
+        quiet=False,
+    )
+    eh.run()
+>>>>>>> upstream/master
 
 # delete the output sdkconfig file when the input defaults changes. we take the
 # stamp as the output so we can compute the path to the sdkconfig, yet it
@@ -211,6 +260,28 @@ def pre_build(self):
     tsk.set_inputs(self.path.find_resource('esp-idf_build/includes.list'))
     self.add_to_group(tsk)
 
+    # hwdef pre-build:
+    load_env_vars(self.env)
+#    if bld.env.HAL_NUM_CAN_IFACES:
+#        bld.get_board().with_can = True
+    hwdef_h = os.path.join(self.env.BUILDROOT, 'hwdef.h')
+    if not os.path.exists(hwdef_h):
+        print("Generating hwdef.h")
+        try:
+            generate_hwdef_h(self.env)
+        except Exception:
+            self.fatal(f"Failed to process hwdef.dat {hwdef_h}")
+
+def build(bld):
+    bld(
+        # build hwdef.h from hwdef.dat. This is needed after a waf clean
+        source=bld.path.ant_glob(bld.env.HWDEF),
+        rule="",
+        group='dynamic_sources',
+        target=[
+            bld.bldnode.find_or_declare('hwdef.h'),
+        ]
+    )
 
 @feature('esp32_ap_program')
 @after_method('process_source')

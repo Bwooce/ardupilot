@@ -349,10 +349,10 @@ void AC_PrecLand::check_target_status(float rangefinder_alt_m, bool rangefinder_
 
     if (_current_target_state == TargetState::TARGET_RECENTLY_LOST) {
         // check if it's nearby/found recently, else the status will be demoted to "TARGET_LOST"
-        Vector2f curr_pos;
-        if (AP::ahrs().get_relative_position_NE_origin_float(curr_pos)) {
-            const float dist_to_last_target_loc_xy = (curr_pos - Vector2f{_last_target_pos_rel_origin_NED.x, _last_target_pos_rel_origin_NED.y}).length();
-            const float dist_to_last_loc_xy = (curr_pos - Vector2f{_last_vehicle_pos_NED.x, _last_vehicle_pos_NED.y}).length();
+        Vector2p curr_pos;
+        if (AP::ahrs().get_relative_position_NE_origin(curr_pos)) {
+            const float dist_to_last_target_loc_xy = (curr_pos - _last_target_pos_rel_origin_NED.xy()).length();
+            const float dist_to_last_loc_xy = (curr_pos - _last_vehicle_pos_NED.xy()).length();
             if ((AP_HAL::millis() - _last_valid_target_ms) > LANDING_TARGET_LOST_TIMEOUT_MS) {
                 // the target has not been seen for a long time
                 // might as well consider it as "never seen"
@@ -414,70 +414,70 @@ bool AC_PrecLand::target_acquired()
 }
 
 // returns target position relative to the EKF origin
-bool AC_PrecLand::get_target_position_cm(Vector2f& ret)
+bool AC_PrecLand::get_target_position_m(Vector2p& ret)
 {
     if (!target_acquired()) {
         return false;
     }
-    Vector2f curr_pos;
-    if (!AP::ahrs().get_relative_position_NE_origin_float(curr_pos)) {
+    Vector2p curr_pos;
+    if (!AP::ahrs().get_relative_position_NE_origin(curr_pos)) {
         return false;
     }
-    ret.x = (_target_pos_rel_out_NE.x + curr_pos.x) * 100.0f;   // m to cm
-    ret.y = (_target_pos_rel_out_NE.y + curr_pos.y) * 100.0f;   // m to cm
+    ret.x = (_target_pos_rel_out_NE.x + curr_pos.x);
+    ret.y = (_target_pos_rel_out_NE.y + curr_pos.y);
     return true;
 }
 
 // returns target relative position as 3D vector
-void AC_PrecLand::get_target_position_measurement_cm(Vector3f& ret)
+void AC_PrecLand::get_target_position_measurement_m(Vector3f& ret)
 {
-    ret = _target_pos_rel_meas_NED*100.0f;
+    ret = _target_pos_rel_meas_NED;
     return;
 }
 
 // returns target position relative to vehicle
-bool AC_PrecLand::get_target_position_relative_cm(Vector2f& ret)
+bool AC_PrecLand::get_target_position_relative_m(Vector2f& ret)
 {
     if (!target_acquired()) {
         return false;
     }
-    ret = _target_pos_rel_out_NE*100.0f;
+    ret = _target_pos_rel_out_NE;
     return true;
 }
 
 // returns target velocity relative to vehicle
-bool AC_PrecLand::get_target_velocity_relative_cms(Vector2f& ret)
+bool AC_PrecLand::get_target_velocity_relative_ms(Vector2f& ret)
 {
     if (!target_acquired()) {
         return false;
     }
-    ret = _target_vel_rel_out_NE*100.0f;
+    ret = _target_vel_rel_out_NE;
     return true;
 }
 
 // get the absolute velocity of the vehicle
-void AC_PrecLand::get_target_velocity_cms(const Vector2f& vehicle_velocity_cms, Vector2f& target_vel_cms)
+void AC_PrecLand::get_target_velocity_ms(const Vector2f& vehicle_velocity_ms, Vector2f& target_vel_ms)
 {
     if (!(_options & PLND_OPTION_MOVING_TARGET)) {
         // the target should not be moving
-        target_vel_cms.zero();
+        target_vel_ms.zero();
         return;
     }
     if ((EstimatorType)_estimator_type.get() == EstimatorType::RAW_SENSOR) {
         // We do not predict the velocity of the target in this case
         // assume velocity to be zero
-        target_vel_cms.zero();
+        target_vel_ms.zero();
         return;
     }
-    Vector2f target_vel_rel_cms;
-    if (!get_target_velocity_relative_cms(target_vel_rel_cms)) {
+    Vector2f target_vel_rel_ms;
+    if (!get_target_velocity_relative_ms(target_vel_rel_ms)) {
         // Don't know where the target is
         // assume velocity to be zero
-        target_vel_cms.zero();
+        target_vel_ms.zero();
         return;
     }
     // return the absolute velocity
-    target_vel_cms  = target_vel_rel_cms + vehicle_velocity_cms;
+    target_vel_ms  = target_vel_rel_ms + vehicle_velocity_ms;
 }
 
 // handle_msg - Process a LANDING_TARGET mavlink message
@@ -705,8 +705,8 @@ bool AC_PrecLand::construct_pos_meas_using_rangefinder(float rangefinder_alt_m, 
 
             // store the current relative down position so that if we need to retry landing, we know at this height landing target can be found
             const AP_AHRS &_ahrs = AP::ahrs();
-            Vector3f pos_NED;
-            if (_ahrs.get_relative_position_NED_origin_float(pos_NED)) {
+            Vector3p pos_NED;
+            if (_ahrs.get_relative_position_NED_origin(pos_NED)) {
                 _last_target_pos_rel_origin_NED.z = pos_NED.z;
                 _last_vehicle_pos_NED = pos_NED;
             }
@@ -761,10 +761,10 @@ void AC_PrecLand::run_output_prediction()
     _target_pos_rel_out_NE.y += land_ofs_ned_m.y;
 
     // store the landing target as a offset from current position. This is used in landing retry
-    Vector2f last_target_loc_rel_origin_2d;
-    get_target_position_cm(last_target_loc_rel_origin_2d);
-    _last_target_pos_rel_origin_NED.x = last_target_loc_rel_origin_2d.x * 0.01f;
-    _last_target_pos_rel_origin_NED.y = last_target_loc_rel_origin_2d.y * 0.01f;
+    Vector2p last_target_loc_rel_origin_ne_m;
+    get_target_position_m(last_target_loc_rel_origin_ne_m);
+    _last_target_pos_rel_origin_NED.x = last_target_loc_rel_origin_ne_m.x;
+    _last_target_pos_rel_origin_NED.y = last_target_loc_rel_origin_ne_m.y;
 
     // record the last time there was a target output
     _last_valid_target_ms = AP_HAL::millis();
@@ -783,7 +783,7 @@ bool AC_PrecLand::get_target_location(Location &loc)
         return false;
     }
     loc.offset(_last_target_pos_rel_origin_NED.x, _last_target_pos_rel_origin_NED.y);
-    loc.alt -= _last_target_pos_rel_origin_NED.z*100;
+    loc.offset_up_m(-_last_target_pos_rel_origin_NED.z);
     return true;
 }
 
@@ -800,12 +800,12 @@ bool AC_PrecLand::get_target_velocity(Vector2f& target_vel)
     if ((EstimatorType)_estimator_type.get() == EstimatorType::RAW_SENSOR) {
         return false;
     }
-    Vector2f target_vel_rel_cms;
-    if (!get_target_velocity_relative_cms(target_vel_rel_cms)) {
+    Vector2f target_vel_rel_ms;
+    if (!get_target_velocity_relative_ms(target_vel_rel_ms)) {
         return false;
     }
     // return the absolute velocity
-    target_vel = (target_vel_rel_cms*0.01) + _last_veh_velocity_NED_ms.xy();
+    target_vel = (target_vel_rel_ms) + _last_veh_velocity_NED_ms.xy();
     return true;
 }
 
@@ -818,25 +818,25 @@ void AC_PrecLand::Write_Precland()
         return;
     }
 
-    Vector3f target_pos_meas;
-    Vector2f target_pos_rel;
-    Vector2f target_vel_rel;
-    get_target_position_relative_cm(target_pos_rel);
-    get_target_velocity_relative_cms(target_vel_rel);
-    get_target_position_measurement_cm(target_pos_meas);
+    Vector2f target_pos_rel_neu_m;
+    Vector2f target_vel_rel_neu_ms;
+    Vector3f target_pos_meas_neu_m;
+    get_target_position_relative_m(target_pos_rel_neu_m);
+    get_target_velocity_relative_ms(target_vel_rel_neu_ms);
+    get_target_position_measurement_m(target_pos_meas_neu_m);
 
     const struct log_Precland pkt {
         LOG_PACKET_HEADER_INIT(LOG_PRECLAND_MSG),
         time_us         : AP_HAL::micros64(),
         healthy         : healthy(),
         target_acquired : target_acquired(),
-        pos_x           : target_pos_rel.x,
-        pos_y           : target_pos_rel.y,
-        vel_x           : target_vel_rel.x,
-        vel_y           : target_vel_rel.y,
-        meas_x          : target_pos_meas.x,
-        meas_y          : target_pos_meas.y,
-        meas_z          : target_pos_meas.z,
+        pos_x           : target_pos_rel_neu_m.x,
+        pos_y           : target_pos_rel_neu_m.y,
+        vel_x           : target_vel_rel_neu_ms.x,
+        vel_y           : target_vel_rel_neu_ms.y,
+        meas_x          : target_pos_meas_neu_m.x,
+        meas_y          : target_pos_meas_neu_m.y,
+        meas_z          : target_pos_meas_neu_m.z,
         last_meas       : last_backend_los_meas_ms(),
         ekf_outcount    : ekf_outlier_count(),
         estimator       : (uint8_t)_estimator_type

@@ -959,6 +959,8 @@ AP_Param::find(const char *name, enum ap_var_type *ptype, uint16_t *flags)
                     ap->find_var_info(&group_element, ginfo, group_nesting, &idx);
                     if (ginfo != nullptr) {
                         *flags = ginfo->flags;
+                    } else {
+                        *flags = 0;
                     }
                 }
                 return ap;
@@ -971,6 +973,9 @@ AP_Param::find(const char *name, enum ap_var_type *ptype, uint16_t *flags)
             ptrdiff_t base;
             if (!get_base(info, base)) {
                 return nullptr;
+            }
+            if (flags != nullptr) {
+                *flags = 0;
             }
             return (AP_Param *)base;
         }
@@ -2114,7 +2119,7 @@ void AP_Param::convert_old_parameters_scaled(const struct ConversionInfo *conver
 // is_top_level: Is true if the class had its own top level key, param_key. It is false if the class was a subgroup
 void AP_Param::convert_class(uint16_t param_key, void *object_pointer,
                                     const struct AP_Param::GroupInfo *group_info,
-                                    uint16_t old_index, bool is_top_level)
+                                    uint16_t old_index, bool is_top_level, bool recurse_sub_groups)
 {
     const uint8_t group_shift = is_top_level ? 0 : 6;
 
@@ -2128,6 +2133,15 @@ void AP_Param::convert_class(uint16_t param_key, void *object_pointer,
         if (group_shift != 0 && idx == 0) {
             // Note: Index 0 is treated as 63 for group bit shifting purposes. See group_id()
             idx = 63;
+        }
+
+        if (info.type == AP_PARAM_GROUP) {
+            // Convert subgroups if enabled
+            if (recurse_sub_groups) {
+                // Only recurse once
+                convert_class(param_key, (uint8_t *)object_pointer + group_info[i].offset, get_group_info(group_info[i]), idx, false, false);
+            }
+            continue;
         }
 
         info.old_group_element = (idx << group_shift) + old_index;
@@ -3166,22 +3180,23 @@ bool AP_Param::add_table(uint8_t _key, const char *prefix, uint8_t num_params)
             info.name = _empty_string;
             return false;
         }
-        // fill in footer for all entries
-        for (uint8_t gi=1; gi<num_params+2; gi++) {
-            auto &ginfo = const_cast<GroupInfo*>(info.group_info)[gi];
-            ginfo.name = _empty_string;
-            ginfo.idx = 0xff;
-        }
-        // hidden first parameter containing AP_Int32 crc
-        auto &hinfo = const_cast<GroupInfo*>(info.group_info)[0];
-        hinfo.flags = AP_PARAM_FLAG_HIDDEN;
-        hinfo.name = _empty_string;
-        hinfo.idx = 0;
-        hinfo.offset = 0;
-        hinfo.type = AP_PARAM_INT32;
-        // fill in default value with the CRC. Relies on sizeof crc == sizeof float
-        memcpy((uint8_t *)&hinfo.def_value, (const uint8_t *)&crc, sizeof(crc));
     }
+    // fill in footer for all entries
+    for (uint8_t gi=1; gi<num_params+2; gi++) {
+        auto &ginfo = const_cast<GroupInfo*>(info.group_info)[gi];
+        ginfo.name = _empty_string;
+        ginfo.idx = 0xff;
+        ginfo.flags = AP_PARAM_FLAG_HIDDEN;
+    }
+    // hidden first parameter containing AP_Int32 crc
+    auto &hinfo = const_cast<GroupInfo*>(info.group_info)[0];
+    hinfo.flags = AP_PARAM_FLAG_HIDDEN;
+    hinfo.name = _empty_string;
+    hinfo.idx = 0;
+    hinfo.offset = 0;
+    hinfo.type = AP_PARAM_INT32;
+    // fill in default value with the CRC. Relies on sizeof crc == sizeof float
+    memcpy((uint8_t *)&hinfo.def_value, (const uint8_t *)&crc, sizeof(crc));
 
     // remember the table size
     if (_dynamic_table_sizes[i] == 0) {
@@ -3321,12 +3336,17 @@ bool AP_Param::add_param(uint8_t _key, uint8_t param_num, const char *pname, flo
     *def_value = default_value;
     ginfo.type = AP_PARAM_FLOAT;
 
-    invalidate_count();
-
-    // load from storage if available
+    // load from storage if available, the param is hidden during this
+    // load so the param is not visible to MAVLink until after it is
+    // loaded
     p.set_default(default_value);
     p.load();
 
+    // clear the hidden flag if set and invalidate the count
+    // so we recount the parameters
+    ginfo.flags = 0;
+    invalidate_count();
+    
     return true;
 }
 #endif

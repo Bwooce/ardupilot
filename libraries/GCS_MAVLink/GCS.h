@@ -175,6 +175,9 @@ class GCS_MAVLINK
 {
 public:
     friend class GCS;
+#if AP_MAVLINK_FTP_ENABLED
+    friend class GCS_FTP;
+#endif
 
     GCS_MAVLINK(AP_HAL::UARTDriver &uart);
     virtual ~GCS_MAVLINK() {}
@@ -464,8 +467,10 @@ public:
     // corresponding to the channel
     static GCS_MAVLINK *find_by_mavtype_and_compid(uint8_t mav_type, uint8_t compid, uint8_t &sysid);
 
+#if AP_MAVLINK_SIGNING_ENABLED
     // update signing timestamp on GPS lock
     static void update_signing_timestamp(uint64_t timestamp_usec);
+#endif  // AP_MAVLINK_SIGNING_ENABLED
 
     // return current packet overhead for a channel
     static uint8_t packet_overhead_chan(mavlink_channel_t chan);
@@ -522,7 +527,6 @@ protected:
     AP_Int16 options;
     enum class Option : uint16_t {
         MAVLINK2_SIGNING_DISABLED = (1U << 0),
-        // first bit is reserved for: MAVLINK2_SIGNING_DISABLED = (1U << 0),
         NO_FORWARD                = (1U << 1),  // don't forward MAVLink data to or from this device
         NOSTREAMOVERRIDE          = (1U << 2),  // ignore REQUEST_DATA_STREAM messages (eg. from GCSs)
     };
@@ -707,10 +711,10 @@ protected:
       handle MAV_CMD_CAN_FORWARD and CAN_FRAME messages for CAN over MAVLink
      */
     void can_frame_callback(uint8_t bus, const AP_HAL::CANFrame &);
-#if HAL_CANMANAGER_ENABLED
+#if AP_MAVLINKCAN_ENABLED
     MAV_RESULT handle_can_forward(const mavlink_command_int_t &packet, const mavlink_message_t &msg);
-#endif
     void handle_can_frame(const mavlink_message_t &msg) const;
+#endif  // AP_MAVLINKCAN_ENABLED
 
     void handle_optical_flow(const mavlink_message_t &msg);
 
@@ -725,7 +729,9 @@ protected:
 
     // message sending functions:
     bool try_send_mission_message(enum ap_message id);
+#if AP_MAVLINK_MSG_HWSTATUS_ENABLED
     void send_hwstatus();
+#endif  // AP_MAVLINK_MSG_HWSTATUS_ENABLED
     void handle_data_packet(const mavlink_message_t &msg);
 
     // these two methods are called after current_loc is updated:
@@ -976,6 +982,7 @@ private:
 
     uint8_t send_parameter_async_replies();
 
+<<<<<<< HEAD
 #if AP_MAVLINK_FTP_ENABLED
     enum class FTP_OP : uint8_t {
         None = 0,
@@ -1085,6 +1092,7 @@ private:
 
     void lock_channel(const mavlink_channel_t chan, bool lock);
 
+#if AP_MAVLINK_SIGNING_ENABLED
     mavlink_signing_t signing;
     static mavlink_signing_streams_t signing_streams;
     static uint32_t last_signing_save_ms;
@@ -1095,6 +1103,7 @@ private:
     void load_signing_key(void);
     bool signing_enabled(void) const;
     static void save_signing_timestamp(bool force_save_now);
+#endif  // AP_MAVLINK_SIGNING_ENABLED
 
 #if HAL_MAVLINK_INTERVALS_FROM_FILES_ENABLED
     // structure containing default intervals read from files for this
@@ -1213,7 +1222,10 @@ public:
         return _statustext_queue;
     }
 
-    uint8_t sysid_gcs() const { return uint8_t(mav_gcs_sysid); }
+    /*
+      return true if a MAVLink system ID is a GCS
+     */
+    bool sysid_is_gcs(uint8_t sysid) const;
 
     // last time traffic was seen from my designated GCS.  traffic
     // includes heartbeats and some manual control messages.
@@ -1240,6 +1252,7 @@ public:
     void send_message(enum ap_message id);
     void send_mission_item_reached_message(uint16_t mission_index);
     void send_named_float(const char *name, float value) const;
+    void send_named_string(const char *name, const char *value) const;
 
     void send_parameter_value(const char *param_name,
                               ap_var_type param_type,
@@ -1367,6 +1380,7 @@ protected:
     // parameters
     AP_Int16                 sysid;
     AP_Int16                 mav_gcs_sysid;
+    AP_Int16                 mav_gcs_sysid_high;
     AP_Enum16<Option>        mav_options;
     AP_Int8                  mav_telem_delay;
 

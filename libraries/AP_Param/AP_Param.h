@@ -177,12 +177,12 @@
 
 enum ap_var_type {
     AP_PARAM_NONE    = 0,
-    AP_PARAM_INT8,
-    AP_PARAM_INT16,
-    AP_PARAM_INT32,
-    AP_PARAM_FLOAT,
-    AP_PARAM_VECTOR3F,
-    AP_PARAM_GROUP
+    AP_PARAM_INT8    = 1,
+    AP_PARAM_INT16   = 2,
+    AP_PARAM_INT32   = 3,
+    AP_PARAM_FLOAT   = 4,
+    AP_PARAM_VECTOR3F= 5,
+    AP_PARAM_GROUP   = 6,
 };
 
 
@@ -522,7 +522,7 @@ public:
     // is_top_level: Is true if the class had its own top level key, param_key. It is false if the class was a subgroup
     static void         convert_class(uint16_t param_key, void *object_pointer,
                                         const struct AP_Param::GroupInfo *group_info,
-                                        uint16_t old_index, bool is_top_level);
+                                        uint16_t old_index, bool is_top_level, bool recurse_sub_groups = false);
 
     /*
       fetch a parameter value based on the index within a group. This

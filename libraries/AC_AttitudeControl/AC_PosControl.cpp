@@ -357,14 +357,6 @@ AC_PosControl::AC_PosControl(AP_AHRS_View& ahrs, const AP_Motors& motors, AC_Att
 /// 3D position shaper
 ///
 
-// Sets a new NEU position target in centimeters and computes a jerk-limited trajectory.
-// Also updates vertical buffer logic using terrain altitude target.
-// See input_pos_NEU_m() for full details.
-void AC_PosControl::input_pos_NEU_cm(const Vector3p& pos_neu_cm, float pos_terrain_target_u_cm, float terrain_buffer_cm)
-{
-    input_pos_NEU_m(pos_neu_cm * 0.01, pos_terrain_target_u_cm * 0.01, terrain_buffer_cm * 0.01);
-}
-
 // Sets a new NEU position target in meters and computes a jerk-limited trajectory.
 // Updates internal acceleration commands using a smooth kinematic path constrained
 // by configured acceleration and jerk limits. Terrain margin is used to constrain
@@ -412,13 +404,6 @@ void AC_PosControl::input_pos_NEU_m(const Vector3p& pos_neu_m, float pos_terrain
                         -vel_max_u_ms, vel_max_u_ms,
                         -constrain_float(accel_max_u_mss, 0.0, 7.5), accel_max_u_mss,
                         jerk_max_u_msss, _dt_s, false);
-}
-
-// Returns a scaling factor for horizontal velocity in cm/s to respect vertical terrain buffer.
-// See pos_terrain_U_scaler_m() for full details.
-float AC_PosControl::pos_terrain_U_scaler_cm(float pos_terrain_u_cm, float pos_terrain_u_buffer_cm) const
-{
-    return pos_terrain_U_scaler_m(pos_terrain_u_cm * 0.01, pos_terrain_u_buffer_cm * 0.01);
 }
 
 // Returns a scaling factor for horizontal velocity in m/s to ensure
@@ -571,13 +556,6 @@ void AC_PosControl::init_NE_controller()
 
     // initialise z_controller time out
     _last_update_ne_ticks = AP::scheduler().ticks32();
-}
-
-// Sets the desired NE-plane acceleration in cm/s² using jerk-limited shaping.
-// See input_accel_NE_m() for full details.
-void AC_PosControl::input_accel_NE_cm(const Vector3f& accel_neu_cmss)
-{
-    input_accel_NE_m(accel_neu_cmss * 0.01);
 }
 
 // Sets the desired NE-plane acceleration in m/s² using jerk-limited shaping.
@@ -818,15 +796,15 @@ void AC_PosControl::set_max_speed_accel_U_m(float speed_down_ms, float speed_up_
 
 // Sets vertical correction velocity and acceleration limits (cm/s, cm/s²).
 // Should only be called during initialization to avoid discontinuities.
-// See set_correction_speed_accel_U_mss() for full details.
-void AC_PosControl::set_correction_speed_accel_U_cmss(float speed_down_cms, float speed_up_cms, float accel_cmss)
+// See set_correction_speed_accel_U_m() for full details.
+void AC_PosControl::set_correction_speed_accel_U_cm(float speed_down_cms, float speed_up_cms, float accel_cmss)
 {
-    set_correction_speed_accel_U_mss(speed_down_cms * 0.01, speed_up_cms * 0.01, accel_cmss * 0.01);
+    set_correction_speed_accel_U_m(speed_down_cms * 0.01, speed_up_cms * 0.01, accel_cmss * 0.01);
 }
 
 // Sets vertical correction velocity and acceleration limits (m/s, m/s²).
 // These values constrain the correction output of the PID controller.
-void AC_PosControl::set_correction_speed_accel_U_mss(float speed_down_ms, float speed_up_ms, float accel_mss)
+void AC_PosControl::set_correction_speed_accel_U_m(float speed_down_ms, float speed_up_ms, float accel_mss)
 {
     // define maximum position error and maximum first and second differential limits
     _p_pos_u_m.set_limits(-fabsf(speed_down_ms), speed_up_ms, accel_mss, 0.0f);
@@ -916,13 +894,6 @@ void AC_PosControl::init_U_controller()
     _last_update_u_ticks = AP::scheduler().ticks32();
 }
 
-// Sets the desired vertical acceleration in cm/s² using jerk-limited shaping.
-// See input_accel_U_m() for full details.
-void AC_PosControl::input_accel_U_cm(float accel_cmss)
-{
-    input_accel_U_m(accel_cmss * 0.01);
-}
-
 // Sets the desired vertical acceleration in m/s² using jerk-limited shaping.
 // Smoothly transitions to the target acceleration from current kinematic state.
 // Constraints: max acceleration and jerk set via set_max_speed_accel_U_m().
@@ -935,15 +906,6 @@ void AC_PosControl::input_accel_U_m(float accel_mss)
     update_pos_vel_accel(_pos_desired_neu_m.z, _vel_desired_neu_ms.z, _accel_desired_neu_mss.z, _dt_s, _limit_vector_neu.z, _p_pos_u_m.get_error(), _pid_vel_u_cm.get_error());
 
     shape_accel(accel_mss, _accel_desired_neu_mss.z, jerk_max_u_msss, _dt_s);
-}
-
-// Sets desired vertical velocity and acceleration (cm/s, cm/s²) using jerk-limited shaping.
-// See input_vel_accel_U_m() for full details.
-void AC_PosControl::input_vel_accel_U_cm(float &vel_u_cms, float accel_cmss, bool limit_output)
-{
-    float vel_u_ms = vel_u_cms * 0.01; 
-    input_vel_accel_U_m(vel_u_ms, accel_cmss * 0.01, limit_output);
-    vel_u_cms = vel_u_ms * 100.0;
 }
 
 // Sets desired vertical velocity and acceleration (m/s, m/s²) using jerk-limited shaping.
@@ -982,17 +944,9 @@ void AC_PosControl::set_pos_target_U_from_climb_rate_m(float vel_u_ms)
     input_vel_accel_U_m(vel_u_ms, 0.0);
 }
 
-// Descends at a given rate (cm/s) using jerk-limited shaping for landing.
-// If `ignore_descent_limit` is true, descent output is not limited by the configured max.
-// See land_at_climb_rate_m() for full details.
-void AC_PosControl::land_at_climb_rate_cm(float vel_u_cms, bool ignore_descent_limit)
-{
-    land_at_climb_rate_m(vel_u_cms * 0.01, ignore_descent_limit);
-}
-
 // Descends at a given rate (m/s) using jerk-limited shaping for landing.
 // Used during final descent phase to ensure smooth touchdown.
-void AC_PosControl::land_at_climb_rate_m(float vel_u_ms, bool ignore_descent_limit)
+void AC_PosControl::land_at_climb_rate_ms(float vel_u_ms, bool ignore_descent_limit)
 {
     if (ignore_descent_limit) {
         // turn off limits in the negative z direction
@@ -1116,14 +1070,10 @@ void AC_PosControl::update_U_controller()
     // Combine desired + offset + terrain for final position target
     _pos_target_neu_m.z = _pos_desired_neu_m.z + _pos_offset_neu_m.z + _pos_terrain_u_m;
 
-    // calculate the target velocity correction
-    float pos_target_zf = _pos_target_neu_m.z;
-
     // P controller: convert position error to velocity target
-    _vel_target_neu_ms.z = _p_pos_u_m.update_all(pos_target_zf, _pos_estimate_neu_m.z);
+    _vel_target_neu_ms.z = _p_pos_u_m.update_all(_pos_target_neu_m.z, _pos_estimate_neu_m.z);
     _vel_target_neu_ms.z *= AP::ahrs().getControlScaleZ();
 
-    _pos_target_neu_m.z = pos_target_zf;
     _pos_desired_neu_m.z = _pos_target_neu_m.z - (_pos_offset_neu_m.z + _pos_terrain_u_m);
 
     // add feed forward component
@@ -1198,13 +1148,6 @@ float AC_PosControl::get_lean_angle_max_rad() const
     return radians(_lean_angle_max_deg);
 }
 
-// Sets externally computed NEU position, velocity, and acceleration in centimeters, cm/s, and cm/s².
-// See set_pos_vel_accel_NEU_m() for full details.
-void AC_PosControl::set_pos_vel_accel_NEU_cm(const Vector3p& pos_neu_cm, const Vector3f& vel_neu_cms, const Vector3f& accel_neu_cmss)
-{
-    set_pos_vel_accel_NEU_m(pos_neu_cm * 0.01, vel_neu_cms * 0.01, accel_neu_cmss * 0.01);
-}
-
 // Sets externally computed NEU position, velocity, and acceleration in meters, m/s, and m/s².
 // Use when path planning or shaping is done outside this controller.
 void AC_PosControl::set_pos_vel_accel_NEU_m(const Vector3p& pos_neu_m, const Vector3f& vel_neu_ms, const Vector3f& accel_neu_mss)
@@ -1214,13 +1157,6 @@ void AC_PosControl::set_pos_vel_accel_NEU_m(const Vector3p& pos_neu_m, const Vec
     _accel_desired_neu_mss = accel_neu_mss;
 }
 
-// Sets externally computed NE position, velocity, and acceleration in centimeters, cm/s, and cm/s².
-// See set_pos_vel_accel_NE_m() for full details.
-void AC_PosControl::set_pos_vel_accel_NE_cm(const Vector2p& pos_ne_cm, const Vector2f& vel_ne_cms, const Vector2f& accel_ne_cmss)
-{
-    set_pos_vel_accel_NE_m(pos_ne_cm * 0.01, vel_ne_cms * 0.01, accel_ne_cmss * 0.01);
-}
-
 // Sets externally computed NE position, velocity, and acceleration in meters, m/s, and m/s².
 // Use when path planning or shaping is done outside this controller.
 void AC_PosControl::set_pos_vel_accel_NE_m(const Vector2p& pos_ne_m, const Vector2f& vel_ne_ms, const Vector2f& accel_ne_mss)
@@ -1228,13 +1164,6 @@ void AC_PosControl::set_pos_vel_accel_NE_m(const Vector2p& pos_ne_m, const Vecto
     _pos_desired_neu_m.xy() = pos_ne_m;
     _vel_desired_neu_ms.xy() = vel_ne_ms;
     _accel_desired_neu_mss.xy() = accel_ne_mss;
-}
-
-// Converts lean angles (rad) to NEU acceleration in cm/s².
-// See lean_angles_rad_to_accel_NEU_mss() for full details.
-Vector3f AC_PosControl::lean_angles_rad_to_accel_NEU_cmss(const Vector3f& att_target_euler_rad) const
-{
-    return lean_angles_rad_to_accel_NEU_mss(att_target_euler_rad) * 100.0;
 }
 
 // Converts lean angles (rad) to NEU acceleration in m/s².
@@ -1388,14 +1317,6 @@ bool AC_PosControl::get_accel_target(Vector3f &accel_target_NED_mss)
 }
 #endif
 
-// Sets NE offset targets (position [cm], velocity [cm/s], acceleration [cm/s²]) from EKF origin.
-// Offsets must be refreshed at least every 3 seconds to remain active.
-// See set_posvelaccel_offset_target_NE_m() for full details.
-void AC_PosControl::set_posvelaccel_offset_target_NE_cm(const Vector2p& pos_offset_target_ne_cm, const Vector2f& vel_offset_target_ne_cms, const Vector2f& accel_offset_target_ne_cmss)
-{
-    set_posvelaccel_offset_target_NE_m(pos_offset_target_ne_cm * 0.01, vel_offset_target_ne_cms * 0.01, accel_offset_target_ne_cmss * 0.01);
-}
-
 // Sets NE offset targets in meters, m/s, and m/s².
 void AC_PosControl::set_posvelaccel_offset_target_NE_m(const Vector2p& pos_offset_target_ne_m, const Vector2f& vel_offset_target_ne_ms, const Vector2f& accel_offset_target_ne_mss)
 {
@@ -1410,13 +1331,6 @@ void AC_PosControl::set_posvelaccel_offset_target_NE_m(const Vector2p& pos_offse
 
     // record time of update so we can detect timeouts
     _posvelaccel_offset_target_ne_ms = AP_HAL::millis();
-}
-
-// Sets vertical offset targets (cm, cm/s, cm/s²) from EKF origin.
-// See set_posvelaccel_offset_target_U_m() for full details.
-void AC_PosControl::set_posvelaccel_offset_target_U_cm(float pos_offset_target_u_cm, float vel_offset_target_u_cms, const float accel_offset_target_u_cmss)
-{
-    set_posvelaccel_offset_target_U_m(pos_offset_target_u_cm * 0.01, vel_offset_target_u_cms * 0.01, accel_offset_target_u_cmss * 0.01);
 }
 
 // Sets vertical offset targets (m, m/s, m/s²) from EKF origin.
@@ -1441,15 +1355,6 @@ Vector3f AC_PosControl::get_thrust_vector() const
     Vector3f accel_target_neu_mss = get_accel_target_NEU_mss();
     accel_target_neu_mss.z = -GRAVITY_MSS;
     return accel_target_neu_mss;
-}
-
-// Computes NE stopping point in centimeters based on current position, velocity, and acceleration.
-// See get_stopping_point_NE_m() for full details.
-void AC_PosControl::get_stopping_point_NE_cm(Vector2p &stopping_point_neu_cm) const
-{
-    Vector2p stopping_point_neu_m = stopping_point_neu_cm * 0.01;
-    get_stopping_point_NE_m(stopping_point_neu_m);
-    stopping_point_neu_cm = stopping_point_neu_m * 100.0;
 }
 
 // Computes NE stopping point in meters based on current position, velocity, and acceleration.
@@ -1481,15 +1386,6 @@ void AC_PosControl::get_stopping_point_NE_m(Vector2p &stopping_point_neu_m) cons
     // todo: convert velocity to a unit vector instead.
     const float t = stopping_dist / vel_total;
     stopping_point_neu_m += (curr_vel * t).topostype();
-}
-
-// Computes vertical stopping point in centimeters based on current velocity and acceleration.
-// See get_stopping_point_U_m() for full details.
-void AC_PosControl::get_stopping_point_U_cm(postype_t &stopping_point_u_cm) const
-{
-    postype_t stopping_point_u_m = stopping_point_u_cm * 0.01;
-    get_stopping_point_U_m(stopping_point_u_m);
-    stopping_point_u_cm = stopping_point_u_m * 100.0;
 }
 
 // Computes vertical stopping point in meters based on current velocity and acceleration.
@@ -1635,7 +1531,7 @@ void AC_PosControl::write_log()
 
 // Returns lateral distance to closest point on active trajectory in meters.
 // Used to assess horizontal deviation from path.
-float AC_PosControl::crosstrack_error() const
+float AC_PosControl::crosstrack_error_m() const
 {
     const Vector2f pos_error = (_pos_target_neu_m.xy() - _pos_estimate_neu_m.xy()).tofloat();
     if (is_zero(_vel_desired_neu_ms.xy().length_squared())) {

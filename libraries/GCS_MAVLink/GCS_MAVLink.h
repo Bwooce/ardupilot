@@ -84,7 +84,14 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len);
 uint16_t comm_get_txspace(mavlink_channel_t chan);
 
 #define MAVLINK_USE_CONVENIENCE_FUNCTIONS
+
+#pragma GCC diagnostic push
+// mavlink relies on strncpy() supporting deliberate truncation
+#if !defined(__clang__)  // avoid -Wunknown-warning-option
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
+#endif  // clang
 #include "include/mavlink/v2.0/all/mavlink.h"
+#pragma GCC diagnostic pop
 
 // ESP32 fix: Override message IDs with explicit casts after MAVLink headers
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32

@@ -35,7 +35,6 @@ define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, HAL_INS_MPU9250_NAME, ROTATI
 
 # Barometer - BMP280 via SPI (default)
 define HAL_BARO_PROBE_LIST PROBE_BARO_SPI(BMP280, "bmp280")
-define HAL_BARO_ALLOW_INIT_NO_BARO 1
 
 # Alternative barometer configurations (uncomment to use):
 # For I2C barometer instead:

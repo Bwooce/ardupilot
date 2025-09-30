@@ -136,7 +136,7 @@ public:
 private:
 
     AP_HAL::Proc _delay_cb;
-    bool _in_delay_callback : 1;
+    bool _in_delay_callback;
 
 };
 

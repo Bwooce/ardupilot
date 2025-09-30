@@ -39,10 +39,12 @@ BUILD_OPTIONS = [
     Feature('AHRS', 'MicroStrain7', 'AP_EXTERNAL_AHRS_MICROSTRAIN7_ENABLED', 'Enable MICROSTRAIN 7-series external AHRS', 0, "AHRS_EXT"),  # noqa: E501
     Feature('AHRS', 'AHRS_EXT_VECTORNAV', 'AP_EXTERNAL_AHRS_VECTORNAV_ENABLED', 'Enable VectorNav external AHRS', 0, "AHRS_EXT"),  # noqa
     Feature('AHRS', 'InertialLabs', 'AP_EXTERNAL_AHRS_INERTIALLABS_ENABLED', 'Enable InertialLabs external AHRS', 0, "AHRS_EXT"),  # noqa
+    Feature('AHRS', 'SBG', 'AP_EXTERNAL_AHRS_SBG_ENABLED', 'Enable SBG external AHRS', 0, "AHRS_EXT"),
     Feature('AHRS', 'VISUALODOM', 'HAL_VISUALODOM_ENABLED', 'Enable Visual Odometry', 0, None),
     Feature('AHRS', 'EKF3_EXTNAV', 'EK3_FEATURE_EXTERNAL_NAV', 'Enable External navigation for EKF3', 0, 'EKF3'),
     Feature('AHRS', 'EKF3_WINDEST', 'EK3_FEATURE_DRAG_FUSION', 'Enable Wind estimation for EKF3', 0, 'EKF3'),
     Feature('AHRS', 'EKF3_OPTFLOW', 'EK3_FEATURE_OPTFLOW_FUSION', 'Enable OpticalFlow fusion for EKF3', 0, 'EKF3,OPTICALFLOW'),
+    Feature('AHRS', 'EKF3_OPTFLOW_SRTM', 'EK3_FEATURE_OPTFLOW_SRTM', 'Enable OpticalFlow using SRTM for EKF3', 0, 'EKF3_OPTFLOW'),  # noqa: E501
     Feature('AHRS', 'BARO_WIND_COMP', 'HAL_BARO_WIND_COMP_ENABLED', 'Enable Baro wind compensation', 0, None),
 
     Feature('Safety', 'PARACHUTE', 'HAL_PARACHUTE_ENABLED', 'Enable Parachute', 0, None),
@@ -139,12 +141,24 @@ BUILD_OPTIONS = [
     Feature('AP_Periph', 'LONG_TEXT', 'HAL_PERIPH_SUPPORT_LONG_CAN_PRINTF', 'Enable extended length text strings', 0, None),
     Feature('AP_Periph', 'PERIPH_DEVICE_TEMPERATURE', 'AP_PERIPH_DEVICE_TEMPERATURE_ENABLED', 'Emit DroneCAN Temperature Messages for AP_Temperature sensors', 0, 'TEMP'), # noqa
     Feature('AP_Periph', 'PERIPH_MSP', 'AP_PERIPH_MSP_ENABLED', 'Emit MSP protocol messages from AP_Periph', 0, 'MSP'),
-    Feature('AP_Periph', 'PERIPH_NOTIFY', 'AP_PERIPH_NOTIFY_ENABLED', 'Handle DroneCAN messages for notification equipments (e.g. buzzers, lights etc.)', 0, None), # noqa
+    Feature('AP_Periph', 'PERIPH_NOTIFY', 'AP_PERIPH_NOTIFY_ENABLED', 'Handle DroneCAN messages for notification equipment (e.g. buzzers, lights etc.)', 0, None), # noqa
     Feature('AP_Periph', 'PERIPH_SERIAL_OPTIONS', 'AP_PERIPH_SERIAL_OPTIONS_ENABLED', 'Enable Serial Options on AP_Periph', 0, None), # noqa
     Feature('AP_Periph', 'PERIPH_BATTERY', 'AP_PERIPH_BATTERY_ENABLED', 'Emit DroneCAN battery info messages using AP_BattMonitor', 0, None), # noqa
     Feature('AP_Periph', 'PERIPH_RELAY', 'AP_PERIPH_RELAY_ENABLED', 'Handle DroneCAN hardpoint command', 0, 'RELAY'),
     Feature('AP_Periph', 'PERIPH_BATTERY_BALANCE', 'AP_PERIPH_BATTERY_BALANCE_ENABLED', 'Emit DroneCAN BatteryInfoAux messages for monitoring Battery Balance', 0, None), # noqa
     Feature('AP_Periph', 'PERIPH_BATTERY_TAG', 'AP_PERIPH_BATTERY_TAG_ENABLED', 'Emit DroneCAN BatteryTag messages', 0, None), # noqa
+    Feature('AP_Periph', 'PERIPH_PROXIMITY', 'AP_PERIPH_PROXIMITY_ENABLED', 'Emit DroneCAN Proximity Messages for AP_Proximity sensors', 0, 'PROXIMITY'), # noqa
+    Feature('AP_Periph', 'PERIPH_GPS', 'AP_PERIPH_GPS_ENABLED', 'Emit DroneCAN GNSS Messages for AP_GPS sensors', 0, None), # noqa
+    Feature('AP_Periph', 'PERIPH_ADSB', 'AP_PERIPH_ADSB_ENABLED', 'Emit DroneCAN TrafficReport Messages for ADSB_VEHICLE MAVLink messages', 0, None), # noqa
+    Feature('AP_Periph', 'PERIPH_MAG', 'AP_PERIPH_MAG_ENABLED', 'Emit DroneCAN MagneticFieldStrength Messages ', 0, None), # noqa
+    Feature('AP_Periph', 'PERIPH_BARO', 'AP_PERIPH_BARO_ENABLED', 'Emit DroneCAN StaticTemperature and StaticPressure Messages for AP_Baro Sensors', 0, None), # noqa
+    Feature('AP_Periph', 'PERIPH_RANGEFINDER', 'AP_PERIPH_RANGEFINDER_ENABLED', 'Emit DroneCAN range_sensor_Measurement Messages ', 0, 'RANGEFINDER'), # noqa
+    Feature('AP_Periph', 'PERIPH_IMU', 'AP_PERIPH_IMU_ENABLED', 'Emit DroneCAN ahrs_RawIMU Messages ', 0, None),
+    Feature('AP_Periph', 'PERIPH_RC_OUT', 'AP_PERIPH_RC_OUT_ENABLED', 'Emit DroneCAN actuator_Status Messages', 0, None),
+    Feature('AP_Periph', 'PERIPH_EFI', 'AP_PERIPH_EFI_ENABLED', 'Emit DroneCAN ice_reciprocating_Status Messages', 0, 'EFI'),
+    Feature('AP_Periph', 'PERIPH_RCIN', 'AP_PERIPH_RCIN_ENABLED', 'Emit DroneCAN RCInput Messages', 0, 'RC_Protocol'),
+    Feature('AP_Periph', 'PERIPH_RPM', 'AP_PERIPH_RPM_ENABLED', 'Emit DroneCAN RPM messages for AP_RPM sensors', 0, 'RPM'),
+    Feature('AP_Periph', 'PERIPH_AIRSPEED', 'AP_PERIPH_AIRSPEED_ENABLED', 'Emit DroneCAN air_data_RawAirData messages for AP_Airspeed sensors', 0, 'AIRSPEED'), # noqa
 
     Feature('Camera', 'Camera', 'AP_CAMERA_ENABLED', 'Enable Camera trigger', 0, None),
     Feature('Camera', 'Camera_MAVLink', 'AP_CAMERA_MAVLINK_ENABLED', 'Enable MAVLink camera ', 0, 'Camera'),
@@ -259,6 +273,8 @@ BUILD_OPTIONS = [
     Feature('RC', 'RC_GHST', 'AP_RCPROTOCOL_GHST_ENABLED', "Enable Ghost", 0, "RC_Protocol"),   # NOQA: E501
     Feature('RC', 'RC_MAVLINK_RADIO', 'AP_RCPROTOCOL_MAVLINK_RADIO_ENABLED', "Enable MAVLink", 0, "RC_Protocol"),   # NOQA: E501
     Feature('RC', 'RSSI', 'AP_RSSI_ENABLED', 'RSSI', 0, None),
+
+    Feature('RC', 'RC_TRANSMITTER_TUNING', 'AP_RC_TRANSMITTER_TUNING_ENABLED', "Enable knob-based transmitter tuning", 0, None),  # NOQA:E501
 
     Feature('Rangefinder', 'RANGEFINDER', 'AP_RANGEFINDER_ENABLED', "Enable Rangefinders", 0, None),   # NOQA: E501
     Feature('Rangefinder', 'RANGEFINDER_ANALOG', 'AP_RANGEFINDER_ANALOG_ENABLED', "Enable Rangefinder - Analog", 0, "RANGEFINDER"),   # NOQA: E501
@@ -409,6 +425,7 @@ BUILD_OPTIONS = [
     Feature('Other', 'AP_FOLLOW', 'AP_FOLLOW_ENABLED', 'Enable Follow library', 0, None),
     Feature('MAVLink', 'MAVLINK_MSG_FLIGHT_INFORMATION', 'AP_MAVLINK_MSG_FLIGHT_INFORMATION_ENABLED', 'Enable FLIGHT_INFORMATION MAVLink message', 0, None),  # noqa
     Feature('MAVLink', 'RANGEFINDER_SENDING', 'AP_MAVLINK_MSG_RANGEFINDER_SENDING_ENABLED', 'Enable sending of RANGEFINDER mavlink message', 0, "RANGEFINDER"),  # noqa
+    Feature('MAVLink', 'MAVLINK_SIGNING', 'AP_MAVLINK_SIGNING_ENABLED', 'Enable MAVLink2 packet signing and validation', 0, "RANGEFINDER"),  # noqa
 
     Feature('Developer', 'KILL_IMU', 'AP_INERTIALSENSOR_KILL_IMU_ENABLED', 'Allow IMUs to be disabled at runtime', 0, None),
     Feature('Developer', 'CRASHCATCHER', 'AP_CRASHDUMP_ENABLED', 'Enable CrashCatcher', 0, None),
@@ -465,6 +482,7 @@ BUILD_OPTIONS = [
     Feature('Networking', 'Networking', 'AP_NETWORKING_ENABLED', 'Enable networking', 0, None),
     Feature('Networking', 'PPP', 'AP_NETWORKING_BACKEND_PPP', 'Enable PPP networking', 0, "Networking"),
     Feature('Networking', 'CAN_MCAST', 'AP_NETWORKING_CAN_MCAST_ENABLED', 'Enable CAN multicast bridge', 0, "Networking,DroneCAN"), # noqa
+    Feature('Networking', 'NetworkCapture', 'AP_NETWORKING_CAPTURE_ENABLED', 'Enable network capture', 0, "Networking"),
 
     Feature('CAN', 'DroneCAN', 'HAL_ENABLE_DRONECAN_DRIVERS', 'Enable DroneCAN support', 0, None),
     Feature('CAN', 'CAN Logging', 'AP_CAN_LOGGING_ENABLED', 'Enable CAN logging support', 0, 'Logging'),

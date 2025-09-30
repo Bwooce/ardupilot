@@ -8,7 +8,7 @@ void Plane::loiter_angle_reset(void)
     loiter.sum_cd = 0;
     loiter.total_cd = 0;
     loiter.reached_target_alt = false;
-    loiter.unable_to_acheive_target_alt = false;
+    loiter.unable_to_achieve_target_alt = false;
 }
 
 /*
@@ -69,12 +69,12 @@ void Plane::loiter_angle_update(void)
 
     if (reached_target_alt) {
         loiter.reached_target_alt = true;
-        loiter.unable_to_acheive_target_alt = false;
+        loiter.unable_to_achieve_target_alt = false;
         loiter.next_sum_lap_cd = loiter.sum_cd + lap_check_interval_cd;
 
     } else if (!loiter.reached_target_alt && labs(loiter.sum_cd) >= loiter.next_sum_lap_cd) {
         // check every few laps for scenario where up/downward inhibit you from loitering up/down for too long
-        loiter.unable_to_acheive_target_alt = labs(current_loc.alt - loiter.start_lap_alt_cm) < 500;
+        loiter.unable_to_achieve_target_alt = labs(current_loc.alt - loiter.start_lap_alt_cm) < 500;
         loiter.start_lap_alt_cm = current_loc.alt;
         loiter.next_sum_lap_cd += lap_check_interval_cd;
     }
@@ -126,7 +126,7 @@ float Plane::mode_auto_target_airspeed_cm()
         return aparm.airspeed_cruise*100;
     }
     if (quadplane.in_vtol_land_approach()) {
-        return quadplane.get_land_airspeed() * 100;
+        return quadplane.get_land_airspeed_ms() * 100;
     }
 #endif
 
@@ -235,7 +235,7 @@ void Plane::calc_airspeed_errors()
         target_airspeed_cm = mode_auto_target_airspeed_cm();
 #if HAL_QUADPLANE_ENABLED
     } else if (control_mode == &mode_qrtl && quadplane.in_vtol_land_approach()) {
-        target_airspeed_cm = quadplane.get_land_airspeed() * 100;
+        target_airspeed_cm = quadplane.get_land_airspeed_ms() * 100;
 #endif
     } else {
         // Normal airspeed target for all other cases
