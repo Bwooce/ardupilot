@@ -194,7 +194,6 @@ def generate_hwdef_h(env):
         quiet=False,
     )
     eh.run()
->>>>>>> upstream/master
 
 # delete the output sdkconfig file when the input defaults changes. we take the
 # stamp as the output so we can compute the path to the sdkconfig, yet it

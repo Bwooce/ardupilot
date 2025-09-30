@@ -982,7 +982,6 @@ private:
 
     uint8_t send_parameter_async_replies();
 
-<<<<<<< HEAD
 #if AP_MAVLINK_FTP_ENABLED
     enum class FTP_OP : uint8_t {
         None = 0,
