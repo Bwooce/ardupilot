@@ -113,10 +113,10 @@ void ESP32Params::apply_log_level() {
         esp_log_level_set("UART_HW", ESP_LOG_WARN);
     }
     esp_log_level_set("MUTEX", level);
-    esp_log_level_set("ESP32", level);
+    esp_log_level_set("ESP32", ESP_LOG_WARN);      // Reduced - DNA issues resolved
     esp_log_level_set("HAL", level);
     esp_log_level_set("SCHED", level);
-    
+
     // Important initialization messages should always be visible
     esp_log_level_set("SCHEDULER", ESP_LOG_INFO);
     esp_log_level_set("CONSOLE", ESP_LOG_INFO);
@@ -127,19 +127,20 @@ void ESP32Params::apply_log_level() {
     esp_log_level_set("AP_FS_ESP32", ESP_LOG_INFO); // Filesystem operations debugging
     esp_log_level_set("ESP32_SPIFFS", ESP_LOG_INFO); // SPIFFS operations debugging
 
-    // CAN/DroneCAN debugging - temporarily increased for debugging
+    // CAN/DroneCAN debugging - reduced after resolving DNA issues (keep unknown message logging)
     esp_log_level_set("CAN", ESP_LOG_INFO);        // Show CAN info for debugging
-    esp_log_level_set("CAN_RX", ESP_LOG_INFO);     // Show RX info for debugging
+    esp_log_level_set("CAN_RX", ESP_LOG_WARN);     // Reduced - keep rejection logging only
     esp_log_level_set("CAN_TX", ESP_LOG_INFO);     // Show TX info for debugging
     esp_log_level_set("CAN_SEND", ESP_LOG_INFO);   // Show send queue info
     esp_log_level_set("DRONECAN", ESP_LOG_INFO);   // Show DroneCAN info
-    esp_log_level_set("CANARD", ESP_LOG_INFO);     // Show Canard info for debugging
+    esp_log_level_set("CANARD", ESP_LOG_WARN);     // Reduced - DNA issues resolved
     esp_log_level_set("DNA_SERVER", ESP_LOG_INFO);  // Show DNA server info for debugging
     esp_log_level_set("DNA_HEX", ESP_LOG_INFO); // Enable DNA hex debugging for manual decode
     esp_log_level_set("TWAI_RX", ESP_LOG_INFO);    // TWAI receive debugging
     esp_log_level_set("TWAI_TX", ESP_LOG_INFO);    // TWAI transmit debugging
     esp_log_level_set("TWAI_BUG", ESP_LOG_INFO);   // TWAI bug detection
-    esp_log_level_set("GETNODEINFO", ESP_LOG_INFO); // GetNodeInfo multi-frame debugging
+    esp_log_level_set("GETNODEINFO", ESP_LOG_WARN); // Reduced - DNA issues resolved
+    esp_log_level_set("NODESTATUS", ESP_LOG_WARN);  // Reduced - DNA issues resolved
 
     // Note: eFuse MAC_CUSTOM error was fixed by skipping custom MAC check in Util.cpp
     

@@ -421,8 +421,8 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
     static uint32_t last_debug = 0;
 #endif
     
-    // Debug logging for all important message types (disabled - too verbose)
-#if 1  // Enable only for DNA debugging
+    // Debug logging for all important message types (disabled - DNA issues resolved)
+#if 0  // Disable verbose shouldAccept logging - DNA issues resolved
     bool is_important = (data_type_id == 1) || // Allocation/GetNodeInfo
                         (data_type_id == 341) || // NodeStatus
                         (data_type_id == 551); // Legacy GetNodeInfo
@@ -451,9 +451,9 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     if (!accepted) {
         reject_count++;
-        // Log every 50th rejection
+        // Log every 50th rejection (unknown messages - no handler registered)
         if (reject_count % 50 == 1) {
-            ESP_LOGD("CAN_RX", "shouldAccept REJECTED dtid=%d, xfer_type=%d, src=%d (total rejected=%d)",
+            ESP_LOGW("CAN_RX", "shouldAccept REJECTED dtid=%d, xfer_type=%d, src=%d (total rejected=%d)",
                      data_type_id, transfer_type, source_node_id, reject_count);
         }
     } else {
