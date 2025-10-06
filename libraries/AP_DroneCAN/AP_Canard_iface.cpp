@@ -473,7 +473,7 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
             else if (transfer_type == CanardTransferTypeRequest) xfer_type_str = "REQUEST";
             else if (transfer_type == CanardTransferTypeBroadcast) xfer_type_str = "BROADCAST";
 
-            ESP_LOGW("CAN_RX", "UNKNOWN MESSAGE REJECTED: dtype=%d (%s), src=node %d, total_rejected=%lu",
+            ESP_LOGD("CAN_RX", "UNKNOWN MESSAGE REJECTED: dtype=%d (%s), src=node %d, total_rejected=%lu",
                      data_type_id, xfer_type_str, source_node_id, (unsigned long)reject_count);
 
             if (is_new_rejection) {
@@ -483,7 +483,7 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
             }
         } else if (reject_count % 100 == 0) {
             // Periodic summary for known unknown messages
-            ESP_LOGW("CAN_RX", "Unknown messages: %lu total rejected", (unsigned long)reject_count);
+            ESP_LOGD("CAN_RX", "Unknown messages: %lu total rejected", (unsigned long)reject_count);
         }
     } else {
         // Log all accepted messages at DEBUG level
@@ -1018,9 +1018,9 @@ void CanardInterface::processRx() {
 
                         if (is_new_unknown || total_unknown <= 5) {
                             const char* frame_type = is_service ? "SERVICE" : "BROADCAST";
-                            ESP_LOGW("CAN_RX", "UNKNOWN MSG: dtype=%d (%s) from node %d - no handler registered",
+                            ESP_LOGD("CAN_RX", "UNKNOWN MSG: dtype=%d (%s) from node %d - no handler registered",
                                      data_type, frame_type, source_node);
-                            ESP_LOGW("CAN_RX", "  CAN ID=0x%08lX, DLC=%d, payload:",
+                            ESP_LOGD("CAN_RX", "  CAN ID=0x%08lX, DLC=%d, payload:",
                                      (unsigned long)(rx_frame.id & 0x1FFFFFFF), rx_frame.data_len);
 
                             // Hex dump of frame payload
@@ -1029,7 +1029,7 @@ void CanardInterface::processRx() {
                             for (uint8_t i = 0; i < rx_frame.data_len && i < 8; i++) {
                                 pos += snprintf(hex_buf + pos, sizeof(hex_buf) - pos, "%02X ", rx_frame.data[i]);
                             }
-                            ESP_LOGW("CAN_RX", "    %s", hex_buf);
+                            ESP_LOGD("CAN_RX", "    %s", hex_buf);
 
                             if (is_new_unknown) {
                                 last_unknown_dtype[unknown_slot] = data_type;
