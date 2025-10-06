@@ -391,10 +391,11 @@ void AP_DroneCAN_DNA_Server::Database::write_record(const NodeRecord &record, ui
     storage->read_block(&existing_record, NODERECORD_LOC(node_id), sizeof(NodeRecord));
 
     if (memcmp(&existing_record, &record, sizeof(NodeRecord)) == 0) {
+        // Record unchanged, skip write to preserve flash lifetime
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         ESP_LOGD("DNA_SERVER", "Skipping write to node %d - record unchanged", node_id);
 #endif
-        return; // Record unchanged, skip write
+        return;
     }
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
