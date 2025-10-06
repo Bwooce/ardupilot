@@ -451,10 +451,39 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     if (!accepted) {
         reject_count++;
-        // Log every 50th rejection (unknown messages - no handler registered)
-        if (reject_count % 50 == 1) {
-            ESP_LOGW("CAN_RX", "shouldAccept REJECTED dtid=%d, xfer_type=%d, src=%d (total rejected=%d)",
-                     data_type_id, transfer_type, source_node_id, reject_count);
+
+        // Track unique message types and log first occurrence with full details
+        static uint16_t last_rejected_dtype[10] = {0};
+        static uint8_t last_rejected_xfer_type[10] = {0};
+        static uint8_t rejection_slot = 0;
+
+        bool is_new_rejection = true;
+        for (uint8_t i = 0; i < 10; i++) {
+            if (last_rejected_dtype[i] == data_type_id &&
+                last_rejected_xfer_type[i] == transfer_type) {
+                is_new_rejection = false;
+                break;
+            }
+        }
+
+        if (is_new_rejection || reject_count <= 10) {
+            // Log with full details for new unknown message types
+            const char* xfer_type_str = "UNKNOWN";
+            if (transfer_type == CanardTransferTypeResponse) xfer_type_str = "RESPONSE";
+            else if (transfer_type == CanardTransferTypeRequest) xfer_type_str = "REQUEST";
+            else if (transfer_type == CanardTransferTypeBroadcast) xfer_type_str = "BROADCAST";
+
+            ESP_LOGW("CAN_RX", "UNKNOWN MESSAGE REJECTED: dtype=%d (%s), src=node %d, total_rejected=%lu",
+                     data_type_id, xfer_type_str, source_node_id, (unsigned long)reject_count);
+
+            if (is_new_rejection) {
+                last_rejected_dtype[rejection_slot] = data_type_id;
+                last_rejected_xfer_type[rejection_slot] = transfer_type;
+                rejection_slot = (rejection_slot + 1) % 10;
+            }
+        } else if (reject_count % 100 == 0) {
+            // Periodic summary for known unknown messages
+            ESP_LOGW("CAN_RX", "Unknown messages: %lu total rejected", (unsigned long)reject_count);
         }
     } else {
         // Log all accepted messages at DEBUG level
@@ -971,20 +1000,58 @@ void CanardInterface::processRx() {
 
                     // Check if this is a service frame
                     bool is_service = (masked_id & 0x80) != 0;
-                    if (is_service && res == -CANARD_ERROR_RX_NOT_WANTED) {
-                        // Service frame not wanted - check if it's misaddressed
-                        uint8_t dest_node = (masked_id >> 8) & 0x7F;
-                        uint8_t our_node = canardGetLocalNodeID(&canard);
-                        bool is_response = ((masked_id >> 15) & 1) == 0;
+                    if (res == -CANARD_ERROR_RX_NOT_WANTED) {
+                        // Message not wanted - log details for unknown message types
+                        static uint16_t last_unknown_dtype[10] = {0};
+                        static uint8_t unknown_slot = 0;
+                        static uint32_t total_unknown = 0;
 
-                        if (dest_node != our_node && data_type == 1) { // GetNodeInfo = type 1
-                            static uint32_t misaddr_count = 0;
-                            misaddr_count++;
-                            if (misaddr_count <= 10) {
-                                ESP_LOGE("CAN_RX", "MISADDRESSED GetNodeInfo %s from node %d to node %d (we are node %d)!",
-                                         is_response ? "response" : "request",
-                                         source_node, dest_node, our_node);
-                                ESP_LOGE("CAN_RX", "  This node is sending responses to wrong destination!");
+                        total_unknown++;
+
+                        bool is_new_unknown = true;
+                        for (uint8_t i = 0; i < 10; i++) {
+                            if (last_unknown_dtype[i] == data_type) {
+                                is_new_unknown = false;
+                                break;
+                            }
+                        }
+
+                        if (is_new_unknown || total_unknown <= 5) {
+                            const char* frame_type = is_service ? "SERVICE" : "BROADCAST";
+                            ESP_LOGW("CAN_RX", "UNKNOWN MSG: dtype=%d (%s) from node %d - no handler registered",
+                                     data_type, frame_type, source_node);
+                            ESP_LOGW("CAN_RX", "  CAN ID=0x%08lX, DLC=%d, payload:",
+                                     (unsigned long)(rx_frame.id & 0x1FFFFFFF), rx_frame.data_len);
+
+                            // Hex dump of frame payload
+                            char hex_buf[64];
+                            int pos = 0;
+                            for (uint8_t i = 0; i < rx_frame.data_len && i < 8; i++) {
+                                pos += snprintf(hex_buf + pos, sizeof(hex_buf) - pos, "%02X ", rx_frame.data[i]);
+                            }
+                            ESP_LOGW("CAN_RX", "    %s", hex_buf);
+
+                            if (is_new_unknown) {
+                                last_unknown_dtype[unknown_slot] = data_type;
+                                unknown_slot = (unknown_slot + 1) % 10;
+                            }
+                        }
+
+                        if (is_service) {
+                            // Service frame - check if it's misaddressed
+                            uint8_t dest_node = (masked_id >> 8) & 0x7F;
+                            uint8_t our_node = canardGetLocalNodeID(&canard);
+                            bool is_response = ((masked_id >> 15) & 1) == 0;
+
+                            if (dest_node != our_node && data_type == 1) { // GetNodeInfo = type 1
+                                static uint32_t misaddr_count = 0;
+                                misaddr_count++;
+                                if (misaddr_count <= 10) {
+                                    ESP_LOGE("CAN_RX", "MISADDRESSED GetNodeInfo %s from node %d to node %d (we are node %d)",
+                                             is_response ? "response" : "request",
+                                             source_node, dest_node, our_node);
+                                    ESP_LOGE("CAN_RX", "  This node is sending responses to wrong destination");
+                                }
                             }
                         }
                     }
