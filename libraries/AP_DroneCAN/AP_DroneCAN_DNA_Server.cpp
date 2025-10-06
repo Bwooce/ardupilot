@@ -386,13 +386,24 @@ void AP_DroneCAN_DNA_Server::Database::write_record(const NodeRecord &record, ui
         return;
     }
 
+    // Read existing record and only write if different (preserve flash write lifetime)
+    NodeRecord existing_record;
+    storage->read_block(&existing_record, NODERECORD_LOC(node_id), sizeof(NodeRecord));
+
+    if (memcmp(&existing_record, &record, sizeof(NodeRecord)) == 0) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGD("DNA_SERVER", "Writing record for node_id=%d to storage offset=%d", 
+        ESP_LOGD("DNA_SERVER", "Skipping write to node %d - record unchanged", node_id);
+#endif
+        return; // Record unchanged, skip write
+    }
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGD("DNA_SERVER", "Writing record for node_id=%d to storage offset=%d",
              node_id, NODERECORD_LOC(node_id));
-    hal.console->printf("DNA: Writing node %d to storage offset %d\n", 
+    hal.console->printf("DNA: Writing node %d to storage offset %d\n",
                        node_id, NODERECORD_LOC(node_id));
 #endif
-    
+
     storage->write_block(NODERECORD_LOC(node_id), &record, sizeof(NodeRecord));
 }
 
