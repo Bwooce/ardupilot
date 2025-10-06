@@ -304,10 +304,11 @@ void CanardInterface::onTransferReception(CanardInstance* ins, CanardRxTransfer*
     }
     
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Debug GetNodeInfo responses
+    // Debug GetNodeInfo responses (changed to INFO level for better visibility)
     if (transfer->transfer_type == CanardTransferTypeResponse && transfer->data_type_id == 1) {
-        ESP_LOGD("CAN_RX", "GetNodeInfo RESPONSE in onTransferReception from node %d! Payload len=%d",
+        ESP_LOGI("CAN_RX", "GetNodeInfo RESPONSE received in onTransferReception from node %d! Payload len=%d",
                  transfer->source_node_id, transfer->payload_len);
+        ESP_LOGI("CAN_RX", "  About to dispatch to handlers...");
     }
 #endif
     
@@ -408,14 +409,27 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
 #endif
     
     // Debug logging for all important message types (disabled - too verbose)
-#if 0  // Enable only for DNA debugging
-    bool is_important = (data_type_id == 1) || // Allocation
-                        (data_type_id == 341) || // NodeStatus  
-                        (data_type_id == 551); // GetNodeInfo
-    
+#if 1  // Enable only for DNA debugging
+    bool is_important = (data_type_id == 1) || // Allocation/GetNodeInfo
+                        (data_type_id == 341) || // NodeStatus
+                        (data_type_id == 551); // Legacy GetNodeInfo
+
     if (is_important) {
-        hal.console->printf("DNA: shouldAccept dtid=%d from node %d, xfer_type=%d\n", 
-                           data_type_id, source_node_id, transfer_type);
+        const char* msg_type = "UNKNOWN";
+        if (data_type_id == 1) {
+            if (source_node_id == 0) {
+                msg_type = "DNA";  // Only actual allocation from node 0
+            } else {
+                msg_type = "GETNODEINFO";  // GetNodeInfo from assigned nodes
+            }
+        } else if (data_type_id == 341) {
+            msg_type = "NODESTATUS";
+        } else if (data_type_id == 551) {
+            msg_type = "LEGACY_GETNODEINFO";
+        }
+
+        hal.console->printf("%s: shouldAccept dtid=%d from node %d, xfer_type=%d\n",
+                           msg_type, data_type_id, source_node_id, transfer_type);
     }
 #endif
     
@@ -436,10 +450,11 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
         
         // Special logging for service responses
         if (transfer_type == CanardTransferTypeResponse) {
-            ESP_LOGD("CAN_RX", "SERVICE RESPONSE RECEIVED! dtid=%d from node %d", 
+            ESP_LOGI("CAN_RX", "SERVICE RESPONSE ACCEPTED in shouldAccept! dtid=%d from node %d",
                      data_type_id, source_node_id);
             if (data_type_id == 1) {  // GetNodeInfo response
-                ESP_LOGD("CAN_RX", "GetNodeInfo RESPONSE from node %d!", source_node_id);
+                ESP_LOGI("CAN_RX", "GetNodeInfo RESPONSE ACCEPTED from node %d, xfer_type=%d!",
+                         source_node_id, transfer_type);
             }
         }
     }
@@ -800,6 +815,42 @@ void CanardInterface::processRx() {
                 const int16_t res = canardHandleRxFrame(&canard, &rx_frame, timestamp);
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+                // Log every GetNodeInfo frame result immediately with more details
+                if ((rx_frame.id & CANARD_CAN_EXT_ID_MASK) != 0) {
+                    uint32_t masked_id = rx_frame.id & CANARD_CAN_EXT_ID_MASK;
+                    uint16_t dtype = extractDataType(masked_id);
+                    if (dtype == 1) {
+                        uint8_t src = extractSourceNodeID(masked_id);
+                        bool is_service = (masked_id >> 7) & 1; // SNM bit: 1=service, 0=broadcast
+
+                        if (is_service) {
+                            // Service message - has destination field
+                            uint8_t dest = (masked_id >> 8) & 0x7F; // Destination node ID
+                            bool is_response = ((masked_id >> 15) & 1) == 0; // bit 15=0 means response
+                            uint8_t service_tid = (masked_id >> 0) & 0x7F; // service transfer ID bits 6:0
+                            if (src == 125) {
+                                ESP_LOGI("CANARD", "canardHandleRxFrame(dtype=1 SERVICE, src=%d, dest=%d, is_resp=%d, service_tid=%d) returned %d",
+                                         src, dest, is_response, service_tid, res);
+                                if (dest != canard.node_id) {
+                                    ESP_LOGE("CANARD", "WARNING: Response is for node %d but we are node %d!",
+                                             dest, canard.node_id);
+                                }
+                                if (!is_response) {
+                                    ESP_LOGE("CANARD", "WARNING: Frame marked as REQUEST not RESPONSE!");
+                                }
+                            }
+                        } else {
+                            // Broadcast message - no destination field (bits 14-8 are part of message type)
+                            if (src == 125) {
+                                ESP_LOGI("CANARD", "canardHandleRxFrame(dtype=1 BROADCAST, src=%d, no dest) returned %d",
+                                         src, res);
+                            }
+                        }
+                    }
+                }
+#endif
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
                 // Debug GetNodeInfo multi-frame assembly from specific nodes
                 if ((rx_frame.id & CANARD_CAN_EXT_ID_MASK) != 0) {
                     uint32_t masked_id = rx_frame.id & CANARD_CAN_EXT_ID_MASK;
@@ -821,8 +872,8 @@ void CanardInterface::processRx() {
 
                         if (sot) {
                             // Start of new transfer
-                            ESP_LOGI("GETNODEINFO", "START from node %d: TID=%d, toggle=%d, DLC=%d",
-                                     src_node, tid, toggle, rx_frame.data_len);
+                            ESP_LOGI("GETNODEINFO", "START from node %d: TID=%d, toggle=%d, SOT=%d, EOT=%d, DLC=%d",
+                                     src_node, tid, toggle, sot, eot, rx_frame.data_len);
                             frame_count[src_node] = 0;
                             last_tid[src_node] = tid;
                             last_toggle[src_node] = toggle;
@@ -842,11 +893,19 @@ void CanardInterface::processRx() {
                             }
                         }
 
+                        // Always increment frame count
+                        frame_count[src_node]++;
+
                         // Log frame details
                         if (debug_count++ < 100) {  // Limit spam
                             ESP_LOGI("GETNODEINFO", "Frame %lu from %d: SOT=%d EOT=%d TOG=%d TID=%d (res=%d)",
-                                     (unsigned long)frame_count[src_node]++, src_node,
+                                     (unsigned long)(frame_count[src_node] - 1), src_node,
                                      sot, eot, toggle, tid, res);
+
+                            // Special logging for the final frame
+                            if (eot && res == 0) {
+                                ESP_LOGI("GETNODEINFO", "EOT frame processed correctly (canard always returns 0, not 1)");
+                            }
 
                             // Check for errors
                             if (!sot && tid != last_tid[src_node]) {
@@ -944,10 +1003,10 @@ void CanardInterface::processRx() {
                     uint32_t masked_id = rx_frame.id & CANARD_CAN_EXT_ID_MASK;
                     uint16_t data_type = extractDataType(masked_id);
                     uint8_t source_node = extractSourceNodeID(masked_id);
-                    ESP_LOGD("CAN_RX", "SUCCESS: canardHandleRxFrame returned %d for dtype=%d from node=%d",
+                    ESP_LOGI("CAN_RX", "SUCCESS: canardHandleRxFrame returned %d for dtype=%d from node=%d",
                              res, data_type, source_node);
                     // This means a complete transfer was assembled - onTransferReception should be called
-                    ESP_LOGD("CAN_RX", "COMPLETE TRANSFER ASSEMBLED! Check if onTransferReception is called");
+                    ESP_LOGI("CAN_RX", "COMPLETE TRANSFER ASSEMBLED! onTransferReception should fire now...");
                 } else if (res < 0) {
                     canard_errors++;
                     // Log every 50th error with more details
@@ -955,7 +1014,8 @@ void CanardInterface::processRx() {
                         uint32_t masked_id = rx_frame.id & CANARD_CAN_EXT_ID_MASK;
                         uint16_t data_type = extractDataType(masked_id);
                         uint8_t source_node = extractSourceNodeID(masked_id);
-                        uint8_t dest_node = (masked_id >> 8) & 0x7F; // Destination for service frames (bits 14-8)
+                        bool is_service = (masked_id >> 7) & 1; // SNM bit: 1=service, 0=broadcast
+                        uint8_t dest_node = is_service ? ((masked_id >> 8) & 0x7F) : 0; // Only extract dest for service frames
                         const char* error_name = "UNKNOWN";
                         switch(-res) {
                             case CANARD_ERROR_RX_WRONG_ADDRESS: error_name = "WRONG_ADDRESS"; break;
@@ -967,9 +1027,15 @@ void CanardInterface::processRx() {
                             case CANARD_ERROR_RX_BAD_CRC: error_name = "BAD_CRC"; break;
                             default: break;
                         }
-                        ESP_LOGI("CAN_RX", "ERROR %s (%d): dtype=%d, src=%d, dest=%d, our_id=%d",
-                                 error_name, res, data_type, source_node, dest_node,
-                                 canardGetLocalNodeID(&canard));
+                        if (is_service) {
+                            ESP_LOGI("CAN_RX", "ERROR %s (%d): dtype=%d SERVICE, src=%d, dest=%d, our_id=%d",
+                                     error_name, res, data_type, source_node, dest_node,
+                                     canardGetLocalNodeID(&canard));
+                        } else {
+                            ESP_LOGI("CAN_RX", "ERROR %s (%d): dtype=%d BROADCAST, src=%d, our_id=%d",
+                                     error_name, res, data_type, source_node,
+                                     canardGetLocalNodeID(&canard));
+                        }
 
                         // Log the actual frame data for debugging
                         // Log the actual 29-bit CAN ID without internal flags
