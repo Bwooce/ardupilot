@@ -75,14 +75,6 @@ bool AP_Notify_APA102_LED::init()
 
     hal.console->printf("APA102: Initialized %d LEDs\n", num_leds);
 
-    // Debug initial notify flag states
-    hal.console->printf("APA102: Initial flags - init:%d prearm:%d gyro:%d gps_st:%d armed:%d\n",
-                        AP_Notify::flags.initialising,
-                        AP_Notify::flags.pre_arm_check,
-                        AP_Notify::flags.gyro_calibrated,
-                        AP_Notify::flags.gps_status,
-                        AP_Notify::flags.armed);
-
     initialized = true;
     return true;
 }
