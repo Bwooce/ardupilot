@@ -418,10 +418,12 @@ bool Scheduler::thread_create(AP_HAL::MemberProc proc, const char *name, uint32_
     // This fixes tasks like "FTP" that are created at runtime
     // Note: Registration happens in the creating task's context, not the new task
     esp_err_t wdt_result = esp_task_wdt_add(xhandle);
-    if (wdt_result == ESP_OK) {
-        ESP_LOGI("SCHED", "Auto-registered task '%s' with watchdog", name);
-    } else {
-        ESP_LOGW("SCHED", "Failed to auto-register task '%s' with watchdog: %d", name, wdt_result);
+
+    // Don't log success - ESP-IDF logging system can deadlock during init when
+    // multiple threads try to log simultaneously. Watchdog registration failure
+    // is critical, so we use printf to bypass the logging semaphore.
+    if (wdt_result != ESP_OK) {
+        printf("SCHED: Failed to auto-register task '%s' with watchdog: %d\n", name, wdt_result);
     }
 
     return true;
