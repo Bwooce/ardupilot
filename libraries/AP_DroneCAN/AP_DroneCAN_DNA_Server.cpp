@@ -410,10 +410,23 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
             node_verified.set(curr_verifying_node);
             node_healthy.set(curr_verifying_node);
         } else {
+            // Track verification failures
+            static uint32_t verification_attempt_count[128] = {0};
+            verification_attempt_count[curr_verifying_node]++;
+
             uavcan_protocol_GetNodeInfoRequest request;
-            ESP_LOGI("DNA_SERVER", "Sending GetNodeInfo request to node %d", curr_verifying_node);
+            ESP_LOGI("DNA_SERVER", "Sending GetNodeInfo request to node %d (attempt %lu)",
+                     curr_verifying_node,
+                     (unsigned long)verification_attempt_count[curr_verifying_node]);
             node_info_client.request(curr_verifying_node, request);
             nodeInfo_resp_rcvd = false;
+
+            // Warn about nodes that repeatedly fail verification
+            if (verification_attempt_count[curr_verifying_node] % 10 == 0) {
+                hal.console->printf("DNA: Node %d failed verification %lu times - possible decode or protocol issue\n",
+                                  curr_verifying_node,
+                                  (unsigned long)verification_attempt_count[curr_verifying_node]);
+            }
         }
     }
 }

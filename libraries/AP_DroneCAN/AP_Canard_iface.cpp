@@ -393,7 +393,20 @@ void CanardInterface::onTransferReception(CanardInstance* ins, CanardRxTransfer*
     }
 #endif
     
+    // Debug dispatch for GetNodeInfo responses
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    if (transfer->transfer_type == CanardTransferTypeResponse && transfer->data_type_id == 1) {
+        ESP_LOGI("CAN_RX", "  Calling iface->handle_message for GetNodeInfo response from node %d...", transfer->source_node_id);
+    }
+#endif
+
     iface->handle_message(*transfer);
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    if (transfer->transfer_type == CanardTransferTypeResponse && transfer->data_type_id == 1) {
+        ESP_LOGI("CAN_RX", "  Returned from iface->handle_message for node %d", transfer->source_node_id);
+    }
+#endif
 }
 
 bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
