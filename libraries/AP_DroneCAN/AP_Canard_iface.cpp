@@ -299,8 +299,12 @@ void CanardInterface::onTransferReception(CanardInstance* ins, CanardRxTransfer*
     
     // Debug for allocation messages (only for broadcast messages with ID 1, not service responses)
     if (transfer->data_type_id == 1 && transfer->transfer_type == CanardTransferTypeBroadcast) {
-        hal.console->printf("DNA: onTransferReception got Allocation message from node %d\n", 
-                           transfer->source_node_id);
+        if (transfer->source_node_id == 0) {
+            hal.console->printf("DNA: onTransferReception got Allocation message from anonymous node (node_id=0, pre-allocation)\n");
+        } else {
+            hal.console->printf("DNA: onTransferReception got Allocation message from node %d\n",
+                               transfer->source_node_id);
+        }
     }
     
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32

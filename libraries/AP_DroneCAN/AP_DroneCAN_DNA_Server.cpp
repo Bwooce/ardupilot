@@ -145,7 +145,12 @@ bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, 
     if (registered_node_id == 0) {
         // UID not in database - could be new, or allocation used partial UID (different hash)
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP_LOGI("DNA_DB", "UID not found in DB (new or partial UID in allocation), registering node %d", source_node_id);
+        NodeRecord cmp_record;
+        compute_uid_hash(cmp_record, unique_id, 16);
+        ESP_LOGI("DNA_DB", "UID not found in DB (new or partial UID in allocation), registering node %d, hash=%02X%02X%02X%02X%02X%02X",
+                 source_node_id,
+                 cmp_record.uid_hash[0], cmp_record.uid_hash[1], cmp_record.uid_hash[2],
+                 cmp_record.uid_hash[3], cmp_record.uid_hash[4], cmp_record.uid_hash[5]);
 #endif
         register_uid(source_node_id, unique_id, 16);
         return false;
@@ -206,7 +211,12 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
             resp_node_id = 0; // Force new allocation below
         } else {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            ESP_LOGD("DNA_DB", "UID found with node %d (not in use), re-assigning", resp_node_id);
+            NodeRecord cmp_record;
+            compute_uid_hash(cmp_record, unique_id, 16);
+            ESP_LOGD("DNA_DB", "UID found with node %d (not in use), re-assigning, hash=%02X%02X%02X%02X%02X%02X",
+                     resp_node_id,
+                     cmp_record.uid_hash[0], cmp_record.uid_hash[1], cmp_record.uid_hash[2],
+                     cmp_record.uid_hash[3], cmp_record.uid_hash[4], cmp_record.uid_hash[5]);
 #endif
             return resp_node_id; // Safe to return - node not currently active
         }
@@ -224,7 +234,11 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
 
         if (resp_node_id != 0) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            ESP_LOGD("DNA_DB", "Assigning new node ID %d", resp_node_id);
+            NodeRecord cmp_record;
+            compute_uid_hash(cmp_record, unique_id, 16);
+            ESP_LOGD("DNA_DB", "Assigning new node ID %d, hash=%02X%02X%02X%02X%02X%02X", resp_node_id,
+                     cmp_record.uid_hash[0], cmp_record.uid_hash[1], cmp_record.uid_hash[2],
+                     cmp_record.uid_hash[3], cmp_record.uid_hash[4], cmp_record.uid_hash[5]);
 #endif
             create_registration(resp_node_id, unique_id, 16);
         } else {
