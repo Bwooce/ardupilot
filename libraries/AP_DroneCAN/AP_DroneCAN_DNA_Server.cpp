@@ -134,15 +134,51 @@ bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, 
 {
     WITH_SEMAPHORE(sem);
 
-    if (is_registered(source_node_id)) {
-        // this device's node ID is associated with a different unique ID
-        if (source_node_id != find_node_id(unique_id, 16)) {
-            return true; // so raise as duplicate
-        }
-    } else {
-        register_uid(source_node_id, unique_id, 16); // we don't know about this node ID, let's register it
+    // UID is the source of truth - find what node ID this UID is registered to
+    uint8_t registered_node_id = find_node_id(unique_id, 16);
+
+    if (registered_node_id == 0) {
+        // UID not in database at all - register it
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        ESP_LOGI("DNA_DB", "New UID detected, registering node %d", source_node_id);
+#endif
+        register_uid(source_node_id, unique_id, 16);
+        return false;
     }
-    return false; // not a duplicate
+
+    if (registered_node_id == source_node_id) {
+        // UID and node ID match our records - all good
+        return false;
+    }
+
+    // UID is registered to a DIFFERENT node ID
+    // This could be:
+    // 1. Device legitimately changed its node ID - UPDATE the database
+    // 2. Two devices with same UID (hardware issue) - should be rare
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGW("DNA_DB", "UID conflict: Node %d has UID registered to node %d",
+             source_node_id, registered_node_id);
+    ESP_LOGW("DNA_DB", "  Updating database to map UID to node %d (node may have changed ID)",
+             source_node_id);
+    ESP_LOGW("DNA_DB", "  UID: %02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
+             unique_id[0], unique_id[1], unique_id[2], unique_id[3],
+             unique_id[4], unique_id[5], unique_id[6], unique_id[7],
+             unique_id[8], unique_id[9], unique_id[10], unique_id[11],
+             unique_id[12], unique_id[13], unique_id[14], unique_id[15]);
+#endif
+
+    // Clear old registration and register with new node ID
+    // This allows devices to change their node ID
+    NodeRecord empty_record;
+    memset(&empty_record, 0, sizeof(empty_record));
+    write_record(empty_record, registered_node_id);
+    node_registered.clear(registered_node_id);
+
+    // Register with the current node ID
+    register_uid(source_node_id, unique_id, 16);
+
+    return false; // Not a duplicate, just updated the mapping
 }
 
 // handle the allocation message. returns the allocated node ID, or 0 if allocation failed
