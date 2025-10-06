@@ -169,6 +169,8 @@ void AP_Notify_APA102_LED::update()
             uint8_t total_healthy = 0;
             bool has_dronecan = false;
             bool has_can = false;
+            char bus_status[64] = "";
+            int bus_status_len = 0;
 
             for (uint8_t i = 0; i < HAL_NUM_CAN_IFACES; i++) {
 #if HAL_ENABLE_DRONECAN_DRIVERS
@@ -178,8 +180,19 @@ void AP_Notify_APA102_LED::update()
                     AP_DroneCAN* dronecan = static_cast<AP_DroneCAN*>(can_mgr.get_driver(i));
                     if (dronecan != nullptr) {
                         AP_DroneCAN_DNA_Server& dna = dronecan->get_dna_server();
-                        total_verified += dna.get_verified_node_count();
-                        total_healthy += dna.get_healthy_node_count();
+                        // Get counts excluding local node
+                        uint8_t verified = dna.get_remote_verified_count();
+                        uint8_t healthy = dna.get_remote_healthy_count();
+
+                        total_verified += verified;
+                        total_healthy += healthy;
+
+                        // Build per-bus status string
+                        if (bus_status_len > 0) {
+                            bus_status_len += snprintf(bus_status + bus_status_len, sizeof(bus_status) - bus_status_len, ",");
+                        }
+                        bus_status_len += snprintf(bus_status + bus_status_len, sizeof(bus_status) - bus_status_len,
+                                                   "can%d:%d/%d", i+1, healthy, verified);
                     }
                 } else
 #endif
@@ -195,11 +208,11 @@ void AP_Notify_APA102_LED::update()
             } else if (total_verified == 0) {
                 hal.console->printf("[1]can=no_nodes:red ");
             } else if (total_healthy == 0) {
-                hal.console->printf("[1]can=0/%d:red ", total_verified);
+                hal.console->printf("[1]can=%s:red ", bus_status);
             } else if (total_healthy < total_verified) {
-                hal.console->printf("[1]can=%d/%d:orange ", total_healthy, total_verified);
+                hal.console->printf("[1]can=%s:orange ", bus_status);
             } else {
-                hal.console->printf("[1]can=%d/%d:green ", total_healthy, total_verified);
+                hal.console->printf("[1]can=%s:green ", bus_status);
             }
 #else
             hal.console->printf("[1]can=disabled:off ");
@@ -429,7 +442,7 @@ AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::get_can_status_color()
 #if HAL_NUM_CAN_IFACES > 0
     const AP_CANManager& can_mgr = AP::can();
 
-    // Check all CAN interfaces for DroneCAN status
+    // Check all CAN interfaces for DroneCAN status (excluding local node)
     bool can_enabled = false;
     uint8_t total_verified_nodes = 0;
     uint8_t total_healthy_nodes = 0;
@@ -441,12 +454,12 @@ AP_Notify_APA102_LED::LED_Color AP_Notify_APA102_LED::get_can_status_color()
             can_enabled = true;
             has_dronecan = true;
 
-            // Get DroneCAN driver and check node health
+            // Get DroneCAN driver and check node health (excluding local node)
             AP_DroneCAN* dronecan = static_cast<AP_DroneCAN*>(can_mgr.get_driver(i));
             if (dronecan != nullptr) {
                 AP_DroneCAN_DNA_Server& dna = dronecan->get_dna_server();
-                total_verified_nodes += dna.get_verified_node_count();
-                total_healthy_nodes += dna.get_healthy_node_count();
+                total_verified_nodes += dna.get_remote_verified_count();
+                total_healthy_nodes += dna.get_remote_healthy_count();
             }
         } else
 #endif

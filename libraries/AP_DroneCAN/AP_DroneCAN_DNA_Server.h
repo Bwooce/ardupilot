@@ -160,6 +160,16 @@ public:
     bool has_healthy_nodes() { return node_healthy.count() > 0; }
     bool all_nodes_healthy() { return node_healthy == node_verified && node_verified.count() > 0; }
 
+    // Get node counts excluding local node (for display purposes)
+    uint8_t get_remote_healthy_count() {
+        uint8_t count = node_healthy.count();
+        return (node_healthy.get(self_node_id) && count > 0) ? count - 1 : count;
+    }
+    uint8_t get_remote_verified_count() {
+        uint8_t count = node_verified.count();
+        return (node_verified.get(self_node_id) && count > 0) ? count - 1 : count;
+    }
+
     // canard message handler callbacks
     void handle_allocation(const CanardRxTransfer& transfer, const uavcan_protocol_dynamic_node_id_Allocation& msg);
     void handleNodeStatus(const CanardRxTransfer& transfer, const uavcan_protocol_NodeStatus& msg);
