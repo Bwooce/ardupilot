@@ -835,8 +835,12 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
 
     bool duplicate = db.handle_node_info(transfer.source_node_id, rsp.hardware_version.unique_id, &node_healthy);
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DNA_SERVER", "Node %d GetNodeInfo: duplicate=%s, name='%s'",
-             transfer.source_node_id, duplicate ? "YES" : "NO", rsp.name.data);
+    // Only log on first GetNodeInfo (when not yet verified), or if duplicate detected
+    bool first_verification = !node_verified.get(transfer.source_node_id);
+    if (first_verification || duplicate) {
+        ESP_LOGI("DNA_SERVER", "Node %d GetNodeInfo: duplicate=%s, name='%s'",
+                 transfer.source_node_id, duplicate ? "YES" : "NO", rsp.name.data);
+    }
 #endif
     if (duplicate) {
         if (!_ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_DUPLICATE_NODE)) {
