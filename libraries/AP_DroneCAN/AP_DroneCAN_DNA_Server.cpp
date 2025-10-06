@@ -143,9 +143,9 @@ bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, 
     uint8_t registered_node_id = find_node_id(unique_id, 16);
 
     if (registered_node_id == 0) {
-        // UID not in database at all - register it
+        // UID not in database - could be new, or allocation used partial UID (different hash)
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP_LOGI("DNA_DB", "New UID detected, registering node %d", source_node_id);
+        ESP_LOGI("DNA_DB", "UID not found in DB (new or partial UID in allocation), registering node %d", source_node_id);
 #endif
         register_uid(source_node_id, unique_id, 16);
         return false;
@@ -200,7 +200,7 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
         // Clear the stale registration and assign a new ID to avoid conflicts
         if (node_seen && node_seen->get(resp_node_id)) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            ESP_LOGW("DNA_DB", "UID wants node %d which is in use - assigning new ID to avoid conflict", resp_node_id);
+            ESP_LOGW("DNA_DB", "Node %d in use - clearing stale registration, will reallocate (may get same ID if free)", resp_node_id);
 #endif
             delete_registration(resp_node_id);
             resp_node_id = 0; // Force new allocation below
