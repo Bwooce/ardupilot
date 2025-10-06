@@ -540,11 +540,61 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
         // Get node name if available (stored in handleNodeInfo)
         const char* node_name = g_node_names[transfer.source_node_id][0] ? g_node_names[transfer.source_node_id] : "unknown";
 
-        ESP_LOGI("DRONECAN", "Node %d (%s) NodeStatus #%lu: uptime=%lus, health=%d, mode=%d, interval=%lums",
-                 transfer.source_node_id, node_name,
-                 (unsigned long)nodestatus_count[transfer.source_node_id],
-                 (unsigned long)msg.uptime_sec, msg.health, msg.mode,
-                 (unsigned long)dt);
+        // Decode health and mode values per UAVCAN spec
+        const char* health_str = "UNKNOWN";
+        switch (msg.health) {
+            case 0: health_str = "OK"; break;
+            case 1: health_str = "WARNING"; break;
+            case 2: health_str = "ERROR"; break;
+            case 3: health_str = "CRITICAL"; break;
+        }
+
+        const char* mode_str = "UNKNOWN";
+        switch (msg.mode) {
+            case 0: mode_str = "OPERATIONAL"; break;
+            case 1: mode_str = "INITIALIZATION"; break;
+            case 2: mode_str = "MAINTENANCE"; break;
+            case 3: mode_str = "SOFTWARE_UPDATE"; break;
+            case 4: mode_str = "OFFLINE"; break;
+            default: mode_str = "RESERVED"; break;
+        }
+
+        // Convert uptime to human-readable format
+        uint32_t uptime = msg.uptime_sec;
+        uint32_t days = uptime / 86400;
+        uint32_t hours = (uptime % 86400) / 3600;
+        uint32_t minutes = (uptime % 3600) / 60;
+        uint32_t seconds = uptime % 60;
+
+        if (days > 0) {
+            ESP_LOGI("DRONECAN", "Node %d (%s) NodeStatus #%lu: uptime=%lud%luh%lum, health=%d (%s), mode=%d (%s), interval=%lums",
+                     transfer.source_node_id, node_name,
+                     (unsigned long)nodestatus_count[transfer.source_node_id],
+                     (unsigned long)days, (unsigned long)hours, (unsigned long)minutes,
+                     msg.health, health_str, msg.mode, mode_str,
+                     (unsigned long)dt);
+        } else if (hours > 0) {
+            ESP_LOGI("DRONECAN", "Node %d (%s) NodeStatus #%lu: uptime=%luh%lum%lus, health=%d (%s), mode=%d (%s), interval=%lums",
+                     transfer.source_node_id, node_name,
+                     (unsigned long)nodestatus_count[transfer.source_node_id],
+                     (unsigned long)hours, (unsigned long)minutes, (unsigned long)seconds,
+                     msg.health, health_str, msg.mode, mode_str,
+                     (unsigned long)dt);
+        } else if (minutes > 0) {
+            ESP_LOGI("DRONECAN", "Node %d (%s) NodeStatus #%lu: uptime=%lum%lus, health=%d (%s), mode=%d (%s), interval=%lums",
+                     transfer.source_node_id, node_name,
+                     (unsigned long)nodestatus_count[transfer.source_node_id],
+                     (unsigned long)minutes, (unsigned long)seconds,
+                     msg.health, health_str, msg.mode, mode_str,
+                     (unsigned long)dt);
+        } else {
+            ESP_LOGI("DRONECAN", "Node %d (%s) NodeStatus #%lu: uptime=%lus, health=%d (%s), mode=%d (%s), interval=%lums",
+                     transfer.source_node_id, node_name,
+                     (unsigned long)nodestatus_count[transfer.source_node_id],
+                     (unsigned long)seconds,
+                     msg.health, health_str, msg.mode, mode_str,
+                     (unsigned long)dt);
+        }
     }
 
     // Warn about irregular intervals

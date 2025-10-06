@@ -32,7 +32,7 @@ private:
     void update_leds();
     
     // Status determination functions for multi-LED mode
-    LED_Color get_system_status_color();
+    LED_Color get_battery_status_color();
     LED_Color get_can_status_color();
     LED_Color get_gps_status_color();
     LED_Color get_armed_status_color();

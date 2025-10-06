@@ -467,14 +467,17 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
         }
 
         if (is_new_rejection || reject_count <= 10) {
-            // Log with full details for new unknown message types
+            // Log with full details for new unknown message types (skip broadcasts)
             const char* xfer_type_str = "UNKNOWN";
             if (transfer_type == CanardTransferTypeResponse) xfer_type_str = "RESPONSE";
             else if (transfer_type == CanardTransferTypeRequest) xfer_type_str = "REQUEST";
             else if (transfer_type == CanardTransferTypeBroadcast) xfer_type_str = "BROADCAST";
 
-            ESP_LOGD("CAN_RX", "UNKNOWN MESSAGE REJECTED: dtype=%d (%s), src=node %d, total_rejected=%lu",
-                     data_type_id, xfer_type_str, source_node_id, (unsigned long)reject_count);
+            // Only log addressed messages (requests/responses), not broadcasts
+            if (transfer_type != CanardTransferTypeBroadcast) {
+                ESP_LOGI("CAN_RX", "UNKNOWN MESSAGE REJECTED: dtype=%d (%s), src=node %d, total_rejected=%lu",
+                         data_type_id, xfer_type_str, source_node_id, (unsigned long)reject_count);
+            }
 
             if (is_new_rejection) {
                 last_rejected_dtype[rejection_slot] = data_type_id;
@@ -483,7 +486,7 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
             }
         } else if (reject_count % 100 == 0) {
             // Periodic summary for known unknown messages
-            ESP_LOGD("CAN_RX", "Unknown messages: %lu total rejected", (unsigned long)reject_count);
+            ESP_LOGI("CAN_RX", "Unknown messages: %lu total rejected", (unsigned long)reject_count);
         }
     } else {
         // Log all accepted messages at DEBUG level
@@ -869,127 +872,25 @@ void CanardInterface::processRx() {
                             // Service message - has destination field
                             uint8_t dest = (masked_id >> 8) & 0x7F; // Destination node ID
                             bool is_response = ((masked_id >> 15) & 1) == 0; // bit 15=0 means response
-                            uint8_t tail_byte = rx_frame.data[rx_frame.data_len - 1];
-                            uint8_t service_tid = tail_byte & 0x1F; // Transfer ID from tail byte bits 4:0
-                            if (src == 125) {
-                                ESP_LOGD("CANARD", "canardHandleRxFrame(dtype=1 SERVICE, src=%d, dest=%d, is_resp=%d, service_tid=%d) returned %d",
-                                         src, dest, is_response, service_tid, res);
-                                if (dest != canard.node_id) {
-                                    ESP_LOGE("CANARD", "WARNING: Response is for node %d but we are node %d",
-                                             dest, canard.node_id);
-                                }
-                                if (!is_response) {
-                                    ESP_LOGE("CANARD", "WARNING: Frame marked as REQUEST not RESPONSE");
-                                }
+
+                            ESP_LOGD("CANARD", "canardHandleRxFrame(dtype=%d SERVICE, src=%d, dest=%d, is_resp=%d) returned %d",
+                                     dtype, src, dest, is_response, res);
+                            if (dest != canard.node_id) {
+                                ESP_LOGE("CANARD", "WARNING: Response is for node %d but we are node %d",
+                                         dest, canard.node_id);
+                            }
+                            if (!is_response && dtype == 1) {
+                                ESP_LOGE("CANARD", "WARNING: GetNodeInfo frame marked as REQUEST not RESPONSE");
                             }
                         } else {
                             // Broadcast message - no destination field (bits 14-8 are part of message type)
-                            if (src == 125) {
-                                ESP_LOGD("CANARD", "canardHandleRxFrame(dtype=1 BROADCAST, src=%d, no dest) returned %d",
-                                         src, res);
-                            }
+                            ESP_LOGD("CANARD", "canardHandleRxFrame(dtype=%d BROADCAST, src=%d) returned %d",
+                                     dtype, src, res);
                         }
                     }
                 }
 #endif
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-                // Debug GetNodeInfo multi-frame assembly from specific nodes
-                if ((rx_frame.id & CANARD_CAN_EXT_ID_MASK) != 0) {
-                    uint32_t masked_id = rx_frame.id & CANARD_CAN_EXT_ID_MASK;
-                    uint16_t dtype = extractDataType(masked_id);
-                    uint8_t src_node = extractSourceNodeID(masked_id);
-
-                    // Track GetNodeInfo responses from problematic nodes (123, 125)
-                    if (dtype == 1 && (src_node == 123 || src_node == 125)) {
-                        uint8_t tail = rx_frame.data[rx_frame.data_len - 1];
-                        uint8_t sot = (tail >> 7) & 1;
-                        uint8_t eot = (tail >> 6) & 1;
-                        uint8_t toggle = (tail >> 5) & 1;
-                        uint8_t tid = tail & 0x1F;
-
-                        static uint8_t last_tid[128] = {0xFF};  // Track per node
-                        static uint8_t last_toggle[128] = {0xFF};
-                        static uint32_t frame_count[128] = {0};
-                        static uint32_t debug_count = 0;
-
-                        if (sot) {
-                            // Start of new transfer
-                            ESP_LOGI("GETNODEINFO", "START from node %d: TID=%d, toggle=%d, SOT=%d, EOT=%d, DLC=%d",
-                                     src_node, tid, toggle, sot, eot, rx_frame.data_len);
-                            frame_count[src_node] = 0;
-                            last_tid[src_node] = tid;
-                            last_toggle[src_node] = toggle;
-
-                            // Check if this is a single-frame transfer (SOT and EOT both set)
-                            if (eot) {
-                                ESP_LOGE("GETNODEINFO", "SINGLE-FRAME GetNodeInfo.Response from node %d!",
-                                         src_node);
-                                ESP_LOGE("GETNODEINFO", "  This is WRONG - response is ~56 bytes, needs multi-frame!");
-                                ESP_LOGE("GETNODEINFO", "  Payload in frame: %d bytes (should be start of 8-frame sequence)",
-                                         rx_frame.data_len - 1);
-                                // Log the data bytes
-                                ESP_LOGE("GETNODEINFO", "  Data: %02X %02X %02X %02X %02X %02X (tail=%02X)",
-                                         rx_frame.data[0], rx_frame.data[1], rx_frame.data[2],
-                                         rx_frame.data[3], rx_frame.data[4], rx_frame.data[5],
-                                         tail);
-                            }
-                        }
-
-                        // Always increment frame count
-                        frame_count[src_node]++;
-
-                        // Log frame details at DEBUG level
-                        if (debug_count++ < 100) {  // Limit spam
-                            ESP_LOGD("GETNODEINFO", "Frame %lu from %d: SOT=%d EOT=%d TOG=%d TID=%d (res=%d)",
-                                     (unsigned long)(frame_count[src_node] - 1), src_node,
-                                     sot, eot, toggle, tid, res);
-
-                            // Special logging for the final frame
-                            if (eot && res == 0) {
-                                ESP_LOGD("GETNODEINFO", "EOT frame processed correctly (canard always returns 0, not 1)");
-                            }
-
-                            // Check for errors (keep at ERROR level)
-                            if (!sot && tid != last_tid[src_node]) {
-                                ESP_LOGE("GETNODEINFO", "TID CHANGED node %d: %d->%d",
-                                         src_node, last_tid[src_node], tid);
-                            }
-                            if (!sot && last_toggle[src_node] != 0xFF && toggle == last_toggle[src_node]) {
-                                ESP_LOGE("GETNODEINFO", "TOGGLE DIDN'T FLIP node %d: still %d",
-                                         src_node, toggle);
-                            }
-                        }
-
-                        last_toggle[src_node] = toggle;
-
-                        if (eot) {
-                            ESP_LOGD("GETNODEINFO", "END from node %d: %lu frames, result=%d",
-                                     src_node, (unsigned long)frame_count[src_node], res);
-                            last_tid[src_node] = 0xFF;  // Reset for next transfer
-                            last_toggle[src_node] = 0xFF;
-                        }
-
-                        // Log canard errors
-                        if (res < 0 && res != -CANARD_ERROR_RX_NOT_WANTED) {
-                            ESP_LOGE("GETNODEINFO", "ERROR %d from node %d at frame %lu",
-                                     res, src_node, (unsigned long)frame_count[src_node]);
-
-                            // Decode specific errors
-                            const char* error_str = "UNKNOWN";
-                            switch (-res) {
-                                case CANARD_ERROR_RX_WRONG_TOGGLE: error_str = "WRONG_TOGGLE"; break;
-                                case CANARD_ERROR_RX_UNEXPECTED_TID: error_str = "UNEXPECTED_TID"; break;
-                                case CANARD_ERROR_RX_MISSED_START: error_str = "MISSED_START"; break;
-                                case CANARD_ERROR_RX_SHORT_FRAME: error_str = "SHORT_FRAME"; break;
-                                case CANARD_ERROR_RX_BAD_CRC: error_str = "BAD_CRC"; break;
-                            }
-                            ESP_LOGE("GETNODEINFO", "  Error type: %s", error_str);
-                        }
-                    }
-                }
-#endif
-                
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
                 // Log frames that were accepted by shouldAccept but failed in canardHandleRxFrame
                 if (res <= 0) {
@@ -1108,22 +1009,58 @@ void CanardInterface::processRx() {
                             case CANARD_ERROR_RX_BAD_CRC: error_name = "BAD_CRC"; break;
                             default: break;
                         }
-                        if (is_service) {
-                            ESP_LOGI("CAN_RX", "ERROR %s (%d): dtype=%d SERVICE, src=%d, dest=%d, our_id=%d",
-                                     error_name, res, data_type, source_node, dest_node,
-                                     canardGetLocalNodeID(&canard));
-                        } else {
-                            ESP_LOGI("CAN_RX", "ERROR %s (%d): dtype=%d BROADCAST, src=%d, our_id=%d",
-                                     error_name, res, data_type, source_node,
-                                     canardGetLocalNodeID(&canard));
+
+                        // Special handling for NOT_WANTED errors
+                        bool should_log = true;
+                        bool log_at_debug = false;
+                        if (res == -CANARD_ERROR_RX_NOT_WANTED) {
+                            // Don't log broadcast NOT_WANTED messages at all
+                            if (!is_service) {
+                                should_log = false;
+                            } else {
+                                // Service message - check if addressed to us
+                                uint8_t our_id = canardGetLocalNodeID(&canard);
+                                if (dest_node != our_id) {
+                                    // Not addressed to us - log at DEBUG only
+                                    log_at_debug = true;
+                                }
+                                // If addressed to us (dest_node == our_id), log at INFO (log_at_debug stays false)
+                            }
                         }
 
-                        // Log the actual frame data for debugging
-                        // Log the actual 29-bit CAN ID without internal flags
-                        ESP_LOGI("CAN_RX", "  Frame ID: 0x%08X, DLC: %d",
-                                 (unsigned)(rx_frame.id & 0x1FFFFFFF), rx_frame.data_len);
+                        if (should_log) {
+                            if (log_at_debug) {
+                                // NOT_WANTED service message not addressed to us - DEBUG level
+                                ESP_LOGD("CAN_RX", "ERROR %s (%d): dtype=%d SERVICE, src=%d, dest=%d, our_id=%d",
+                                         error_name, res, data_type, source_node, dest_node,
+                                         canardGetLocalNodeID(&canard));
+                            } else {
+                                // All other errors at INFO level
+                                if (is_service) {
+                                    ESP_LOGI("CAN_RX", "ERROR %s (%d): dtype=%d SERVICE, src=%d, dest=%d, our_id=%d",
+                                             error_name, res, data_type, source_node, dest_node,
+                                             canardGetLocalNodeID(&canard));
+                                } else {
+                                    ESP_LOGI("CAN_RX", "ERROR %s (%d): dtype=%d BROADCAST, src=%d, our_id=%d",
+                                             error_name, res, data_type, source_node,
+                                             canardGetLocalNodeID(&canard));
+                                }
+                            }
+                        }
 
-                        if (rx_frame.data_len > 0) {
+                        // Log the actual frame data for debugging (only if we logged the error)
+                        if (should_log) {
+                            // Log the actual 29-bit CAN ID without internal flags
+                            if (log_at_debug) {
+                                ESP_LOGD("CAN_RX", "  Frame ID: 0x%08X, DLC: %d",
+                                         (unsigned)(rx_frame.id & 0x1FFFFFFF), rx_frame.data_len);
+                            } else {
+                                ESP_LOGI("CAN_RX", "  Frame ID: 0x%08X, DLC: %d",
+                                         (unsigned)(rx_frame.id & 0x1FFFFFFF), rx_frame.data_len);
+                            }
+                        }
+
+                        if (should_log && rx_frame.data_len > 0) {
                             char hex_str[25]; // 8 bytes * 3 chars per byte + null
                             char ascii_str[9] = {0}; // ASCII representation
                             int offset = 0;
@@ -1142,7 +1079,11 @@ void CanardInterface::processRx() {
                                 }
                             }
 
-                            ESP_LOGI("CAN_RX", "  Frame data: %s", hex_str);
+                            if (log_at_debug) {
+                                ESP_LOGD("CAN_RX", "  Frame data: %s", hex_str);
+                            } else {
+                                ESP_LOGI("CAN_RX", "  Frame data: %s", hex_str);
+                            }
 
                             // If frame contains ASCII text, log it as potential debug string
                             if (has_ascii) {

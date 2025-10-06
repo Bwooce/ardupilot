@@ -129,7 +129,7 @@ void ESP32Params::apply_log_level() {
 
     // CAN/DroneCAN debugging - reduced after resolving DNA issues (keep unknown message logging)
     esp_log_level_set("CAN", ESP_LOG_INFO);        // Show CAN info for debugging
-    esp_log_level_set("CAN_RX", ESP_LOG_WARN);     // Reduced - keep rejection logging only
+    esp_log_level_set("CAN_RX", ESP_LOG_INFO);     // Show unknown message rejection logging
     esp_log_level_set("CAN_TX", ESP_LOG_INFO);     // Show TX info for debugging
     esp_log_level_set("CAN_SEND", ESP_LOG_INFO);   // Show send queue info
     esp_log_level_set("DRONECAN", ESP_LOG_INFO);   // Show DroneCAN info

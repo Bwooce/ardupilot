@@ -122,12 +122,6 @@ void ESP32_CANBase::update_tx_stats(bool success)
 {
     if (success) {
         stats.tx_success++;
-        
-        // Log first few TX messages to confirm CAN transmission
-        static uint32_t tx_log_count = 0;
-        if (tx_log_count < 5) {
-            ESP32_DEBUG_INFO("CAN%d TX message #%u sent successfully", instance, (unsigned)(++tx_log_count));
-        }
     } else {
         stats.tx_failed++;
     }

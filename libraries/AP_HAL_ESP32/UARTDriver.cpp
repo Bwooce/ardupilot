@@ -36,8 +36,8 @@
     #include "esp_vfs_usb_serial_jtag.h"
 #endif
 
-#define HAL_ESP32_UART_MIN_TX_SIZE 1024  // Increased for packet atomicity
-#define HAL_ESP32_UART_MIN_RX_SIZE 512
+#define HAL_ESP32_UART_MIN_TX_SIZE 2048  // Large buffer to prevent watchdog during initialization logging
+#define HAL_ESP32_UART_MIN_RX_SIZE 1024  // Increased for better burst handling
 
 extern const AP_HAL::HAL& hal;
 

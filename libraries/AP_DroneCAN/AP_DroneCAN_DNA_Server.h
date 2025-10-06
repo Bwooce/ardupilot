@@ -153,6 +153,13 @@ public:
     //report the server state, along with failure message if any
     bool prearm_check(char* fail_msg, uint8_t fail_msg_len) const;
 
+    // Get node health statistics for LED display
+    uint8_t get_healthy_node_count() { return node_healthy.count(); }
+    uint8_t get_verified_node_count() { return node_verified.count(); }
+    uint8_t get_seen_node_count() { return node_seen.count(); }
+    bool has_healthy_nodes() { return node_healthy.count() > 0; }
+    bool all_nodes_healthy() { return node_healthy == node_verified && node_verified.count() > 0; }
+
     // canard message handler callbacks
     void handle_allocation(const CanardRxTransfer& transfer, const uavcan_protocol_dynamic_node_id_Allocation& msg);
     void handleNodeStatus(const CanardRxTransfer& transfer, const uavcan_protocol_NodeStatus& msg);

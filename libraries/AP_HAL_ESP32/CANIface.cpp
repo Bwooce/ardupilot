@@ -327,11 +327,11 @@ void CANIface::rx_task(void *arg)
                          (unsigned long)rx_count, (unsigned)message.identifier, 
                          message.data_length_code, data_str);
 #elif CAN_LOGLEVEL >= 3
-        // INFO level - summary every 100 frames
+        // INFO level - summary every 1000 frames
         static uint32_t rx_count_summary = 0;
         rx_count_summary++;
-        if ((rx_count_summary % 100) == 0) {
-            CAN_DEBUG_INFO("Received %lu frames, latest ID=0x%08X", 
+        if ((rx_count_summary % 1000) == 0) {
+            CAN_DEBUG_INFO("Received %lu frames, latest ID=0x%08X",
                            (unsigned long)rx_count_summary, (unsigned)message.identifier);
         }
 #elif CAN_LOGLEVEL >= 2

@@ -6455,36 +6455,7 @@ void GCS_MAVLINK::send_global_position_int()
         vel.zero();
     }
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Debug: Check for msgid corruption before sending GLOBAL_POSITION_INT
-    static uint32_t gpi_count = 0;
-    gpi_count++;
-
-    // Create a test buffer to check serialization
-    if (gpi_count == 1 || (gpi_count % 100) == 0) {
-        hal.console->printf("ESP32: About to send GLOBAL_POSITION_INT #%lu\n", (unsigned long)gpi_count);
-
-        // Check if channel buffer has any 0xC0 bytes before we even start
-        uint8_t test_buf[50];
-        memset(test_buf, 0xAA, sizeof(test_buf)); // Fill with known pattern
-
-        // Try to peek at what's in the TX buffer area
-        mavlink_message_t *msg = mavlink_get_channel_buffer(chan);
-        if (msg) {
-            hal.console->printf("Pre-send: msg ptr=%p, magic=%02x, msgid=%lu\n",
-                               msg, msg->magic, (unsigned long)msg->msgid);
-        }
-    }
-#endif
-
     uint16_t heading = ahrs.yaw_sensor;
-
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Debug: Check if heading value matches corruption pattern
-    if ((heading & 0xFF00) == 0xC000 || (heading & 0x00FF) == 0xC0) {
-        hal.console->printf("WARNING: Heading value 0x%04X contains 0xC0 byte!\n", heading);
-    }
-#endif
 
     mavlink_msg_global_position_int_send(
         chan,
