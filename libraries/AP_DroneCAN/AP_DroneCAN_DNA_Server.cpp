@@ -130,7 +130,7 @@ void AP_DroneCAN_DNA_Server::Database::init_server(uint8_t own_node_id, const ui
 }
 
 // handle processing the node info message. returns true if from a duplicate node
-bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, const uint8_t unique_id[])
+bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, const uint8_t unique_id[], const Bitmask<128> *node_healthy)
 {
     WITH_SEMAPHORE(sem);
 
@@ -152,41 +152,61 @@ bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, 
     }
 
     // UID is registered to a DIFFERENT node ID
-    // This could be:
-    // 1. Device legitimately changed its node ID - UPDATE the database
-    // 2. Two devices with same UID (hardware issue) - should be rare
+    // Check if the rightful owner is still active
+    bool rightful_owner_active = node_healthy && node_healthy->get(registered_node_id);
 
+    if (rightful_owner_active) {
+        // Rightful owner still active - update database to remap UID
+        // (allocation should have given this device a different ID, but handle it here too)
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGW("DNA_DB", "UID conflict: Node %d has UID registered to node %d",
-             source_node_id, registered_node_id);
-    ESP_LOGW("DNA_DB", "  Updating database to map UID to node %d (node may have changed ID)",
-             source_node_id);
-    ESP_LOGW("DNA_DB", "  UID: %02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
-             unique_id[0], unique_id[1], unique_id[2], unique_id[3],
-             unique_id[4], unique_id[5], unique_id[6], unique_id[7],
-             unique_id[8], unique_id[9], unique_id[10], unique_id[11],
-             unique_id[12], unique_id[13], unique_id[14], unique_id[15]);
+        ESP_LOGW("DNA_DB", "UID conflict: Node %d using ID registered to active node %d",
+                 source_node_id, registered_node_id);
+        ESP_LOGW("DNA_DB", "  Updating mapping (device got wrong ID somehow)");
 #endif
+    } else {
+        // Rightful owner offline - allow takeover
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        ESP_LOGW("DNA_DB", "Allowing takeover: Node %d (inactive) → Node %d (active)",
+                 registered_node_id, source_node_id);
+#endif
+    }
 
     // Clear old registration and register with new node ID
-    // This allows devices to change their node ID
     NodeRecord empty_record;
     memset(&empty_record, 0, sizeof(empty_record));
     write_record(empty_record, registered_node_id);
     node_registered.clear(registered_node_id);
-
-    // Register with the current node ID
     register_uid(source_node_id, unique_id, 16);
 
-    return false; // Not a duplicate, just updated the mapping
+    return false; // Allow it (allocation should prevent conflicts, but handle here too)
 }
 
 // handle the allocation message. returns the allocated node ID, or 0 if allocation failed
-uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique_id[])
+uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique_id[], const Bitmask<128> *node_seen)
 {
     WITH_SEMAPHORE(sem);
 
     uint8_t resp_node_id = find_node_id(unique_id, 16);
+
+    if (resp_node_id != 0) {
+        // UID found in database with existing node ID assignment
+        // Check if this node ID is currently in use by checking node_seen
+        // If it's in use, there might be a conflict (different device using this ID)
+        // Clear the stale registration and assign a new ID to avoid conflicts
+        if (node_seen && node_seen->get(resp_node_id)) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            ESP_LOGW("DNA_DB", "UID wants node %d which is in use - assigning new ID to avoid conflict", resp_node_id);
+#endif
+            delete_registration(resp_node_id);
+            resp_node_id = 0; // Force new allocation below
+        } else {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            ESP_LOGD("DNA_DB", "UID found with node %d (not in use), re-assigning", resp_node_id);
+#endif
+            return resp_node_id; // Safe to return - node not currently active
+        }
+    }
+
     if (resp_node_id == 0) {
         // find free node ID, starting at the max as prescribed by the standard
         resp_node_id = MAX_NODE_ID;
@@ -199,19 +219,16 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
 
         if (resp_node_id != 0) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            ESP32_DEBUG_INFO("DNA: Assigning new node ID %d to device", resp_node_id);
+            ESP_LOGD("DNA_DB", "Assigning new node ID %d", resp_node_id);
 #endif
             create_registration(resp_node_id, unique_id, 16);
         } else {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            ESP32_DEBUG_ERROR("DNA: No free node IDs available in database");
+            ESP_LOGE("DNA_DB", "No free node IDs available in database");
 #endif
         }
-    } else {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP32_DEBUG_INFO("DNA: Device found in database with existing node ID %d", resp_node_id);
-#endif
     }
+
     return resp_node_id; // will be 0 if not found and not created
 }
 
@@ -738,7 +755,7 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
     }
 #endif
 
-    bool duplicate = db.handle_node_info(transfer.source_node_id, rsp.hardware_version.unique_id);
+    bool duplicate = db.handle_node_info(transfer.source_node_id, rsp.hardware_version.unique_id, &node_healthy);
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     ESP_LOGI("DNA_SERVER", "Node %d: duplicate=%s, name='%s'",
              transfer.source_node_id, duplicate ? "YES" : "NO", rsp.name.data);
@@ -914,7 +931,7 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
         // and we couldn't guarantee it anyway. we will always remember and
         // re-assign node IDs consistently, so the node could send a status
         // with a particular ID once then switch back to no preference for DNA
-        rsp.node_id = db.handle_allocation(rcvd_unique_id);
+        rsp.node_id = db.handle_allocation(rcvd_unique_id, &node_seen);
         
         // For the final allocation response with the echoed UID:
         // If the UID fits in one frame (≤6 bytes), mark it as first_part=1
