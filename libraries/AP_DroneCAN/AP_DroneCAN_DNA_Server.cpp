@@ -198,6 +198,16 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
 
     uint8_t resp_node_id = find_node_id(unique_id, 16);
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    if (resp_node_id == 0) {
+        NodeRecord cmp_record;
+        compute_uid_hash(cmp_record, unique_id, 16);
+        ESP_LOGD("DNA_DB", "Allocation: UID not in DB, hash=%02X%02X%02X%02X%02X%02X (may be partial UID)",
+                 cmp_record.uid_hash[0], cmp_record.uid_hash[1], cmp_record.uid_hash[2],
+                 cmp_record.uid_hash[3], cmp_record.uid_hash[4], cmp_record.uid_hash[5]);
+    }
+#endif
+
     if (resp_node_id != 0) {
         // UID found in database with existing node ID assignment
         // Check if this node ID is currently in use by checking node_seen
@@ -288,9 +298,17 @@ void AP_DroneCAN_DNA_Server::Database::register_uid(uint8_t node_id, const uint8
 {
     uint8_t prev_node_id = find_node_id(unique_id, size); // have we registered this unique ID under a different node ID?
     if (prev_node_id != 0) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        ESP_LOGD("DNA_DB", "register_uid: Deleting old registration at node %d before creating new at node %d", prev_node_id, node_id);
+#endif
         delete_registration(prev_node_id); // yes, delete old node ID's registration
     }
     // overwrite an existing registration with this node ID, if any
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    if (prev_node_id == 0 && node_registered.get(node_id)) {
+        ESP_LOGD("DNA_DB", "register_uid: Updating registration for node %d (e.g., partial→full UID hash)", node_id);
+    }
+#endif
     create_registration(node_id, unique_id, size);
 }
 
