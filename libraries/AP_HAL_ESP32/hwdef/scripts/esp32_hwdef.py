@@ -827,13 +827,14 @@ class ESP32HWDef(hwdef.HWDef):
             config_lines.append("CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y")
             
             # Enable task watchdog to catch infinite loops/hangs  
-            config_lines.append("CONFIG_ESP_TASK_WDT=y")
+            config_lines.append("CONFIG_ESP_TASK_WDT_INIT=y")
             config_lines.append("CONFIG_ESP_TASK_WDT_TIMEOUT_S=5")
             
             # Enable assertions for debugging
             config_lines.append("CONFIG_COMPILER_OPTIMIZATION_ASSERTION_LEVEL=2")
             
             # Enable core dump to flash for crash analysis (debug builds only)
+            # ESP-IDF 5.5+ uses choice-based configuration
             config_lines.append("CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y")
             config_lines.append("CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y")
             config_lines.append("CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y")
@@ -858,7 +859,7 @@ class ESP32HWDef(hwdef.HWDef):
             config_lines.append("CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE=y")
             
             # Disable core dump in production for performance
-            config_lines.append("# CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH is not set")
+            config_lines.append("CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y")
             config_lines.append("# CONFIG_ESP_DEBUG_STUBS_ENABLE is not set")
             
             # Disable task watchdog for performance

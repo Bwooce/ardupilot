@@ -827,7 +827,8 @@ void CanardInterface::processRx() {
                             // Service message - has destination field
                             uint8_t dest = (masked_id >> 8) & 0x7F; // Destination node ID
                             bool is_response = ((masked_id >> 15) & 1) == 0; // bit 15=0 means response
-                            uint8_t service_tid = (masked_id >> 0) & 0x7F; // service transfer ID bits 6:0
+                            uint8_t tail_byte = rx_frame.data[rx_frame.data_len - 1];
+                            uint8_t service_tid = tail_byte & 0x1F; // Transfer ID from tail byte bits 4:0
                             if (src == 125) {
                                 ESP_LOGI("CANARD", "canardHandleRxFrame(dtype=1 SERVICE, src=%d, dest=%d, is_resp=%d, service_tid=%d) returned %d",
                                          src, dest, is_response, service_tid, res);

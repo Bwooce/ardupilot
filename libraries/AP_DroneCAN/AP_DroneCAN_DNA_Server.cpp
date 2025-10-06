@@ -411,6 +411,7 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
             node_healthy.set(curr_verifying_node);
         } else {
             uavcan_protocol_GetNodeInfoRequest request;
+            ESP_LOGI("DNA_SERVER", "Sending GetNodeInfo request to node %d", curr_verifying_node);
             node_info_client.request(curr_verifying_node, request);
             nodeInfo_resp_rcvd = false;
         }
@@ -516,6 +517,7 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
 #endif
             //immediately begin verification of the node_id
             uavcan_protocol_GetNodeInfoRequest request;
+            ESP_LOGI("DNA_SERVER", "Sending GetNodeInfo request to node %d (after allocation)", transfer.source_node_id);
             node_info_client.request(transfer.source_node_id, request);
         }
     }
@@ -645,7 +647,7 @@ received Unique ID */
 void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, const uavcan_protocol_GetNodeInfoResponse& rsp)
 {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGD("DNA_SERVER", "handleNodeInfo CALLED for node %d!", transfer.source_node_id);
+    ESP_LOGI("DNA_SERVER", "handleNodeInfo CALLED for node %d!", transfer.source_node_id);
 #endif
     if (transfer.source_node_id > MAX_NODE_ID || transfer.source_node_id == 0) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
@@ -689,6 +691,8 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
 
     bool duplicate = db.handle_node_info(transfer.source_node_id, rsp.hardware_version.unique_id);
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGI("DNA_SERVER", "Node %d: duplicate=%s, name='%s'",
+             transfer.source_node_id, duplicate ? "YES" : "NO", rsp.name.data);
 #endif
     if (duplicate) {
         if (!_ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_DUPLICATE_NODE)) {
@@ -698,12 +702,14 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
             fault_node_id = transfer.source_node_id;
             memcpy(fault_node_name, rsp.name.data, sizeof(fault_node_name));
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            ESP_LOGE("DNA_SERVER", "DUPLICATE NODE DETECTED! Node %d", transfer.source_node_id);
 #endif
         }
     } else {
         //Verify as well
         node_verified.set(transfer.source_node_id);
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        ESP_LOGI("DNA_SERVER", "Node %d VERIFIED successfully!", transfer.source_node_id);
 #endif
         if (transfer.source_node_id == curr_verifying_node) {
             nodeInfo_resp_rcvd = true;

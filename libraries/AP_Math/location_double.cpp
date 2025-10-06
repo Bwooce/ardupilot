@@ -19,7 +19,9 @@
   this is for double precision functions related to the location structure
  */
 
+#ifndef AP_MATH_ALLOW_DOUBLE_FUNCTIONS
 #define AP_MATH_ALLOW_DOUBLE_FUNCTIONS 1
+#endif
 
 #include <AP_HAL/AP_HAL.h>
 #include <stdlib.h>

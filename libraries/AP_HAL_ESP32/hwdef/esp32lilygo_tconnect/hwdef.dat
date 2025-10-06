@@ -256,3 +256,6 @@ define AP_FILESYSTEM_ESP32_ENABLED 1
 # Increase logging thread stack size to prevent overflow
 # Default may be too small for ESP32, causing stack canary watchpoint triggers
 define HAL_LOGGING_STACK_SIZE 8192
+
+# Disable FTP due to build issues
+define AP_MAVLINK_FTP_ENABLED 0

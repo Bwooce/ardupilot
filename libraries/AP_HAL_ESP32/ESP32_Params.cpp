@@ -133,8 +133,8 @@ void ESP32Params::apply_log_level() {
     esp_log_level_set("CAN_TX", ESP_LOG_INFO);     // Show TX info for debugging
     esp_log_level_set("CAN_SEND", ESP_LOG_INFO);   // Show send queue info
     esp_log_level_set("DRONECAN", ESP_LOG_INFO);   // Show DroneCAN info
-    esp_log_level_set("CANARD", ESP_LOG_ERROR);    // Only critical Canard errors
-    esp_log_level_set("DNA_SERVER", ESP_LOG_ERROR); // Only critical DNA errors
+    esp_log_level_set("CANARD", ESP_LOG_INFO);     // Show Canard info for debugging
+    esp_log_level_set("DNA_SERVER", ESP_LOG_INFO);  // Show DNA server info for debugging
     esp_log_level_set("DNA_HEX", ESP_LOG_INFO); // Enable DNA hex debugging for manual decode
     esp_log_level_set("TWAI_RX", ESP_LOG_INFO);    // TWAI receive debugging
     esp_log_level_set("TWAI_TX", ESP_LOG_INFO);    // TWAI transmit debugging
