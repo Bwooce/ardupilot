@@ -42,8 +42,7 @@ define HAL_USE_OTG 1
 
 # Rover-specific sensor configuration - minimal requirements
 # Rover can operate with compass-free navigation for basic operation
-define HAL_COMPASS_ENABLED 0
-define ALLOW_ARM_NO_COMPASS 1
+define HAL_COMPASS_ENABLED 1
 define HAL_BARO_ALLOW_INIT_NO_BARO 1
 
 # IMU Configuration - Enable minimal IMU for AHRS backend
@@ -259,3 +258,9 @@ define HAL_LOGGING_STACK_SIZE 8192
 
 # Disable FTP due to build issues
 define AP_MAVLINK_FTP_ENABLED 0
+
+# Default parameters for DroneCAN peripherals
+env CAN_D1_PROTOCOL 1
+env CAN_P1_DRIVER 1
+env COMPASS_TYPEMASK -1
+env DID_ENABLE 1

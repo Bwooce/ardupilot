@@ -53,8 +53,7 @@ define MCP2515_RST_PIN 9
 
 # Rover-specific sensor configuration - minimal requirements
 # Rover can operate with compass-free navigation for basic operation
-define HAL_COMPASS_ENABLED 0
-define ALLOW_ARM_NO_COMPASS 1
+define HAL_COMPASS_ENABLED 1
 define HAL_BARO_ALLOW_INIT_NO_BARO 1
 
 # IMU Configuration - Enable minimal IMU for AHRS backend
@@ -209,3 +208,11 @@ define HAL_ESP32_USE_USB_CONSOLE 1
 # Increase logging thread stack size to prevent overflow
 # Default may be too small for ESP32, causing stack canary watchpoint triggers
 define HAL_LOGGING_STACK_SIZE 8192
+
+# Default parameters for DroneCAN peripherals
+env CAN_D1_PROTOCOL 1
+env CAN_P1_DRIVER 1
+env CAN_D2_PROTOCOL 1
+env CAN_P2_DRIVER 2
+env COMPASS_TYPEMASK -1
+env DID_ENABLE 1
