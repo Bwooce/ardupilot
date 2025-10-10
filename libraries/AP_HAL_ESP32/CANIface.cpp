@@ -635,7 +635,7 @@ void CANIface::tx_task(void *arg)
                             case TWAI_STATE_BUS_OFF: state_str = "BUS_OFF"; break;
                             case TWAI_STATE_RECOVERING: state_str = "RECOVERING"; break;
                         }
-                        CAN_DEBUG_INFO("TX state diagnostics: state=%s, tx_err=%u, rx_err=%u, to_tx=%lu, to_rx=%lu",
+                        CAN_DEBUG_VERBOSE("TX state diagnostics: state=%s, tx_err=%u, rx_err=%u, to_tx=%lu, to_rx=%lu",
                                        state_str,
                                        (unsigned)diagnostic_status.tx_error_counter,
                                        (unsigned)diagnostic_status.rx_error_counter,
