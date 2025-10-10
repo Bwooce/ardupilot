@@ -1035,7 +1035,7 @@ void CANIface::log_bus_state(BusState new_state)
 
     // Detect state transitions
     if (new_state != last_bus_state) {
-        // State changed - log the transition
+        // State changed - log the transition with power failure diagnostics
         if (new_state == BusState::GOOD) {
             // Recovery - calculate downtime
             if (bus_state_change_ms > 0) {
@@ -1045,7 +1045,43 @@ void CANIface::log_bus_state(BusState new_state)
                 ESP_LOGI("CAN", "Bus initialized to GOOD state");
             }
         } else if (new_state == BusState::BUS_OFF) {
-            ESP_LOGE("CAN", "Bus entered BUS_OFF state");
+            // Get detailed diagnostics when entering BUS_OFF (power failure indicator)
+            twai_status_info_t diag;
+            if (twai_get_status_info(&diag) == ESP_OK) {
+                // Track error counter history for rate-of-change analysis
+                static uint32_t last_tx_err = 0;
+                static uint32_t last_rx_err = 0;
+                static uint32_t last_check_ms = 0;
+                uint32_t delta_ms = (last_check_ms > 0) ? (now_ms - last_check_ms) : 0;
+                uint32_t tx_delta = (diag.tx_error_counter > last_tx_err) ?
+                                    (diag.tx_error_counter - last_tx_err) : 0;
+                uint32_t rx_delta = (diag.rx_error_counter > last_rx_err) ?
+                                    (diag.rx_error_counter - last_rx_err) : 0;
+
+                ESP_LOGE("CAN_POWER", "=== BUS_OFF POWER/EMI DIAGNOSTICS ===");
+                ESP_LOGE("CAN_POWER", "Error counters: TX=%u (+%lu in %lums), RX=%u (+%lu in %lums)",
+                         (unsigned)diag.tx_error_counter, (unsigned long)tx_delta, (unsigned long)delta_ms,
+                         (unsigned)diag.rx_error_counter, (unsigned long)rx_delta, (unsigned long)delta_ms);
+                ESP_LOGE("CAN_POWER", "Msgs pending: TX=%lu, RX=%lu",
+                         (unsigned long)diag.msgs_to_tx, (unsigned long)diag.msgs_to_rx);
+                ESP_LOGE("CAN_POWER", "Heap: free=%lu min=%lu",
+                         (unsigned long)esp_get_free_heap_size(),
+                         (unsigned long)esp_get_minimum_free_heap_size());
+                ESP_LOGE("CAN_POWER", "Uptime: %lums since boot", (unsigned long)now_ms);
+                ESP_LOGE("CAN_POWER", "");
+                ESP_LOGE("CAN_POWER", "DIAGNOSIS GUIDE:");
+                ESP_LOGE("CAN_POWER", "  POWER DROP: Both TX/RX deltas >50, sudden failure, heap stable");
+                ESP_LOGE("CAN_POWER", "  EMI (mLRS): TX delta >50, RX delta <20, correlates with RF TX");
+                ESP_LOGE("CAN_POWER", "  SOFTWARE: Heap decreasing, one counter stuck, gradual degradation");
+                ESP_LOGE("CAN_POWER", "====================================");
+
+                // Update history
+                last_tx_err = diag.tx_error_counter;
+                last_rx_err = diag.rx_error_counter;
+                last_check_ms = now_ms;
+            } else {
+                ESP_LOGE("CAN", "Bus entered BUS_OFF state (cannot read diagnostics)");
+            }
         } else if (new_state == BusState::STOPPED) {
             ESP_LOGE("CAN", "Bus entered STOPPED state");
         } else if (new_state == BusState::RECOVERING) {
