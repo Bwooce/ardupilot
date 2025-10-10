@@ -1037,6 +1037,18 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
     ESP_LOGI("SCHEDULER", "About to call callbacks->setup()");
     ESP_LOGI("SCHEDULER", "callbacks=%p", sched->callbacks);
     ESP_LOGI("SCHEDULER", "========================================");
+
+    // Temporarily increase watchdog timeout for long-running setup()
+    // setup() can take 10-15 seconds for parameter loading, CAN init, sensor detection, etc.
+    // Normal timeout is 5s, increase to 20s during init
+    esp_task_wdt_config_t temp_config = {
+        .timeout_ms = 20000,  // 20 seconds for setup
+        .idle_core_mask = (1 << 0) | (1 << 1),  // Both cores
+        .trigger_panic = true
+    };
+    esp_task_wdt_reconfigure(&temp_config);
+    esp_task_wdt_reset();
+
     if (sched->callbacks != nullptr) {
         ESP_LOGI("SCHEDULER", "Callbacks valid, calling setup()");
         sched->callbacks->setup();
@@ -1044,6 +1056,21 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
     } else {
         ESP_LOGE("SCHEDULER", "ERROR: callbacks is NULL!");
     }
+
+    // Restore normal watchdog timeout (5 seconds for production, 30s for debug)
+    #ifdef SCHEDDEBUG
+    uint32_t normal_timeout_ms = 30000;
+    #else
+    uint32_t normal_timeout_ms = 5000;
+    #endif
+    esp_task_wdt_config_t normal_config = {
+        .timeout_ms = normal_timeout_ms,
+        .idle_core_mask = (1 << 0) | (1 << 1),
+        .trigger_panic = true
+    };
+    esp_task_wdt_reconfigure(&normal_config);
+    esp_task_wdt_reset();
+
     ESP_LOGI("MAIN", "ArduPilot setup completed successfully");
 
     // Re-apply ESP-IDF log levels after parameter loading in setup()

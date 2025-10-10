@@ -67,15 +67,24 @@ bool ESP32_PSRAM_Logger::init(uint32_t buffer_size_mb)
     }
     
     // Allocate buffer in PSRAM
+    // Suppress task_wdt errors during allocation - task may not be registered yet
+    esp_log_level_t saved_wdt_level = esp_log_level_get("task_wdt");
+    esp_log_level_set("task_wdt", ESP_LOG_NONE);
+
     // Feed watchdog before potentially slow allocation
     hal.scheduler->watchdog_pat();
     buffer_start = (uint8_t *)heap_caps_malloc(buffer_size, MALLOC_CAP_SPIRAM);
     if (buffer_start == nullptr) {
         ESP_LOGE(TAG, "Failed to allocate %lu bytes in PSRAM", (unsigned long)buffer_size);
+        // Restore task_wdt logging
+        esp_log_level_set("task_wdt", saved_wdt_level);
         return false;
     }
     // Feed watchdog after allocation
     hal.scheduler->watchdog_pat();
+
+    // Restore task_wdt logging
+    esp_log_level_set("task_wdt", saved_wdt_level);
     
     ESP_LOGI(TAG, "Allocated %lu MB at 0x%08lX for logging", 
             (unsigned long)(buffer_size / (1024 * 1024)),

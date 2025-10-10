@@ -975,7 +975,7 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
 #endif
     } else if (rcvd_unique_id_offset == 0) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP_LOGW("DNA_SERVER", "WARNING: Follow-up without first part (offset=0) - treating as first part");
+        ESP_LOGD("DNA_SERVER", "WARNING: Follow-up without first part (offset=0) - treating as first part");
         // Workaround: Some nodes send follow-ups without proper first_part flag
         // We'll treat this as a first part to allow allocation to proceed
 #else
@@ -1214,10 +1214,10 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     }
     
     // Also check for duplicate responses
-    if (rsp.node_id == last_response_node_id && 
+    if (rsp.node_id == last_response_node_id &&
         uid_hash == last_uid_hash &&
         (now_guard - last_response_time) < 500) {  // Increased to 500ms
-        ESP_LOGW("DNA_SERVER", "Suppressing duplicate DNA response for node %d (sent %lums ago)",
+        ESP_LOGD("DNA_SERVER", "Suppressing duplicate DNA response for node %d (sent %lums ago)",
                  rsp.node_id, (now_guard - last_response_time));
         return; // Don't send duplicate response within 500ms
     }
