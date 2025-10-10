@@ -995,8 +995,13 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
         ESP_LOGD("DNA_SERVER", "First part received, resetting state and clearing buffer");
 #endif
     } else if (rcvd_unique_id_offset == 0) {
-        // Not first part but we're expecting one - ignore malformed request
-        return;
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // Some nodes (by design) send first message with first_part=false
+        // Accept it on ESP32, but require ≥12 bytes before allocation to prevent UID collisions
+        ESP_LOGD("DNA_SERVER", "Accepting message with first_part=false at offset=0 (non-standard but supported on ESP32)");
+#else
+        return; // not first part but we are expecting one, ignore
+#endif
     }
 
     if (rcvd_unique_id_offset) {
