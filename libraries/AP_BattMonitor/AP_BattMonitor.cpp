@@ -29,6 +29,10 @@
 #include "AP_BattMonitor_AD7091R5.h"
 #include "AP_BattMonitor_Scripting.h"
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include <esp_log.h>
+#endif
+
 #include <AP_HAL/AP_HAL.h>
 
 #if HAL_ENABLE_DRONECAN_DRIVERS
@@ -578,6 +582,9 @@ AP_BattMonitor::init()
         state[instance].instance = instance;
 
         const auto allocation_type = configured_type(instance);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        ESP_LOGI("BATTERY", "Init instance %d, type=%d (8=UAVCAN)", instance, (int)allocation_type);
+#endif
         switch (allocation_type) {
 #if AP_BATTERY_ANALOG_ENABLED
             case Type::ANALOG_VOLTAGE_ONLY:

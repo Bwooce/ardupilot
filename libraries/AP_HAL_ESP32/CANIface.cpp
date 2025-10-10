@@ -169,9 +169,11 @@ bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
     // Only create tasks on first init, not during recovery
     if (rx_task_handle == NULL) {
         CAN_DEBUG_INFO("Creating RX and TX tasks...");
-        xTaskCreate(rx_task, "can_rx", 4096, this, 5, &rx_task_handle);
-        // Higher priority for TX task to reduce latency in DNA responses
-        xTaskCreate(tx_task, "can_tx", 4096, this, 6, &tx_task_handle);
+        // Pin to SLOWCPU (Core 1) to separate from Main/UART on Core 0
+        // Priority 10 = same as RCOUT, above I2C/IO, below WiFi
+        #define SLOWCPU 1
+        xTaskCreatePinnedToCore(rx_task, "can_rx", 4096, this, 10, &rx_task_handle, SLOWCPU);
+        xTaskCreatePinnedToCore(tx_task, "can_tx", 4096, this, 10, &tx_task_handle, SLOWCPU);
     } else {
         CAN_DEBUG_INFO("Tasks already running, continuing with recovery");
     }
@@ -331,8 +333,8 @@ void CANIface::rx_task(void *arg)
         static uint32_t rx_count_summary = 0;
         rx_count_summary++;
         if ((rx_count_summary % 1000) == 0) {
-            CAN_DEBUG_INFO("Received %lu frames, latest ID=0x%08X",
-                           (unsigned long)rx_count_summary, (unsigned)message.identifier);
+            CAN_DEBUG_DEBUG("Received %lu frames, latest ID=0x%08X",
+                            (unsigned long)rx_count_summary, (unsigned)message.identifier);
         }
 #elif CAN_LOGLEVEL >= 2
         // WARN level - summary every 1000 frames (less verbose)
@@ -579,10 +581,10 @@ void CANIface::tx_task(void *arg)
                 twai_status_info_t twai_status;
                 if (twai_get_status_info(&twai_status) == ESP_OK) {
                     if (twai_status.state == TWAI_STATE_BUS_OFF) {
-                        // Bus-off condition detected - attempt recovery
-                        CAN_DEBUG_ERROR("Bus-off detected, attempting recovery");
+                        // Bus-off condition detected - use rate-limited logging
+                        iface->log_bus_state(BusState::BUS_OFF);
                         iface->update_error_stats(0x01); // Bus-off error code
-                        
+
                         // Attempt bus recovery
                         twai_initiate_recovery();
                         // Note: Recovery is automatic in TWAI driver
@@ -613,7 +615,18 @@ void CANIface::tx_task(void *arg)
                 bool got_status = (twai_get_status_info(&diagnostic_status) == ESP_OK);
 
                 if (got_status) {
-                    // Log the actual state to verify TX invalid state (0=STOPPED, 1=RUNNING, 2=BUS_OFF, 3=RECOVERING)
+                    // Use rate-limited logging for bus state
+                    BusState current_state;
+                    switch (diagnostic_status.state) {
+                        case TWAI_STATE_STOPPED:    current_state = BusState::STOPPED; break;
+                        case TWAI_STATE_RUNNING:    current_state = BusState::GOOD; break;
+                        case TWAI_STATE_BUS_OFF:    current_state = BusState::BUS_OFF; break;
+                        case TWAI_STATE_RECOVERING: current_state = BusState::RECOVERING; break;
+                        default:                    current_state = BusState::STOPPED; break;
+                    }
+                    iface->log_bus_state(current_state);
+
+                    // Additional diagnostic info on first occurrence or occasionally
                     if (invalid_state_count == 1 || (invalid_state_count % 100) == 0) {
                         const char* state_str = "UNKNOWN";
                         switch (diagnostic_status.state) {
@@ -622,7 +635,7 @@ void CANIface::tx_task(void *arg)
                             case TWAI_STATE_BUS_OFF: state_str = "BUS_OFF"; break;
                             case TWAI_STATE_RECOVERING: state_str = "RECOVERING"; break;
                         }
-                        CAN_DEBUG_ERROR("TX ESP_ERR_INVALID_STATE: state=%s, tx_err=%u, rx_err=%u, to_tx=%lu, to_rx=%lu",
+                        CAN_DEBUG_INFO("TX state diagnostics: state=%s, tx_err=%u, rx_err=%u, to_tx=%lu, to_rx=%lu",
                                        state_str,
                                        (unsigned)diagnostic_status.tx_error_counter,
                                        (unsigned)diagnostic_status.rx_error_counter,
@@ -873,21 +886,35 @@ void CANIface::collect_hw_stats()
     if (twai_get_status_info(&twai_status) == ESP_OK) {
         // Update bus error statistics from TWAI hardware
         stats.bus_errors = twai_status.bus_error_count;
-        
-        // Track bus-off events
-        if (twai_status.state == TWAI_STATE_BUS_OFF) {
-            stats.bus_off_count++;
-            stats.current_health = 2; // ERROR
-            stats.last_error_code = 0x01; // Bus-off error code
-            stats.last_error_time_us = AP_HAL::micros64();
-        } else if (twai_status.state == TWAI_STATE_STOPPED) {
-            stats.current_health = 1; // WARNING
-        } else if (twai_status.state == TWAI_STATE_RUNNING) {
-            // Calculate health based on recent error activity
-            stats.current_health = calculate_bus_health();
-        } else {
-            stats.current_health = 1; // WARNING for other states
+
+        // Map TWAI state to BusState and use rate-limited logging
+        BusState current_state;
+        switch (twai_status.state) {
+            case TWAI_STATE_BUS_OFF:
+                current_state = BusState::BUS_OFF;
+                stats.bus_off_count++;
+                stats.current_health = 2; // ERROR
+                stats.last_error_code = 0x01; // Bus-off error code
+                stats.last_error_time_us = AP_HAL::micros64();
+                break;
+            case TWAI_STATE_STOPPED:
+                current_state = BusState::STOPPED;
+                stats.current_health = 1; // WARNING
+                break;
+            case TWAI_STATE_RECOVERING:
+                current_state = BusState::RECOVERING;
+                stats.current_health = 1; // WARNING
+                break;
+            case TWAI_STATE_RUNNING:
+                current_state = BusState::GOOD;
+                stats.current_health = calculate_bus_health();
+                break;
+            default:
+                current_state = BusState::STOPPED;
+                stats.current_health = 1; // WARNING for other states
+                break;
         }
+        log_bus_state(current_state);
         
         // Update filter rejection count if available
         // Note: TWAI hardware doesn't directly report filter rejections,
@@ -938,13 +965,16 @@ void CANIface::check_bus_health()
     uint32_t now_ms = AP_HAL::millis();
     
     if (twai_status.state == TWAI_STATE_BUS_OFF) {
+        // Use rate-limited logging for BUS_OFF state
+        log_bus_state(BusState::BUS_OFF);
+        update_error_stats(0x01); // Bus-off error
+
         // Attempt basic recovery every 5 seconds
         if (now_ms - last_recovery_attempt_ms > 5000) {
             consecutive_bus_off_count++;
-            CAN_DEBUG_ERROR("Bus-off detected (attempt #%u), attempting recovery", 
+            CAN_DEBUG_INFO("Attempting bus recovery (attempt #%u)",
                            (unsigned)consecutive_bus_off_count);
-            update_error_stats(0x01); // Bus-off error
-            
+
             // If we've had persistent bus-off conditions, try full driver restart
             if (consecutive_bus_off_count > 5 && (now_ms - last_full_restart_ms > 30000)) {
                 CAN_DEBUG_ERROR("Persistent bus-off condition, attempting full TWAI restart");
@@ -997,6 +1027,51 @@ void CANIface::check_bus_health()
         }
         last_rx_missed = twai_status.rx_missed_count;
     }
+}
+
+void CANIface::log_bus_state(BusState new_state)
+{
+    uint32_t now_ms = AP_HAL::millis();
+
+    // Detect state transitions
+    if (new_state != last_bus_state) {
+        // State changed - log the transition
+        if (new_state == BusState::GOOD) {
+            // Recovery - calculate downtime
+            if (bus_state_change_ms > 0) {
+                float downtime_sec = (now_ms - bus_state_change_ms) / 1000.0f;
+                ESP_LOGE("CAN", "Bus recovered to GOOD after %.2f seconds", downtime_sec);
+            } else {
+                ESP_LOGI("CAN", "Bus initialized to GOOD state");
+            }
+        } else if (new_state == BusState::BUS_OFF) {
+            ESP_LOGE("CAN", "Bus entered BUS_OFF state");
+        } else if (new_state == BusState::STOPPED) {
+            ESP_LOGE("CAN", "Bus entered STOPPED state");
+        } else if (new_state == BusState::RECOVERING) {
+            ESP_LOGE("CAN", "Bus entered RECOVERING state");
+        }
+
+        // Update tracking variables
+        last_bus_state = new_state;
+        bus_state_change_ms = now_ms;
+        last_bus_error_log_ms = now_ms;
+    } else if (new_state != BusState::GOOD) {
+        // Still in error state - check if we should log periodic update
+        if (now_ms - last_bus_error_log_ms >= 30000) {  // 30 seconds
+            float downtime_sec = (now_ms - bus_state_change_ms) / 1000.0f;
+            const char* state_str = "UNKNOWN";
+            switch (new_state) {
+                case BusState::BUS_OFF:     state_str = "BUS_OFF"; break;
+                case BusState::STOPPED:     state_str = "STOPPED"; break;
+                case BusState::RECOVERING:  state_str = "RECOVERING"; break;
+                default: break;
+            }
+            ESP_LOGE("CAN", "Bus still %s - down for %.2f seconds", state_str, downtime_sec);
+            last_bus_error_log_ms = now_ms;
+        }
+    }
+    // If state is GOOD and was already GOOD, no logging needed
 }
 
 void CANIface::attempt_driver_restart()

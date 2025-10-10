@@ -201,13 +201,15 @@ bool CANIface_MCP2515::init(const uint32_t bitrate, const OperatingMode mode)
         return false;
     }
 
-    // Create tasks
-    if (xTaskCreate(rx_task, "mcp2515_rx", 4096, this, 5, &rx_task_handle) != pdPASS) {
+    // Create tasks pinned to SLOWCPU (Core 1)
+    // Priority 10 = same as RCOUT, above I2C/IO, below WiFi
+    #define SLOWCPU 1
+    if (xTaskCreatePinnedToCore(rx_task, "mcp2515_rx", 4096, this, 10, &rx_task_handle, SLOWCPU) != pdPASS) {
         ESP32_DEBUG_ERROR("Failed to create RX task");
         return false;
     }
 
-    if (xTaskCreate(tx_task, "mcp2515_tx", 4096, this, 5, &tx_task_handle) != pdPASS) {
+    if (xTaskCreatePinnedToCore(tx_task, "mcp2515_tx", 4096, this, 10, &tx_task_handle, SLOWCPU) != pdPASS) {
         ESP32_DEBUG_ERROR("Failed to create TX task");
         return false;
     }

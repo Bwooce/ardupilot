@@ -25,7 +25,8 @@
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
 // Shared node name storage for logging across functions
-static char g_node_names[128][16] = {};
+// UAVCAN standard allows node names up to 80 characters (uint8[<=80])
+static char g_node_names[128][81] = {};  // 80 chars + null terminator
 #endif
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
@@ -478,6 +479,7 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
 
     // Track verification failures per node
     static uint32_t verification_attempt_count[128] = {0};
+    static uint32_t verification_start_time[128] = {0};
 
     //Check if we got acknowledgement from previous request
     //except for requests using our own node_id
@@ -497,8 +499,9 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
                           curr_verifying_node);
         }
     } else {
-        // Reset failure count on successful verification
+        // Reset failure count and start time on successful verification
         verification_attempt_count[curr_verifying_node] = 0;
+        verification_start_time[curr_verifying_node] = 0;
     }
 
     last_verification_request = now;
@@ -518,6 +521,11 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
             node_verified.set(curr_verifying_node);
             node_healthy.set(curr_verifying_node);
         } else {
+            // Set start time on first attempt
+            if (verification_attempt_count[curr_verifying_node] == 0) {
+                verification_start_time[curr_verifying_node] = now;
+            }
+
             // Increment verification attempt count
             verification_attempt_count[curr_verifying_node]++;
 
@@ -531,9 +539,12 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
             // Warn about nodes that repeatedly fail verification
             if (verification_attempt_count[curr_verifying_node] % 10 == 0 &&
                 verification_attempt_count[curr_verifying_node] > 0) {
-                hal.console->printf("DNA: Node %d failed verification %lu times - possible decode or protocol issue\n",
+                uint32_t duration_ms = now - verification_start_time[curr_verifying_node];
+                float duration_sec = duration_ms / 1000.0f;
+                hal.console->printf("DNA: Node %d: %lu GetNodeInfo requests sent over %.1fs with no response\n",
                                   curr_verifying_node,
-                                  (unsigned long)verification_attempt_count[curr_verifying_node]);
+                                  (unsigned long)verification_attempt_count[curr_verifying_node],
+                                  duration_sec);
             }
         }
     }
@@ -865,12 +876,9 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
 
     bool duplicate = db.handle_node_info(transfer.source_node_id, rsp.hardware_version.unique_id, &node_healthy);
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Only log on first GetNodeInfo (when not yet verified), or if duplicate detected
-    bool first_verification = !node_verified.get(transfer.source_node_id);
-    if (first_verification || duplicate) {
-        ESP_LOGI("DNA_SERVER", "Node %d GetNodeInfo: duplicate=%s, name='%s'",
-                 transfer.source_node_id, duplicate ? "YES" : "NO", rsp.name.data);
-    }
+    // Log GetNodeInfo responses at DEBUG level
+    ESP_LOGD("DNA_SERVER", "Node %d GetNodeInfo: duplicate=%s, name='%s'",
+             transfer.source_node_id, duplicate ? "YES" : "NO", rsp.name.data);
 #endif
     if (duplicate) {
         if (!_ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_DUPLICATE_NODE)) {
@@ -888,10 +896,19 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
         node_verified.set(transfer.source_node_id);
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         // Store node name for later use in NodeStatus logging
-        strncpy(g_node_names[transfer.source_node_id], (const char*)rsp.name.data, 15);
-        g_node_names[transfer.source_node_id][15] = 0;
+        const char* old_name = g_node_names[transfer.source_node_id][0] ? g_node_names[transfer.source_node_id] : "none";
+        const char* new_name = (const char*)rsp.name.data;
 
-        ESP_LOGD("DNA_SERVER", "Node %d VERIFIED successfully", transfer.source_node_id);
+        // Warn if name is changing (possible UID conflict or node re-registration)
+        if (g_node_names[transfer.source_node_id][0] && strcmp(old_name, new_name) != 0) {
+            ESP_LOGW("DNA_SERVER", "Node %d name CHANGED: '%s' -> '%s' (possible UID conflict!)",
+                     transfer.source_node_id, old_name, new_name);
+        }
+
+        strncpy(g_node_names[transfer.source_node_id], new_name, 80);
+        g_node_names[transfer.source_node_id][80] = 0;
+
+        ESP_LOGD("DNA_SERVER", "Node %d VERIFIED: name='%s'", transfer.source_node_id, g_node_names[transfer.source_node_id]);
 #endif
         if (transfer.source_node_id == curr_verifying_node) {
             nodeInfo_resp_rcvd = true;

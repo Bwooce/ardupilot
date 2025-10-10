@@ -880,6 +880,107 @@ void Scheduler::print_stats(void)
     // printf("loop_rate_hz: %d",get_loop_rate_hz());
 }
 
+#ifdef SCHEDDEBUG
+// Print ESP32-specific CPU load info every 60 seconds
+void Scheduler::print_esp32_cpu_stats(void)
+{
+    static int64_t last_run = 0;
+    if (AP_HAL::millis64() - last_run < 60000) {
+        return;
+    }
+    last_run = AP_HAL::millis64();
+
+    // Get per-core idle task statistics
+    TaskHandle_t idle0_handle = xTaskGetIdleTaskHandleForCPU(0);
+    TaskHandle_t idle1_handle = xTaskGetIdleTaskHandleForCPU(1);
+
+    TaskStatus_t idle0_stats, idle1_stats;
+    vTaskGetInfo(idle0_handle, &idle0_stats, pdTRUE, eRunning);
+    vTaskGetInfo(idle1_handle, &idle1_stats, pdTRUE, eRunning);
+
+    // Get total runtime (in microseconds)
+    static uint64_t last_total_runtime = 0;
+    static uint32_t last_idle0_runtime = 0;
+    static uint32_t last_idle1_runtime = 0;
+
+    uint64_t total_runtime = esp_timer_get_time();
+    uint64_t runtime_delta = total_runtime - last_total_runtime;
+
+    // Calculate CPU load per core (100 - idle%)
+    uint8_t core0_load = 0;
+    uint8_t core1_load = 0;
+
+    if (last_total_runtime > 0 && runtime_delta > 0) {
+        uint32_t idle0_delta = idle0_stats.ulRunTimeCounter - last_idle0_runtime;
+        uint32_t idle1_delta = idle1_stats.ulRunTimeCounter - last_idle1_runtime;
+
+        // Convert to percentage (runtime is in ticks, need to scale)
+        // FreeRTOS runtime counter is in tick periods (typically 1ms)
+        core0_load = 100 - ((idle0_delta * 100ULL * portTICK_PERIOD_MS * 1000) / runtime_delta);
+        core1_load = 100 - ((idle1_delta * 100ULL * portTICK_PERIOD_MS * 1000) / runtime_delta);
+
+        // Clamp to valid range
+        if (core0_load > 100) core0_load = 100;
+        if (core1_load > 100) core1_load = 100;
+    }
+
+    last_total_runtime = total_runtime;
+    last_idle0_runtime = idle0_stats.ulRunTimeCounter;
+    last_idle1_runtime = idle1_stats.ulRunTimeCounter;
+
+    // Get heap stats
+    uint32_t heap_free = esp_get_free_heap_size();
+    uint32_t heap_min = esp_get_minimum_free_heap_size();
+
+    // Get main loop rate
+    uint16_t loop_rate = get_filtered_loop_rate_hz();
+
+    // Log summary
+    ESP_LOGI("ESP32_CPU", "=== ESP32 CPU Status ===");
+    ESP_LOGI("ESP32_CPU", "Core 0: %d%% | Core 1: %d%%", core0_load, core1_load);
+    ESP_LOGI("ESP32_CPU", "Heap: %lu bytes free (%lu min)",
+             (unsigned long)heap_free, (unsigned long)heap_min);
+    ESP_LOGI("ESP32_CPU", "Main loop: %u Hz", (unsigned)loop_rate);
+
+    // Get per-task CPU usage (top tasks only)
+    const UBaseType_t max_tasks = 20;
+    TaskStatus_t task_status[max_tasks];
+    uint32_t total_run_time;
+
+    UBaseType_t task_count = uxTaskGetSystemState(task_status, max_tasks, &total_run_time);
+
+    if (task_count > 0 && total_run_time > 0) {
+        // Sort by runtime (simple bubble sort for top 5)
+        for (UBaseType_t i = 0; i < task_count - 1 && i < 5; i++) {
+            for (UBaseType_t j = i + 1; j < task_count; j++) {
+                if (task_status[j].ulRunTimeCounter > task_status[i].ulRunTimeCounter) {
+                    TaskStatus_t temp = task_status[i];
+                    task_status[i] = task_status[j];
+                    task_status[j] = temp;
+                }
+            }
+        }
+
+        // Log top 5 tasks by CPU usage
+        ESP_LOGI("ESP32_CPU", "Top tasks by CPU:");
+        for (UBaseType_t i = 0; i < task_count && i < 5; i++) {
+            uint32_t task_percent = (task_status[i].ulRunTimeCounter * 100ULL) / total_run_time;
+            BaseType_t core = xTaskGetAffinity(task_status[i].xHandle);
+            const char* core_str = (core == 0) ? "C0" : (core == 1) ? "C1" : "Any";
+
+            ESP_LOGI("ESP32_CPU", "  %s: %lu%% (prio=%d, stack=%u, core=%s)",
+                     task_status[i].pcTaskName,
+                     (unsigned long)task_percent,
+                     (int)task_status[i].uxCurrentPriority,
+                     (unsigned)task_status[i].usStackHighWaterMark,
+                     core_str);
+        }
+    }
+
+    ESP_LOGI("ESP32_CPU", "========================");
+}
+#endif // SCHEDDEBUG
+
 // Run every 30s (was 10s - increased for mLRS compatibility)
 void Scheduler::print_main_loop_rate(void)
 {
@@ -1008,6 +1109,7 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
         // run stats periodically
 #ifdef SCHEDDEBUG
         sched->print_stats();
+        sched->print_esp32_cpu_stats();
 #endif
         sched->print_main_loop_rate();
         

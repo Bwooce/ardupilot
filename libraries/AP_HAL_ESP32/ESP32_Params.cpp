@@ -141,6 +141,7 @@ void ESP32Params::apply_log_level() {
     esp_log_level_set("TWAI_BUG", ESP_LOG_INFO);   // TWAI bug detection
     esp_log_level_set("GETNODEINFO", ESP_LOG_WARN); // Reduced - DNA issues resolved
     esp_log_level_set("NODESTATUS", ESP_LOG_WARN);  // Reduced - DNA issues resolved
+    esp_log_level_set("BATTERY", ESP_LOG_INFO);    // Battery monitor debugging
 
     // Note: eFuse MAC_CUSTOM error was fixed by skipping custom MAC check in Util.cpp
     
@@ -149,8 +150,11 @@ void ESP32Params::apply_log_level() {
     
     // Enable GCS parameter debug messages
     esp_log_level_set("GCS_PARAM", ESP_LOG_INFO);
-    
-    // Reduce storage and parameter debugging 
+
+    // ESP32 CPU statistics (only appears in debug builds)
+    esp_log_level_set("ESP32_CPU", ESP_LOG_INFO);
+
+    // Reduce storage and parameter debugging
     esp_log_level_set("STORAGE", ESP_LOG_WARN);
     esp_log_level_set("PARAM", ESP_LOG_WARN);
     

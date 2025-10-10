@@ -25,7 +25,7 @@ public:
     
     // Enhanced bus health monitoring
     void check_bus_health();
-    
+
     // Recovery methods for severe bus errors
     void attempt_driver_restart();
 
@@ -71,6 +71,20 @@ private:
 
     // Flag to indicate driver restart in progress
     volatile bool restart_in_progress = false;
+
+    // Bus state tracking for rate-limited error logging
+    enum class BusState {
+        GOOD,
+        BUS_OFF,
+        STOPPED,
+        RECOVERING
+    };
+    BusState last_bus_state = BusState::GOOD;
+    uint32_t bus_state_change_ms = 0;
+    uint32_t last_bus_error_log_ms = 0;
+
+    // Rate-limited bus error logging (private helper)
+    void log_bus_state(BusState new_state);
 };
 
 } // namespace ESP32
