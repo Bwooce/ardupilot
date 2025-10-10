@@ -153,8 +153,8 @@ AP_BattMonitor_DroneCAN* AP_BattMonitor_DroneCAN::get_dronecan_backend(AP_DroneC
 void AP_BattMonitor_DroneCAN::handle_battery_info(const uavcan_equipment_power_BatteryInfo &msg)
 {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("BATTERY", "Processing BatteryInfo battery_id=%d: V=%.2fV I=%.2fA T=%.1fK SOC=%d%% SOH=%d%%",
-             msg.battery_id, msg.voltage, msg.current, msg.temperature, msg.state_of_charge_pct, msg.state_of_health_pct);
+    ESP_LOGD("BATTERY", "Processing BatteryInfo battery_id=%d: V=%.2fV I=%.2fA T=%.1fC SOC=%d%% SOH=%d%%",
+             msg.battery_id, msg.voltage, msg.current, msg.temperature - 273.15f, msg.state_of_charge_pct, msg.state_of_health_pct);
 #endif
     update_interim_state(msg.voltage, msg.current, msg.temperature, msg.state_of_charge_pct, msg.state_of_health_pct); 
 
