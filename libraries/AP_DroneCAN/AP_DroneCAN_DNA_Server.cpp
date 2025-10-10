@@ -667,28 +667,49 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     const bool was_healthy = node_healthy.get(transfer.source_node_id);
     const bool is_operational = (msg.mode == UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL);
     const bool is_healthy = (msg.health == UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK);
-    
-    if ((!is_healthy || !is_operational) &&
-        !_ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_UNHEALTHY_NODE)) {
-        
+
+    // Debug: Track node_healthy changes for troubleshooting LED flipping
+    static bool first_log[128] = {true};
+    bool ignore_unhealthy = _ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_UNHEALTHY_NODE);
+
+    if ((!is_healthy || !is_operational) && !ignore_unhealthy) {
+
         // Report health status changes with appropriate severity
         if (was_healthy) {
             report_node_health_change(transfer.source_node_id, msg.health, msg.mode, false);
         }
-        
+
         fault_node_id = transfer.source_node_id;
         server_state = NODE_STATUS_UNHEALTHY;
         node_healthy.clear(transfer.source_node_id);
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // Log when node_healthy changes from true to false
+        if (was_healthy || first_log[transfer.source_node_id]) {
+            ESP_LOGW("DNA_HEALTH", "Node %d: node_healthy CLEARED (was=%d, health=%d, mode=%d, operational=%d)",
+                     transfer.source_node_id, was_healthy, is_healthy, msg.mode, is_operational);
+            first_log[transfer.source_node_id] = false;
+        }
+#endif
     } else {
         // Node is now healthy
         if (!was_healthy && is_healthy && is_operational) {
             report_node_health_change(transfer.source_node_id, msg.health, msg.mode, true);
         }
-        
+
         node_healthy.set(transfer.source_node_id);
         if (node_healthy == node_verified) {
             server_state = HEALTHY;
         }
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // Log when node_healthy changes from false to true
+        if (!was_healthy || first_log[transfer.source_node_id]) {
+            ESP_LOGW("DNA_HEALTH", "Node %d: node_healthy SET (was=%d, health=%d, mode=%d, operational=%d, ignore_opt=%d)",
+                     transfer.source_node_id, was_healthy, is_healthy, msg.mode, is_operational, ignore_unhealthy);
+            first_log[transfer.source_node_id] = false;
+        }
+#endif
     }
     if (!node_verified.get(transfer.source_node_id)) {
         // Don't try to verify ourselves - we already know our own info
