@@ -1070,27 +1070,27 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
 #endif
 
     // Check if this looks like a complete UID:
-    // - Standard UIDs are 16 bytes, but shorter UIDs are valid
-    // - If first_part_of_unique_id is false and we have data, treat as complete
-    bool uid_looks_complete = (rcvd_unique_id_offset == sizeof(rcvd_unique_id)) ||
-                              (!msg.first_part_of_unique_id && rcvd_unique_id_offset > 0);
-    
+    // - Require at least 12 bytes (2 stages) to avoid UID collision with single-stage partial UIDs
+    // - Two nodes sharing the same first 6 bytes would get allocated the same node ID otherwise
+    // - Standard UIDs are 16 bytes, but accept 12+ to handle variations
+    bool uid_looks_complete = (rcvd_unique_id_offset >= 12);
+
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGD("DNA_SERVER", "UID completeness check: offset=%d, sizeof=%d, first_part=%d, looks_complete=%d",
-             rcvd_unique_id_offset, (int)sizeof(rcvd_unique_id), msg.first_part_of_unique_id, uid_looks_complete);
+    ESP_LOGD("DNA_SERVER", "UID completeness check: offset=%d, min_required=12, looks_complete=%d",
+             rcvd_unique_id_offset, uid_looks_complete);
 #endif
-    
+
     if (uid_looks_complete) { // full unique ID received, allocate it!
         // we ignore the preferred node ID as it seems nobody uses the feature
         // and we couldn't guarantee it anyway. we will always remember and
         // re-assign node IDs consistently, so the node could send a status
         // with a particular ID once then switch back to no preference for DNA
         rsp.node_id = db.handle_allocation(rcvd_unique_id, &node_seen);
-        
+
         // For the final allocation response with the echoed UID:
-        // If the UID fits in one frame (≤6 bytes), mark it as first_part=1
-        // If it's a continuation from multi-frame (>6 bytes), keep first_part=0
-        rsp.first_part_of_unique_id = (rcvd_unique_id_offset <= 6) ? 1 : 0;
+        // Since we require ≥12 bytes, this is always a multi-frame transfer
+        // Set first_part=0 to indicate this is a continuation/final frame
+        rsp.first_part_of_unique_id = 0;
         
         rcvd_unique_id_offset = 0; // reset state for next allocation
         memset(rcvd_unique_id, 0, sizeof(rcvd_unique_id)); // Clear buffer for next allocation
@@ -1117,11 +1117,11 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
         }
     } else {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP_LOGD("DNA_SERVER", "Partial UID received (%d/%d bytes), sending echo", 
-                 rcvd_unique_id_offset, (int)sizeof(rcvd_unique_id));
+        ESP_LOGD("DNA_SERVER", "Partial UID received (%d bytes, need ≥12), sending echo",
+                 rcvd_unique_id_offset);
 #endif
-        hal.console->printf("DNA: Partial UID received (%d/%d bytes), sending echo\n", 
-                           rcvd_unique_id_offset, (int)sizeof(rcvd_unique_id));
+        hal.console->printf("DNA: Partial UID received (%d bytes, need ≥12), sending echo\n",
+                           rcvd_unique_id_offset);
     }
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
