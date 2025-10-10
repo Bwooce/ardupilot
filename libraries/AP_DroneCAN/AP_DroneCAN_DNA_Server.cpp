@@ -144,11 +144,11 @@ bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, 
     uint8_t registered_node_id = find_node_id(unique_id, 16);
 
     if (registered_node_id == 0) {
-        // UID not in database - could be new, or allocation used partial UID (different hash)
+        // UID not in database - new node
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         NodeRecord cmp_record;
         compute_uid_hash(cmp_record, unique_id, 16);
-        ESP_LOGI("DNA_DB", "UID not found in DB (new or partial UID in allocation), registering node %d, hash=%02X%02X%02X%02X%02X%02X",
+        ESP_LOGI("DNA_DB", "UID not found in DB (new node), registering node %d, hash=%02X%02X%02X%02X%02X%02X",
                  source_node_id,
                  cmp_record.uid_hash[0], cmp_record.uid_hash[1], cmp_record.uid_hash[2],
                  cmp_record.uid_hash[3], cmp_record.uid_hash[4], cmp_record.uid_hash[5]);
@@ -995,13 +995,8 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
         ESP_LOGD("DNA_SERVER", "First part received, resetting state and clearing buffer");
 #endif
     } else if (rcvd_unique_id_offset == 0) {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP_LOGD("DNA_SERVER", "WARNING: Follow-up without first part (offset=0) - treating as first part");
-        // Workaround: Some nodes send follow-ups without proper first_part flag
-        // We'll treat this as a first part to allow allocation to proceed
-#else
-        return; // not first part but we are expecting one, ignore
-#endif
+        // Not first part but we're expecting one - ignore malformed request
+        return;
     }
 
     if (rcvd_unique_id_offset) {
