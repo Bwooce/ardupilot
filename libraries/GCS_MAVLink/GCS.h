@@ -175,6 +175,9 @@ class GCS_MAVLINK
 {
 public:
     friend class GCS;
+#if AP_MAVLINK_FTP_ENABLED
+    friend class GCS_FTP;
+#endif
 
     GCS_MAVLINK(AP_HAL::UARTDriver &uart);
     virtual ~GCS_MAVLINK() {}
@@ -464,8 +467,10 @@ public:
     // corresponding to the channel
     static GCS_MAVLINK *find_by_mavtype_and_compid(uint8_t mav_type, uint8_t compid, uint8_t &sysid);
 
+#if AP_MAVLINK_SIGNING_ENABLED
     // update signing timestamp on GPS lock
     static void update_signing_timestamp(uint64_t timestamp_usec);
+#endif  // AP_MAVLINK_SIGNING_ENABLED
 
     // return current packet overhead for a channel
     static uint8_t packet_overhead_chan(mavlink_channel_t chan);
@@ -485,6 +490,48 @@ public:
     uint16_t get_stream_slowdown_ms() const { return stream_slowdown_ms; }
 
     MAV_RESULT set_message_interval(uint32_t msg_id, int32_t interval_us);
+
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    // PARAM_EXT support for DroneCAN parameter access via USER range (25-99)
+    // Component ID = 25 + (node_id - 1), supports nodes 1-75
+    struct pending_param_ext_request {
+        mavlink_channel_t chan;
+        uint8_t can_driver_index;  // 0-based index (0-8 for CAN1-CAN9)
+        uint8_t node_id;           // DroneCAN node ID (1-127)
+        char param_name[17];       // DroneCAN param name (max 16 chars + null)
+        uint8_t param_type;        // MAV_PARAM_EXT_TYPE
+        char param_value[128];     // Extended parameter value buffer
+        bool is_set;               // true=set, false=get
+        uint32_t request_time_ms;  // For timeout handling
+    };
+
+    // queue of pending PARAM_EXT requests for DroneCAN nodes
+    static ObjectBuffer<pending_param_ext_request> param_ext_requests;
+
+    // parameter enumeration state for PARAM_EXT_REQUEST_LIST
+    struct param_enumeration_state {
+        bool active;                // enumeration in progress
+        mavlink_channel_t chan;     // requesting channel
+        uint8_t can_driver_index;   // CAN driver index
+        uint8_t node_id;            // node being enumerated
+        uint16_t current_index;     // current parameter index
+        uint32_t start_time_ms;     // when enumeration started
+        uint16_t param_count;       // total parameters discovered
+    };
+    static struct param_enumeration_state param_enum_state;
+
+    // PARAM_EXT send functions (must be public for static callbacks)
+    // node_id is used to set correct source component ID (25 + node_id - 1)
+    void send_param_ext_value(const char *param_name, const char *param_value,
+                              uint8_t param_type, uint8_t node_id);
+    void send_param_ext_ack(const char *param_name, const char *param_value,
+                            uint8_t param_type, uint8_t param_result, uint8_t node_id);
+
+    // start parameter enumeration for a DroneCAN node
+    void start_param_enumeration(mavlink_channel_t chan, uint8_t can_driver_index, uint8_t node_id);
+    // continue parameter enumeration (called from loop)
+    void continue_param_enumeration();
+#endif // HAL_ENABLE_DRONECAN_DRIVERS
 
 protected:
 
@@ -522,7 +569,6 @@ protected:
     AP_Int16 options;
     enum class Option : uint16_t {
         MAVLINK2_SIGNING_DISABLED = (1U << 0),
-        // first bit is reserved for: MAVLINK2_SIGNING_DISABLED = (1U << 0),
         NO_FORWARD                = (1U << 1),  // don't forward MAVLink data to or from this device
         NOSTREAMOVERRIDE          = (1U << 2),  // ignore REQUEST_DATA_STREAM messages (eg. from GCSs)
     };
@@ -707,10 +753,10 @@ protected:
       handle MAV_CMD_CAN_FORWARD and CAN_FRAME messages for CAN over MAVLink
      */
     void can_frame_callback(uint8_t bus, const AP_HAL::CANFrame &);
-#if HAL_CANMANAGER_ENABLED
+#if AP_MAVLINKCAN_ENABLED
     MAV_RESULT handle_can_forward(const mavlink_command_int_t &packet, const mavlink_message_t &msg);
-#endif
     void handle_can_frame(const mavlink_message_t &msg) const;
+#endif  // AP_MAVLINKCAN_ENABLED
 
     void handle_optical_flow(const mavlink_message_t &msg);
 
@@ -725,7 +771,9 @@ protected:
 
     // message sending functions:
     bool try_send_mission_message(enum ap_message id);
+#if AP_MAVLINK_MSG_HWSTATUS_ENABLED
     void send_hwstatus();
+#endif  // AP_MAVLINK_MSG_HWSTATUS_ENABLED
     void handle_data_packet(const mavlink_message_t &msg);
 
     // these two methods are called after current_loc is updated:
@@ -783,6 +831,8 @@ protected:
 private:
 
     // define the two objects used for parsing incoming messages:
+    // These structures must match the wire format exactly - no padding allowed
+    // Use MAVLINK_ALIGNED_FIELDS macro if alignment is needed
     mavlink_message_t _channel_buffer;
     mavlink_status_t _channel_status;
 
@@ -974,6 +1024,14 @@ private:
 
     uint8_t send_parameter_async_replies();
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    // PARAM_EXT message handlers
+    void handle_param_ext_request_read(const mavlink_message_t &msg);
+    void handle_param_ext_request_list(const mavlink_message_t &msg);
+    void handle_param_ext_set(const mavlink_message_t &msg);
+    void handle_common_param_ext_message(const mavlink_message_t &msg);
+#endif // HAL_ENABLE_DRONECAN_DRIVERS
+
 #if AP_MAVLINK_FTP_ENABLED
     enum class FTP_OP : uint8_t {
         None = 0,
@@ -1027,6 +1085,7 @@ private:
     enum class FTP_FILE_MODE {
         Read,
         Write,
+        OTA_Write,    // ESP32 firmware update routing (ArduPilot-internal, not MAVLink)
     };
 
     struct ftp_state {
@@ -1082,6 +1141,7 @@ private:
 
     void lock_channel(const mavlink_channel_t chan, bool lock);
 
+#if AP_MAVLINK_SIGNING_ENABLED
     mavlink_signing_t signing;
     static mavlink_signing_streams_t signing_streams;
     static uint32_t last_signing_save_ms;
@@ -1092,6 +1152,7 @@ private:
     void load_signing_key(void);
     bool signing_enabled(void) const;
     static void save_signing_timestamp(bool force_save_now);
+#endif  // AP_MAVLINK_SIGNING_ENABLED
 
 #if HAL_MAVLINK_INTERVALS_FROM_FILES_ENABLED
     // structure containing default intervals read from files for this
@@ -1210,7 +1271,10 @@ public:
         return _statustext_queue;
     }
 
-    uint8_t sysid_gcs() const { return uint8_t(mav_gcs_sysid); }
+    /*
+      return true if a MAVLink system ID is a GCS
+     */
+    bool sysid_is_gcs(uint8_t sysid) const;
 
     // last time traffic was seen from my designated GCS.  traffic
     // includes heartbeats and some manual control messages.
@@ -1237,6 +1301,7 @@ public:
     void send_message(enum ap_message id);
     void send_mission_item_reached_message(uint16_t mission_index);
     void send_named_float(const char *name, float value) const;
+    void send_named_string(const char *name, const char *value) const;
 
     void send_parameter_value(const char *param_name,
                               ap_var_type param_type,
@@ -1364,6 +1429,7 @@ protected:
     // parameters
     AP_Int16                 sysid;
     AP_Int16                 mav_gcs_sysid;
+    AP_Int16                 mav_gcs_sysid_high;
     AP_Enum16<Option>        mav_options;
     AP_Int8                  mav_telem_delay;
 

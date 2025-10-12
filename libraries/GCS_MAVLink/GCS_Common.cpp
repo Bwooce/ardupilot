@@ -6339,6 +6339,10 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
     case MSG_NEXT_PARAM:
         CHECK_PAYLOAD_SIZE(PARAM_VALUE);
         queued_param_send();
+#if HAL_ENABLE_DRONECAN_DRIVERS
+        // Continue any active parameter enumeration for DroneCAN nodes
+        continue_param_enumeration();
+#endif
         break;
 
     case MSG_HEARTBEAT:
