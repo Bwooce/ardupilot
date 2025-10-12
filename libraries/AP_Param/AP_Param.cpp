@@ -171,12 +171,26 @@ StorageAccess AP_Param::_storage_bak(StorageManager::StorageParamBak);
 uint16_t AP_Param::_frame_type_flags;
 
 // write to EEPROM
-void AP_Param::eeprom_write_check(const void *ptr, uint16_t ofs, uint8_t size)
+bool AP_Param::eeprom_write_check(const void *ptr, uint16_t ofs, uint8_t size)
 {
-    _storage.write_block(ofs, ptr, size);
+    bool ret = _storage.write_block(ofs, ptr, size);
+    if (!ret) {
+        DEV_PRINTF("AP_Param: CRITICAL - Failed to write parameter to storage at offset %u, size %u\n",
+                   (unsigned)ofs, (unsigned)size);
+        GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Parameter storage write failed at offset %u", (unsigned)ofs);
+    }
+
 #if AP_PARAM_STORAGE_BAK_ENABLED
-    _storage_bak.write_block(ofs, ptr, size);
+    bool ret_bak = _storage_bak.write_block(ofs, ptr, size);
+    if (!ret_bak) {
+        DEV_PRINTF("AP_Param: WARNING - Failed to write parameter to backup storage at offset %u, size %u\n",
+                   (unsigned)ofs, (unsigned)size);
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Parameter backup storage write failed at offset %u", (unsigned)ofs);
+    }
+    // Return false only if primary storage fails (backup is optional redundancy)
 #endif
+
+    return ret;
 }
 
 bool AP_Param::_hide_disabled_groups = true;
@@ -188,7 +202,11 @@ void AP_Param::write_sentinal(uint16_t ofs)
     phdr.type = _sentinal_type;
     set_key(phdr, _sentinal_key);
     phdr.group_element = _sentinal_group;
-    eeprom_write_check(&phdr, ofs, sizeof(phdr));
+    if (!eeprom_write_check(&phdr, ofs, sizeof(phdr))) {
+        // Write failed, error already reported by eeprom_write_check
+        // Don't update sentinal_offset to indicate the write failed
+        return;
+    }
     sentinal_offset = ofs;
 }
 
@@ -203,7 +221,11 @@ void AP_Param::erase_all(void)
     hdr.magic[1] = k_EEPROM_magic1;
     hdr.revision = k_EEPROM_revision;
     hdr.spare    = 0;
-    eeprom_write_check(&hdr, 0, sizeof(hdr));
+    if (!eeprom_write_check(&hdr, 0, sizeof(hdr))) {
+        // Write failed, error already reported by eeprom_write_check
+        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Parameter erase_all failed - header write error");
+        return;
+    }
 
     // add a sentinal directly after the header
     write_sentinal(sizeof(struct EEPROM_header));
@@ -1224,7 +1246,10 @@ void AP_Param::save_sync(bool force_save, bool send_to_gcs)
     uint16_t ofs;
     if (scan(&phdr, &ofs)) {
         // found an existing copy of the variable
-        eeprom_write_check(ap, ofs+sizeof(phdr), type_size((enum ap_var_type)phdr.type));
+        if (!eeprom_write_check(ap, ofs+sizeof(phdr), type_size((enum ap_var_type)phdr.type))) {
+            // Write failed, error already reported by eeprom_write_check
+            return;
+        }
         if (send_to_gcs) {
             send_parameter(name, (enum ap_var_type)phdr.type, idx);
         }
@@ -1272,8 +1297,14 @@ void AP_Param::save_sync(bool force_save, bool send_to_gcs)
 
     // write a new sentinal, then the data, then the header
     write_sentinal(ofs + sizeof(phdr) + type_size((enum ap_var_type)phdr.type));
-    eeprom_write_check(ap, ofs+sizeof(phdr), type_size((enum ap_var_type)phdr.type));
-    eeprom_write_check(&phdr, ofs, sizeof(phdr));
+    if (!eeprom_write_check(ap, ofs+sizeof(phdr), type_size((enum ap_var_type)phdr.type))) {
+        // Write failed, error already reported by eeprom_write_check
+        return;
+    }
+    if (!eeprom_write_check(&phdr, ofs, sizeof(phdr))) {
+        // Write failed, error already reported by eeprom_write_check
+        return;
+    }
 
     if (send_to_gcs) {
         send_parameter(name, (enum ap_var_type)phdr.type, idx);

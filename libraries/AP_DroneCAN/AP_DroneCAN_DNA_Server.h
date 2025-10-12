@@ -19,8 +19,7 @@ class AP_DroneCAN_DNA_Server
     StorageAccess storage;
 
     struct PACKED NodeRecord {
-        uint8_t uid_hash[6];
-        uint8_t crc;
+        uint8_t uid[16];  // Full 16-byte unique ID (no hash, no CRC)
     };
 
     /*

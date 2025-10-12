@@ -44,14 +44,12 @@ static char g_node_names[128][81] = {};  // 80 chars + null terminator
 #endif
 extern const AP_HAL::HAL& hal;
 
-// FORMAT REVISION DREAMS (things to address if the NodeRecord needs to be changed substantially)
-// * have DNA server accept only a 16 byte local UID to avoid overhead from variable sized hash
-// * have a real empty flag for entries and/or use a CRC which is not zero for an input of all zeros
-// * fix FNV-1a hash folding to be to 48 bits (6 bytes) instead of 56
+// NodeRecord now stores full 16-byte UIDs with no hashing or CRC
+// Storage limit: 1024 bytes = 2 (magic) + 62*16 (records) = 994 bytes used, 30 spare
 
-#define NODERECORD_MAGIC 0xAC01
+#define NODERECORD_MAGIC 0xAC02  // Incremented to force database reset after format change
 #define NODERECORD_MAGIC_LEN 2 // uint16_t
-#define MAX_NODE_ID    125
+#define MAX_NODE_ID    62  // Reduced from 125 to fit 16-byte UIDs in 1KB storage
 #define NODERECORD_LOC(node_id) ((node_id * sizeof(NodeRecord)) + NODERECORD_MAGIC_LEN)
 
 #define debug_dronecan(level_debug, fmt, args...) do { AP::can().log_text(level_debug, "DroneCAN", fmt, ##args); } while (0)
@@ -63,7 +61,8 @@ AP_DroneCAN_DNA_Server::Database AP_DroneCAN_DNA_Server::db;
 void AP_DroneCAN_DNA_Server::Database::init(StorageAccess *storage_)
 {
     // storage size must be synced with StorageCANDNA entry in StorageManager.cpp
-    static_assert(NODERECORD_LOC(MAX_NODE_ID+1) <= 1024, "DNA storage too small");
+    // Check that the LAST record fits completely (start + size)
+    static_assert(NODERECORD_LOC(MAX_NODE_ID) + sizeof(NodeRecord) <= 1024, "DNA storage too small");
 
     // might be called from multiple threads if multiple servers use the same database
     WITH_SEMAPHORE(sem);
@@ -119,7 +118,11 @@ void AP_DroneCAN_DNA_Server::Database::reset()
     }
 
     // mark the magic at the start to indicate a valid (and reset) database
-    storage->write_uint16(0, NODERECORD_MAGIC);
+    uint16_t magic = NODERECORD_MAGIC;
+    if (!storage->write_block(0, &magic, sizeof(magic))) {
+        debug_dronecan(AP_CANManager::LOG_ERROR, "DNA_DB CRITICAL: Failed to write magic number during database reset");
+        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "DroneCAN DNA storage write failed");
+    }
 }
 
 // handle initializing the server with its own node ID and unique ID
@@ -146,12 +149,10 @@ bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, 
     if (registered_node_id == 0) {
         // UID not in database - new node
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        NodeRecord cmp_record;
-        compute_uid_hash(cmp_record, unique_id, 16);
-        ESP_LOGI("DNA_DB", "UID not found in DB (new node), registering node %d, hash=%02X%02X%02X%02X%02X%02X",
+        ESP_LOGI("DNA_DB", "UID not found in DB (new node), registering node %d, UID=%02X%02X%02X%02X%02X%02X...",
                  source_node_id,
-                 cmp_record.uid_hash[0], cmp_record.uid_hash[1], cmp_record.uid_hash[2],
-                 cmp_record.uid_hash[3], cmp_record.uid_hash[4], cmp_record.uid_hash[5]);
+                 unique_id[0], unique_id[1], unique_id[2],
+                 unique_id[3], unique_id[4], unique_id[5]);
 #endif
         register_uid(source_node_id, unique_id, 16);
         return false;
@@ -201,11 +202,9 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     if (resp_node_id == 0) {
-        NodeRecord cmp_record;
-        compute_uid_hash(cmp_record, unique_id, 16);
-        ESP_LOGD("DNA_DB", "Allocation: UID not in DB, hash=%02X%02X%02X%02X%02X%02X (may be partial UID)",
-                 cmp_record.uid_hash[0], cmp_record.uid_hash[1], cmp_record.uid_hash[2],
-                 cmp_record.uid_hash[3], cmp_record.uid_hash[4], cmp_record.uid_hash[5]);
+        ESP_LOGD("DNA_DB", "Allocation: UID not in DB, UID=%02X%02X%02X%02X%02X%02X... (may be partial)",
+                 unique_id[0], unique_id[1], unique_id[2],
+                 unique_id[3], unique_id[4], unique_id[5]);
     }
 #endif
 
@@ -222,12 +221,10 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
             resp_node_id = 0; // Force new allocation below
         } else {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            NodeRecord cmp_record;
-            compute_uid_hash(cmp_record, unique_id, 16);
-            ESP_LOGD("DNA_DB", "UID found with node %d (not in use), re-assigning, hash=%02X%02X%02X%02X%02X%02X",
+            ESP_LOGD("DNA_DB", "UID found with node %d (not in use), re-assigning, UID=%02X%02X%02X%02X%02X%02X...",
                      resp_node_id,
-                     cmp_record.uid_hash[0], cmp_record.uid_hash[1], cmp_record.uid_hash[2],
-                     cmp_record.uid_hash[3], cmp_record.uid_hash[4], cmp_record.uid_hash[5]);
+                     unique_id[0], unique_id[1], unique_id[2],
+                     unique_id[3], unique_id[4], unique_id[5]);
 #endif
             return resp_node_id; // Safe to return - node not currently active
         }
@@ -245,17 +242,14 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
 
         if (resp_node_id != 0) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            NodeRecord cmp_record;
-            compute_uid_hash(cmp_record, unique_id, 16);
-            ESP_LOGD("DNA_DB", "Assigning new node ID %d, hash=%02X%02X%02X%02X%02X%02X", resp_node_id,
-                     cmp_record.uid_hash[0], cmp_record.uid_hash[1], cmp_record.uid_hash[2],
-                     cmp_record.uid_hash[3], cmp_record.uid_hash[4], cmp_record.uid_hash[5]);
+            ESP_LOGD("DNA_DB", "Assigning new node ID %d, UID=%02X%02X%02X%02X%02X%02X...", resp_node_id,
+                     unique_id[0], unique_id[1], unique_id[2],
+                     unique_id[3], unique_id[4], unique_id[5]);
 #endif
             create_registration(resp_node_id, unique_id, 16);
         } else {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            ESP_LOGE("DNA_DB", "No free node IDs available in database");
-#endif
+            debug_dronecan(AP_CANManager::LOG_ERROR, "DNA_DB ERROR: No free node IDs available in database");
+            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "DroneCAN DNA allocation failed - database full");
         }
     }
 
@@ -265,13 +259,22 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
 // retrieve node ID that matches the given unique ID. returns 0 if not found
 uint8_t AP_DroneCAN_DNA_Server::Database::find_node_id(const uint8_t unique_id[], uint8_t size)
 {
-    NodeRecord record, cmp_record;
-    compute_uid_hash(cmp_record, unique_id, size);
+    NodeRecord record;
+
+    // Prepare search buffer: copy provided UID and zero-pad to 16 bytes
+    // This ensures we don't get false matches when:
+    // - Node A stored with 12 bytes (padded with zeros)
+    // - Node B sends 16 bytes with same first 12 but different last 4
+    uint8_t search_uid[16];
+    memset(search_uid, 0, 16);
+    uint8_t copy_size = (size > 16) ? 16 : size;
+    memcpy(search_uid, unique_id, copy_size);
 
     for (int i = MAX_NODE_ID; i > 0; i--) {
         if (node_registered.get(i)) {
             read_record(record, i);
-            if (memcmp(record.uid_hash, cmp_record.uid_hash, sizeof(NodeRecord::uid_hash)) == 0) {
+            // Compare all 16 bytes (zero-padded search vs zero-padded stored)
+            if (memcmp(record.uid, search_uid, 16) == 0) {
                 return i; // node ID found
             }
         }
@@ -279,20 +282,7 @@ uint8_t AP_DroneCAN_DNA_Server::Database::find_node_id(const uint8_t unique_id[]
     return 0; // not found
 }
 
-// fill the given record with the hash of the given unique ID
-void AP_DroneCAN_DNA_Server::Database::compute_uid_hash(NodeRecord &record, const uint8_t unique_id[], uint8_t size) const
-{
-    uint64_t hash = FNV_1_OFFSET_BASIS_64;
-    hash_fnv_1a(size, unique_id, &hash);
-
-    // xor-folding per http://www.isthe.com/chongo/tech/comp/fnv/
-    hash = (hash>>56) ^ (hash&(((uint64_t)1<<56)-1)); // 56 should be 48 since we use 6 bytes
-
-    // write it to ret
-    for (uint8_t i=0; i<6; i++) {
-        record.uid_hash[i] = (hash >> (8*i)) & 0xff;
-    }
-}
+// No longer needed - we store full UIDs instead of hashes
 
 // register a given unique ID to a given node ID, deleting any existing registration for the unique ID
 void AP_DroneCAN_DNA_Server::Database::register_uid(uint8_t node_id, const uint8_t unique_id[], uint8_t size)
@@ -317,9 +307,12 @@ void AP_DroneCAN_DNA_Server::Database::register_uid(uint8_t node_id, const uint8
 void AP_DroneCAN_DNA_Server::Database::create_registration(uint8_t node_id, const uint8_t unique_id[], uint8_t size)
 {
     NodeRecord record;
-    compute_uid_hash(record, unique_id, size);
-    // compute and store CRC of the record's data to validate it
-    record.crc = crc_crc8(record.uid_hash, sizeof(record.uid_hash));
+    memset(&record, 0, sizeof(record));  // Clear all bytes first
+
+    // Copy the UID (up to 16 bytes)
+    uint8_t copy_size = (size > 16) ? 16 : size;
+    memcpy(record.uid, unique_id, copy_size);
+    // Remaining bytes already zeroed by memset
 
     write_record(record, node_id);
 
@@ -347,12 +340,13 @@ bool AP_DroneCAN_DNA_Server::Database::check_registration(uint8_t node_id)
     NodeRecord record;
     read_record(record, node_id);
 
-    uint8_t empty_uid[sizeof(NodeRecord::uid_hash)] {};
-    uint8_t crc = crc_crc8(record.uid_hash, sizeof(record.uid_hash));
-    if (crc == record.crc && memcmp(&record.uid_hash[0], &empty_uid[0], sizeof(empty_uid)) != 0) {
-        return true; // CRC matches and UID hash is not all zero
+    // Check if UID is all zeros (no registration)
+    for (uint8_t i = 0; i < 16; i++) {
+        if (record.uid[i] != 0) {
+            return true; // Found non-zero byte, registration exists
+        }
     }
-    return false;
+    return false; // All zero, no registration
 }
 
 // read the given node ID's registration's record
@@ -363,18 +357,18 @@ void AP_DroneCAN_DNA_Server::Database::read_record(NodeRecord &record, uint8_t n
     }
 
     storage->read_block(&record, NODERECORD_LOC(node_id), sizeof(NodeRecord));
-    
+
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     // Debug: Check if record has valid data
     bool is_empty = true;
-    for (int i = 0; i < sizeof(NodeRecord::uid_hash); i++) {
-        if (record.uid_hash[i] != 0) {
+    for (int i = 0; i < 16; i++) {
+        if (record.uid[i] != 0) {
             is_empty = false;
             break;
         }
     }
     if (!is_empty) {
-        ESP_LOGD("DNA_SERVER", "Read record for node_id=%d from offset=%d (has data)", 
+        ESP_LOGD("DNA_SERVER", "Read record for node_id=%d from offset=%d (has data)",
                  node_id, NODERECORD_LOC(node_id));
     }
 #endif
@@ -399,14 +393,33 @@ void AP_DroneCAN_DNA_Server::Database::write_record(const NodeRecord &record, ui
         return;
     }
 
+    // Check if we're writing a registration (non-zero UID) or clearing (all-zero UID)
+    bool is_clearing = true;
+    for (uint8_t i = 0; i < 16; i++) {
+        if (record.uid[i] != 0) {
+            is_clearing = false;
+            break;
+        }
+    }
+
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGD("DNA_SERVER", "Writing record for node_id=%d to storage offset=%d",
-             node_id, NODERECORD_LOC(node_id));
-    hal.console->printf("DNA: Writing node %d to storage offset %d\n",
-                       node_id, NODERECORD_LOC(node_id));
+    if (is_clearing) {
+        ESP_LOGD("DNA_SERVER", "Clearing node %d record (old format garbage or deregistration) at offset=%d",
+                 node_id, NODERECORD_LOC(node_id));
+        hal.console->printf("DNA: Clearing node %d (removing old data)\n", node_id);
+    } else {
+        ESP_LOGD("DNA_SERVER", "Writing registration for node %d at offset=%d, UID=%02X%02X%02X%02X%02X%02X...",
+                 node_id, NODERECORD_LOC(node_id),
+                 record.uid[0], record.uid[1], record.uid[2],
+                 record.uid[3], record.uid[4], record.uid[5]);
+        hal.console->printf("DNA: Writing node %d registration to storage\n", node_id);
+    }
 #endif
 
-    storage->write_block(NODERECORD_LOC(node_id), &record, sizeof(NodeRecord));
+    if (!storage->write_block(NODERECORD_LOC(node_id), &record, sizeof(NodeRecord))) {
+        debug_dronecan(AP_CANManager::LOG_ERROR, "DNA_DB CRITICAL: Failed to write record for node %d to storage", node_id);
+        GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "DroneCAN DNA storage write failed for node %d", node_id);
+    }
 }
 
 
@@ -908,9 +921,7 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
             server_state = DUPLICATE_NODES;
             fault_node_id = transfer.source_node_id;
             memcpy(fault_node_name, rsp.name.data, sizeof(fault_node_name));
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            ESP_LOGE("DNA_SERVER", "DUPLICATE NODE DETECTED! Node %d", transfer.source_node_id);
-#endif
+            debug_dronecan(AP_CANManager::LOG_ERROR, "DNA_SERVER ERROR: DUPLICATE NODE DETECTED on Node %d", transfer.source_node_id);
         }
     } else {
         //Verify as well
@@ -995,11 +1006,8 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
         ESP_LOGD("DNA_SERVER", "First part received, resetting state and clearing buffer");
 #endif
     } else if (rcvd_unique_id_offset == 0) {
-        // Some nodes (by design) send first message with first_part=false
-        // Accept it, but require ≥12 bytes before allocation to prevent UID collisions
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP_LOGD("DNA_SERVER", "Accepting message with first_part=false at offset=0 (non-standard but supported)");
-#endif
+        // not first part but we are expecting one, reject per DroneCAN standard
+        return;
     }
 
     if (rcvd_unique_id_offset) {
@@ -1220,7 +1228,7 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     response_count++;
     if ((now_guard - last_rate_limit_log) >= 1000) {
         if (response_count > 10) {
-            ESP_LOGE("DNA_SERVER", "RATE LIMIT: Sent %lu DNA responses in 1 second - TX queue likely flooded!", response_count);
+            debug_dronecan(AP_CANManager::LOG_WARNING, "DNA_SERVER WARNING: RATE LIMIT - Sent %lu DNA responses in 1 second - TX queue likely flooded", (unsigned long)response_count);
         }
         response_count = 0;
         last_rate_limit_log = now_guard;
