@@ -4645,6 +4645,14 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
         handle_common_param_message(msg);
         break;
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    case MAVLINK_MSG_ID_PARAM_EXT_REQUEST_LIST:
+    case MAVLINK_MSG_ID_PARAM_EXT_REQUEST_READ:
+    case MAVLINK_MSG_ID_PARAM_EXT_SET:
+        handle_common_param_ext_message(msg);
+        break;
+#endif
+
 #if AP_MAVLINK_SET_GPS_GLOBAL_ORIGIN_MESSAGE_ENABLED
     case MAVLINK_MSG_ID_SET_GPS_GLOBAL_ORIGIN:
         handle_set_gps_global_origin(msg);
