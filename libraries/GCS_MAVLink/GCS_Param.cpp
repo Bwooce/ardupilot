@@ -25,6 +25,10 @@
 #include <AP_Logger/AP_Logger.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
+#include <AP_DroneCAN/AP_DroneCAN.h>
+#endif
+
 extern const AP_HAL::HAL& hal;
 
 // queue of pending parameter requests and replies
@@ -34,6 +38,148 @@ ObjectBuffer<GCS_MAVLINK::pending_param_reply> GCS_MAVLINK::param_replies(5);
 #if HAL_ENABLE_DRONECAN_DRIVERS
 // queue of pending PARAM_EXT requests for DroneCAN nodes
 ObjectBuffer<GCS_MAVLINK::pending_param_ext_request> GCS_MAVLINK::param_ext_requests(5);
+
+// DroneCAN parameter get/set callbacks
+// These are called when a DroneCAN node responds to parameter requests
+static bool dronecan_param_get_set_float_cb(AP_DroneCAN* ap_dronecan, const uint8_t node_id,
+                                             const char* name, float &value)
+{
+    // Find matching pending request
+    GCS_MAVLINK::pending_param_ext_request req;
+    bool found = false;
+
+    // Search through all pending requests
+    for (uint8_t i = 0; i < GCS_MAVLINK::param_ext_requests.available(); i++) {
+        if (GCS_MAVLINK::param_ext_requests.peek(req, i)) {
+            if (req.node_id == node_id &&
+                strncmp(req.param_name, name, sizeof(req.param_name)) == 0) {
+                found = true;
+                break;
+            }
+        }
+    }
+
+    if (!found) {
+        return false;  // No matching request found
+    }
+
+    // Format value as string
+    char value_str[128];
+    snprintf(value_str, sizeof(value_str), "%.6f", value);
+
+    // Send response to GCS
+    GCS_MAVLINK *gcs_chan = gcs().chan(req.chan);
+    if (gcs_chan != nullptr) {
+        if (req.is_set) {
+            // This was a set operation - send PARAM_EXT_ACK
+            gcs_chan->send_param_ext_ack(req.full_param_name, value_str,
+                                         MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_ACCEPTED);
+        } else {
+            // This was a get operation - send PARAM_EXT_VALUE
+            gcs_chan->send_param_ext_value(req.full_param_name, value_str,
+                                           MAV_PARAM_EXT_TYPE_REAL32, 0);
+        }
+    }
+
+    // Remove request from queue (TODO: implement proper removal)
+    // For now we rely on timeout to clear it
+
+    return true;
+}
+
+static bool dronecan_param_get_set_int_cb(AP_DroneCAN* ap_dronecan, const uint8_t node_id,
+                                           const char* name, int32_t &value)
+{
+    // Find matching pending request
+    GCS_MAVLINK::pending_param_ext_request req;
+    bool found = false;
+
+    // Search through all pending requests
+    for (uint8_t i = 0; i < GCS_MAVLINK::param_ext_requests.available(); i++) {
+        if (GCS_MAVLINK::param_ext_requests.peek(req, i)) {
+            if (req.node_id == node_id &&
+                strncmp(req.param_name, name, sizeof(req.param_name)) == 0) {
+                found = true;
+                break;
+            }
+        }
+    }
+
+    if (!found) {
+        return false;  // No matching request found
+    }
+
+    // Format value as string
+    char value_str[128];
+    snprintf(value_str, sizeof(value_str), "%ld", (long)value);
+
+    // Send response to GCS
+    GCS_MAVLINK *gcs_chan = gcs().chan(req.chan);
+    if (gcs_chan != nullptr) {
+        if (req.is_set) {
+            // This was a set operation - send PARAM_EXT_ACK
+            gcs_chan->send_param_ext_ack(req.full_param_name, value_str,
+                                         MAV_PARAM_EXT_TYPE_INT32, PARAM_ACK_ACCEPTED);
+        } else {
+            // This was a get operation - send PARAM_EXT_VALUE
+            gcs_chan->send_param_ext_value(req.full_param_name, value_str,
+                                           MAV_PARAM_EXT_TYPE_INT32, 0);
+        }
+    }
+
+    // Remove request from queue (TODO: implement proper removal)
+    // For now we rely on timeout to clear it
+
+    return true;
+}
+
+static bool dronecan_param_get_set_string_cb(AP_DroneCAN* ap_dronecan, const uint8_t node_id,
+                                              const char* name, AP_DroneCAN::string &value)
+{
+    // Find matching pending request
+    GCS_MAVLINK::pending_param_ext_request req;
+    bool found = false;
+
+    // Search through all pending requests
+    for (uint8_t i = 0; i < GCS_MAVLINK::param_ext_requests.available(); i++) {
+        if (GCS_MAVLINK::param_ext_requests.peek(req, i)) {
+            if (req.node_id == node_id &&
+                strncmp(req.param_name, name, sizeof(req.param_name)) == 0) {
+                found = true;
+                break;
+            }
+        }
+    }
+
+    if (!found) {
+        return false;  // No matching request found
+    }
+
+    // Copy string value (ensure null termination)
+    char value_str[128];
+    size_t copy_len = MIN(value.len, sizeof(value_str) - 1);
+    memcpy(value_str, value.data, copy_len);
+    value_str[copy_len] = '\0';
+
+    // Send response to GCS
+    GCS_MAVLINK *gcs_chan = gcs().chan(req.chan);
+    if (gcs_chan != nullptr) {
+        if (req.is_set) {
+            // This was a set operation - send PARAM_EXT_ACK
+            gcs_chan->send_param_ext_ack(req.full_param_name, value_str,
+                                         MAV_PARAM_EXT_TYPE_CUSTOM, PARAM_ACK_ACCEPTED);
+        } else {
+            // This was a get operation - send PARAM_EXT_VALUE
+            gcs_chan->send_param_ext_value(req.full_param_name, value_str,
+                                           MAV_PARAM_EXT_TYPE_CUSTOM, 0);
+        }
+    }
+
+    // Remove request from queue (TODO: implement proper removal)
+    // For now we rely on timeout to clear it
+
+    return true;
+}
 #endif
 
 bool GCS_MAVLINK::param_timer_registered;
@@ -587,24 +733,214 @@ void GCS_MAVLINK::handle_param_ext_request_list(const mavlink_message_t &msg)
 
 void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
 {
-    // Implementation placeholder - will be filled in next commit
+    mavlink_param_ext_request_read_t packet;
+    mavlink_msg_param_ext_request_read_decode(&msg, &packet);
+
+    // Extract parameter name (ensure null termination)
+    char param_id[17];
+    memcpy(param_id, packet.param_id, 16);
+    param_id[16] = '\0';
+
+    // Parse DroneCAN parameter name
+    uint8_t can_driver_index;
+    uint8_t node_id;
+    char dronecan_param_name[17];
+
+    if (!parse_dronecan_param_name(param_id, can_driver_index, node_id,
+                                    dronecan_param_name, sizeof(dronecan_param_name))) {
+        // Not a DroneCAN parameter name, ignore
+        return;
+    }
+
+    // Get DroneCAN driver instance
+    AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(can_driver_index);
+    if (ap_dronecan == nullptr) {
+        // DroneCAN driver not available
+        send_param_ext_ack(param_id, "", MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED);
+        return;
+    }
+
+    // Create pending request
+    pending_param_ext_request req;
+    req.chan = chan;
+    req.can_driver_index = can_driver_index;
+    req.node_id = node_id;
+    strncpy(req.param_name, dronecan_param_name, sizeof(req.param_name) - 1);
+    req.param_name[sizeof(req.param_name) - 1] = '\0';
+    strncpy(req.full_param_name, param_id, sizeof(req.full_param_name) - 1);
+    req.full_param_name[sizeof(req.full_param_name) - 1] = '\0';
+    req.is_set = false;
+    req.request_time_ms = AP_HAL::millis();
+
+    // Try to initiate DroneCAN parameter get
+    // Try float first (most common)
+    static AP_DroneCAN::ParamGetSetFloatCb float_cb(dronecan_param_get_set_float_cb);
+    if (ap_dronecan->get_parameter_on_node(node_id, dronecan_param_name, &float_cb)) {
+        // Queue the request
+        if (!param_ext_requests.push(req)) {
+            // Queue full
+            send_param_ext_ack(param_id, "", MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED);
+        }
+        return;
+    }
+
+    // Try integer
+    static AP_DroneCAN::ParamGetSetIntCb int_cb(dronecan_param_get_set_int_cb);
+    if (ap_dronecan->get_parameter_on_node(node_id, dronecan_param_name, &int_cb)) {
+        // Queue the request
+        if (!param_ext_requests.push(req)) {
+            // Queue full
+            send_param_ext_ack(param_id, "", MAV_PARAM_EXT_TYPE_INT32, PARAM_ACK_FAILED);
+        }
+        return;
+    }
+
+    // Try string
+    static AP_DroneCAN::ParamGetSetStringCb string_cb(dronecan_param_get_set_string_cb);
+    if (ap_dronecan->get_parameter_on_node(node_id, dronecan_param_name, &string_cb)) {
+        // Queue the request
+        if (!param_ext_requests.push(req)) {
+            // Queue full
+            send_param_ext_ack(param_id, "", MAV_PARAM_EXT_TYPE_CUSTOM, PARAM_ACK_FAILED);
+        }
+        return;
+    }
+
+    // All attempts failed - probably busy
+    send_param_ext_ack(param_id, "", MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED);
 }
 
 void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
 {
-    // Implementation placeholder - will be filled in next commit
+    mavlink_param_ext_set_t packet;
+    mavlink_msg_param_ext_set_decode(&msg, &packet);
+
+    // Extract parameter name (ensure null termination)
+    char param_id[17];
+    memcpy(param_id, packet.param_id, 16);
+    param_id[16] = '\0';
+
+    // Extract parameter value (ensure null termination)
+    char param_value[129];
+    memcpy(param_value, packet.param_value, 128);
+    param_value[128] = '\0';
+
+    // Parse DroneCAN parameter name
+    uint8_t can_driver_index;
+    uint8_t node_id;
+    char dronecan_param_name[17];
+
+    if (!parse_dronecan_param_name(param_id, can_driver_index, node_id,
+                                    dronecan_param_name, sizeof(dronecan_param_name))) {
+        // Not a DroneCAN parameter name, ignore
+        return;
+    }
+
+    // Get DroneCAN driver instance
+    AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(can_driver_index);
+    if (ap_dronecan == nullptr) {
+        // DroneCAN driver not available
+        send_param_ext_ack(param_id, param_value, packet.param_type, PARAM_ACK_FAILED);
+        return;
+    }
+
+    // Create pending request
+    pending_param_ext_request req;
+    req.chan = chan;
+    req.can_driver_index = can_driver_index;
+    req.node_id = node_id;
+    strncpy(req.param_name, dronecan_param_name, sizeof(req.param_name) - 1);
+    req.param_name[sizeof(req.param_name) - 1] = '\0';
+    strncpy(req.full_param_name, param_id, sizeof(req.full_param_name) - 1);
+    req.full_param_name[sizeof(req.full_param_name) - 1] = '\0';
+    strncpy(req.param_value, param_value, sizeof(req.param_value) - 1);
+    req.param_value[sizeof(req.param_value) - 1] = '\0';
+    req.param_type = packet.param_type;
+    req.is_set = true;
+    req.request_time_ms = AP_HAL::millis();
+
+    // Parse value and call appropriate DroneCAN set function
+    bool success = false;
+
+    switch (packet.param_type) {
+    case MAV_PARAM_EXT_TYPE_REAL32: {
+        float value = atof(param_value);
+        static AP_DroneCAN::ParamGetSetFloatCb float_cb(dronecan_param_get_set_float_cb);
+        success = ap_dronecan->set_parameter_on_node(node_id, dronecan_param_name, value, &float_cb);
+        break;
+    }
+    case MAV_PARAM_EXT_TYPE_INT32: {
+        int32_t value = atol(param_value);
+        static AP_DroneCAN::ParamGetSetIntCb int_cb(dronecan_param_get_set_int_cb);
+        success = ap_dronecan->set_parameter_on_node(node_id, dronecan_param_name, value, &int_cb);
+        break;
+    }
+    case MAV_PARAM_EXT_TYPE_CUSTOM: {
+        AP_DroneCAN::string value;
+        value.len = strlen(param_value);
+        if (value.len > sizeof(value.data)) {
+            value.len = sizeof(value.data);
+        }
+        memcpy(value.data, param_value, value.len);
+        static AP_DroneCAN::ParamGetSetStringCb string_cb(dronecan_param_get_set_string_cb);
+        success = ap_dronecan->set_parameter_on_node(node_id, dronecan_param_name, value, &string_cb);
+        break;
+    }
+    default:
+        // Unsupported parameter type
+        send_param_ext_ack(param_id, param_value, packet.param_type, PARAM_ACK_VALUE_UNSUPPORTED);
+        return;
+    }
+
+    if (success) {
+        // Queue the request
+        if (!param_ext_requests.push(req)) {
+            // Queue full
+            send_param_ext_ack(param_id, param_value, packet.param_type, PARAM_ACK_FAILED);
+        }
+    } else {
+        // DroneCAN call failed - probably busy
+        send_param_ext_ack(param_id, param_value, packet.param_type, PARAM_ACK_FAILED);
+    }
 }
 
 void GCS_MAVLINK::send_param_ext_value(const char *param_name, const char *param_value,
                                         uint8_t param_type, uint8_t param_result)
 {
-    // Implementation placeholder - will be filled in next commit
+    mavlink_message_t msg;
+    mavlink_msg_param_ext_value_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &msg,
+        param_name,
+        param_value,
+        param_type,
+        0,  // param_count - not used for DroneCAN parameters
+        0   // param_index - not used for DroneCAN parameters
+    );
+
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
 }
 
 void GCS_MAVLINK::send_param_ext_ack(const char *param_name, const char *param_value,
                                       uint8_t param_type, uint8_t param_result)
 {
-    // Implementation placeholder - will be filled in next commit
+    mavlink_message_t msg;
+    mavlink_msg_param_ext_ack_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &msg,
+        param_name,
+        param_value,
+        param_type,
+        param_result
+    );
+
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
 }
 
 #endif // HAL_ENABLE_DRONECAN_DRIVERS
