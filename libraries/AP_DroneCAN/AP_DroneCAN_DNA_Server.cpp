@@ -362,6 +362,111 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     node_seen.set(transfer.source_node_id);
 }
 
+void AP_DroneCAN_DNA_Server::send_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg)
+{
+#if HAL_GCS_ENABLED
+    // Send UAVCAN_NODE_STATUS MAVLink message (ID 310)
+    mavlink_uavcan_node_status_t pkt;
+    pkt.time_usec = AP_HAL::micros64();
+    pkt.uptime_sec = msg.uptime_sec;
+    pkt.health = msg.health;
+    pkt.mode = msg.mode;
+    pkt.sub_mode = msg.sub_mode;
+    pkt.vendor_specific_status_code = msg.vendor_specific_status_code;
+
+    // Send to all active MAVLink channels using the correct method
+    gcs().send_to_active_channels(MAVLINK_MSG_ID_UAVCAN_NODE_STATUS, (const char *)&pkt);
+#endif
+}
+
+void AP_DroneCAN_DNA_Server::report_node_health_change(uint8_t node_id, uint8_t health, uint8_t mode, bool recovered)
+{
+#if AP_HAVE_GCS_SEND_TEXT
+    const char* health_str;
+    MAV_SEVERITY severity;
+
+    // Map DroneCAN health states to MAVLink severity and text
+    switch (health) {
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK:
+            health_str = "OK";
+            severity = MAV_SEVERITY_INFO;
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_WARNING:
+            health_str = "WARNING";
+            severity = MAV_SEVERITY_WARNING;
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_ERROR:
+            health_str = "ERROR";
+            severity = MAV_SEVERITY_ERROR;
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_CRITICAL:
+            health_str = "CRITICAL";
+            severity = MAV_SEVERITY_CRITICAL;
+            break;
+        default:
+            health_str = "UNKNOWN";
+            severity = MAV_SEVERITY_WARNING;
+            break;
+    }
+
+    const char* mode_str;
+    switch (mode) {
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL:
+            mode_str = "OPERATIONAL";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_INITIALIZATION:
+            mode_str = "INITIALIZING";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_MAINTENANCE:
+            mode_str = "MAINTENANCE";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_SOFTWARE_UPDATE:
+            mode_str = "UPDATING";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_OFFLINE:
+            mode_str = "OFFLINE";
+            break;
+        default:
+            mode_str = "UNKNOWN";
+            break;
+    }
+
+    if (recovered) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN Node %d: %s (%s) - RECOVERED",
+                      node_id, health_str, mode_str);
+    } else {
+        GCS_SEND_TEXT(severity, "DroneCAN Node %d: %s (%s)",
+                      node_id, health_str, mode_str);
+    }
+#endif
+}
+
+void AP_DroneCAN_DNA_Server::send_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg)
+{
+#if HAL_GCS_ENABLED
+    // Send UAVCAN_NODE_INFO MAVLink message (ID 311)
+    mavlink_uavcan_node_info_t pkt;
+    pkt.time_usec = AP_HAL::micros64();
+    pkt.uptime_sec = msg.status.uptime_sec;
+    memcpy(pkt.name, msg.name.data, MIN(msg.name.len, sizeof(pkt.name)));
+    pkt.name[sizeof(pkt.name)-1] = '\0';  // Ensure null termination
+    pkt.hw_version_major = msg.hardware_version.major;
+    pkt.hw_version_minor = msg.hardware_version.minor;
+    memcpy(pkt.hw_unique_id, msg.hardware_version.unique_id, sizeof(pkt.hw_unique_id));
+    pkt.sw_version_major = msg.software_version.major;
+    pkt.sw_version_minor = msg.software_version.minor;
+    pkt.sw_vcs_commit = msg.software_version.vcs_commit;
+
+    // Send to all active MAVLink channels using the correct method
+    gcs().send_to_active_channels(MAVLINK_MSG_ID_UAVCAN_NODE_INFO, (const char *)&pkt);
+
+    // Also send a text message for human-readable notification
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN Node %d: %s v%d.%d online",
+                  node_id, msg.name.data,
+                  msg.software_version.major, msg.software_version.minor);
+#endif
+}
+
 /* Node Info message handler
 Handle responses from GetNodeInfo Request. We verify the node info
 against our records. Marks Verification mask if already recorded,
