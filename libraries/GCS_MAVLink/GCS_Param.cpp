@@ -48,14 +48,22 @@ static bool dronecan_param_get_set_float_cb(AP_DroneCAN* ap_dronecan, const uint
     GCS_MAVLINK::pending_param_ext_request req;
     bool found = false;
 
-    // Search through all pending requests
-    for (uint8_t i = 0; i < GCS_MAVLINK::param_ext_requests.available(); i++) {
-        if (GCS_MAVLINK::param_ext_requests.peek(req, i)) {
-            if (req.node_id == node_id &&
-                strncmp(req.param_name, name, sizeof(req.param_name)) == 0) {
-                found = true;
-                break;
-            }
+    // Get all pending requests into a temporary array
+    uint8_t num_requests = GCS_MAVLINK::param_ext_requests.available();
+    if (num_requests == 0) {
+        return false;
+    }
+
+    GCS_MAVLINK::pending_param_ext_request requests[5];  // Match queue size
+    uint8_t read_count = GCS_MAVLINK::param_ext_requests.peek(requests, num_requests);
+
+    // Search for matching request
+    for (uint8_t i = 0; i < read_count; i++) {
+        if (requests[i].node_id == node_id &&
+            strncmp(requests[i].param_name, name, sizeof(requests[i].param_name)) == 0) {
+            req = requests[i];
+            found = true;
+            break;
         }
     }
 
@@ -94,14 +102,22 @@ static bool dronecan_param_get_set_int_cb(AP_DroneCAN* ap_dronecan, const uint8_
     GCS_MAVLINK::pending_param_ext_request req;
     bool found = false;
 
-    // Search through all pending requests
-    for (uint8_t i = 0; i < GCS_MAVLINK::param_ext_requests.available(); i++) {
-        if (GCS_MAVLINK::param_ext_requests.peek(req, i)) {
-            if (req.node_id == node_id &&
-                strncmp(req.param_name, name, sizeof(req.param_name)) == 0) {
-                found = true;
-                break;
-            }
+    // Get all pending requests into a temporary array
+    uint8_t num_requests = GCS_MAVLINK::param_ext_requests.available();
+    if (num_requests == 0) {
+        return false;
+    }
+
+    GCS_MAVLINK::pending_param_ext_request requests[5];  // Match queue size
+    uint8_t read_count = GCS_MAVLINK::param_ext_requests.peek(requests, num_requests);
+
+    // Search for matching request
+    for (uint8_t i = 0; i < read_count; i++) {
+        if (requests[i].node_id == node_id &&
+            strncmp(requests[i].param_name, name, sizeof(requests[i].param_name)) == 0) {
+            req = requests[i];
+            found = true;
+            break;
         }
     }
 
@@ -140,14 +156,22 @@ static bool dronecan_param_get_set_string_cb(AP_DroneCAN* ap_dronecan, const uin
     GCS_MAVLINK::pending_param_ext_request req;
     bool found = false;
 
-    // Search through all pending requests
-    for (uint8_t i = 0; i < GCS_MAVLINK::param_ext_requests.available(); i++) {
-        if (GCS_MAVLINK::param_ext_requests.peek(req, i)) {
-            if (req.node_id == node_id &&
-                strncmp(req.param_name, name, sizeof(req.param_name)) == 0) {
-                found = true;
-                break;
-            }
+    // Get all pending requests into a temporary array
+    uint8_t num_requests = GCS_MAVLINK::param_ext_requests.available();
+    if (num_requests == 0) {
+        return false;
+    }
+
+    GCS_MAVLINK::pending_param_ext_request requests[5];  // Match queue size
+    uint8_t read_count = GCS_MAVLINK::param_ext_requests.peek(requests, num_requests);
+
+    // Search for matching request
+    for (uint8_t i = 0; i < read_count; i++) {
+        if (requests[i].node_id == node_id &&
+            strncmp(requests[i].param_name, name, sizeof(requests[i].param_name)) == 0) {
+            req = requests[i];
+            found = true;
+            break;
         }
     }
 
