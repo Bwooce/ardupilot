@@ -491,6 +491,24 @@ public:
 
     MAV_RESULT set_message_interval(uint32_t msg_id, int32_t interval_us);
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    // PARAM_EXT support for DroneCAN parameter access via USER range (25-99)
+    // Component ID = 25 + (node_id - 1), supports nodes 1-75
+    struct pending_param_ext_request {
+        mavlink_channel_t chan;
+        uint8_t can_driver_index;  // 0-based index (0-8 for CAN1-CAN9)
+        uint8_t node_id;           // DroneCAN node ID (1-127)
+        char param_name[17];       // DroneCAN param name (max 16 chars + null)
+        uint8_t param_type;        // MAV_PARAM_EXT_TYPE
+        char param_value[128];     // Extended parameter value buffer
+        bool is_set;               // true=set, false=get
+        uint32_t request_time_ms;  // For timeout handling
+    };
+
+    // queue of pending PARAM_EXT requests for DroneCAN nodes
+    static ObjectBuffer<pending_param_ext_request> param_ext_requests;
+#endif // HAL_ENABLE_DRONECAN_DRIVERS
+
 protected:
 
     bool mavlink_coordinate_frame_to_location_alt_frame(MAV_FRAME coordinate_frame,
@@ -983,22 +1001,6 @@ private:
     uint8_t send_parameter_async_replies();
 
 #if HAL_ENABLE_DRONECAN_DRIVERS
-    // PARAM_EXT support for DroneCAN parameter access via USER range (25-99)
-    // Component ID = 25 + (node_id - 1), supports nodes 1-75
-    struct pending_param_ext_request {
-        mavlink_channel_t chan;
-        uint8_t can_driver_index;  // 0-based index (0-8 for CAN1-CAN9)
-        uint8_t node_id;           // DroneCAN node ID (1-127)
-        char param_name[17];       // DroneCAN param name (max 16 chars + null)
-        uint8_t param_type;        // MAV_PARAM_EXT_TYPE
-        char param_value[128];     // Extended parameter value buffer
-        bool is_set;               // true=set, false=get
-        uint32_t request_time_ms;  // For timeout handling
-    };
-
-    // queue of pending PARAM_EXT requests for DroneCAN nodes
-    static ObjectBuffer<pending_param_ext_request> param_ext_requests;
-
     // PARAM_EXT message handlers
     void handle_param_ext_request_read(const mavlink_message_t &msg);
     void handle_param_ext_request_list(const mavlink_message_t &msg);
