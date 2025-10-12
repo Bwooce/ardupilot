@@ -92,18 +92,26 @@ Component ID is an 8-bit field (0-255), and the standard allocates most of it al
 
 ## Possible Solutions
 
-### Solution 1: Use USER Range (25-99) ❌ INSUFFICIENT
+### Solution 1: Use USER Range (25-99) ✅ BEST PRACTICAL OPTION
 ```
-Component ID = 25 + node_id
+Component ID = 25 + (node_id - 1)
 
-Node 1   → Component 26  ✅
-Node 2   → Component 27  ✅
+Node 1   → Component 25  ✅
+Node 2   → Component 26  ✅
+Node 3   → Component 27  ✅
 ...
-Node 74  → Component 99  ✅
-Node 75  → Component 100 ❌ CONFLICTS with CAMERA
+Node 75  → Component 99  ✅
+Node 76+ → Not supported via PARAM_EXT
 ```
 
-**Only supports 74 nodes (1-74), not enough for full DroneCAN range (1-127).**
+**Supports 75 nodes (1-75), which covers most practical DroneCAN systems.**
+
+**Why this is acceptable:**
+- USER range (25-99) is designated for "privately managed MAVLink networks"
+- DroneCAN nodes are effectively a private/internal network
+- 75 nodes is more than most vehicles will ever have
+- Clean, intuitive mapping
+- No conflicts with standard components
 
 ### Solution 2: Sparse Mapping (Use Gaps) ❌ COMPLEX AND CONFUSING
 ```
@@ -205,30 +213,34 @@ Revert to `CANn.Nxxx.PARAM_NAME` with component 0:
 
 ## Recommendation
 
-### Short Term: Solution 5 (Hybrid)
-Use component IDs 113-139 for nodes 1-27:
+### RECOMMENDED: Solution 1 (USER Range)
+
+Use component IDs 25-99 for nodes 1-75:
+
 ```cpp
-if (target_component >= 113 && target_component <= 139) {
-    uint8_t node_id = target_component - 112;  // 113 → node 1
+// Component ID = 25 + (node_id - 1)
+if (target_component >= 25 && target_component <= 99) {
+    uint8_t node_id = target_component - 24;  // Component 25 → node 1
     // Use CAN_PARAM_IFACE parameter to select interface
-    // Handle PARAM_EXT for this node
+    // Or auto-discover via DNA server node_seen bitmask
 }
 ```
 
-**Document clearly**: "PARAM_EXT support limited to first 27 DroneCAN nodes"
+**Advantages:**
+- ✅ **75 nodes supported** (vs 27 in hybrid approach)
+- ✅ **No conflicts** with standard components
+- ✅ **Legitimate use** of USER range (DroneCAN is a "private network")
+- ✅ **Clean mapping**: Component 25 = Node 1, Component 99 = Node 75
+- ✅ **Practical**: >95% of systems have <75 DroneCAN nodes
+- ✅ **Simple implementation**
 
-### Long Term: Solution 4 (Protocol Extension)
-Work with MAVLink community to add proper DroneCAN parameter messages:
-- `DRONECAN_PARAM_EXT_REQUEST_READ` (msgid TBD)
-- `DRONECAN_PARAM_EXT_VALUE` (msgid TBD)
-- `DRONECAN_PARAM_EXT_SET` (msgid TBD)
-- `DRONECAN_PARAM_EXT_ACK` (msgid TBD)
+**Document clearly**:
+- "PARAM_EXT supports DroneCAN nodes 1-75 via component IDs 25-99"
+- "Nodes 76+ not accessible via PARAM_EXT (use native DroneCAN tools)"
 
-These messages would properly encode:
-- CAN interface number
-- Node ID
-- Parameter name (no length restriction)
-- Parameter value
+### Rejected: Protocol Extension (Tight Coupling)
+
+Creating DroneCAN-specific MAVLink messages would tightly couple the two protocols, which is architecturally undesirable. The protocols should remain independent.
 
 ## Impact on mavcan-cli
 
@@ -240,41 +252,63 @@ These messages would properly encode:
 
 **Recommendations for mavcan-cli:**
 
-1. **Short term**: Support configurable component base
-   ```python
-   COMPONENT_BASE = 113  # Use 113-139 range
-   component_id = COMPONENT_BASE + (node_id - 1)
-   # Only works for nodes 1-27
-   ```
+**Change component ID base to 25:**
+```python
+COMPONENT_BASE = 25  # USER range
+component_id = COMPONENT_BASE + (node_id - 1)
 
-2. **Medium term**: Add interface state parameter
-   ```python
-   # Set interface before parameter access
-   mavlink.param_set("CAN_PARAM_IFACE", 1)
-   mavlink.param_ext_request_read(component_id, "ESC_INDEX")
-   ```
+# Examples:
+# Node 1  → Component 25
+# Node 42 → Component 66
+# Node 75 → Component 99
+# Node 76+ → Error: "Node not supported via PARAM_EXT"
+```
 
-3. **Long term**: Support new DRONECAN_PARAM_* messages
-   ```python
-   # Once MAVLink protocol extended
-   mavlink.dronecan_param_request_read(
-       can_interface=1,
-       node_id=42,
-       param_name="ESC_INDEX"
-   )
-   ```
+**With interface selection:**
+```python
+# Option A: Auto-discover (ArduPilot finds which interface has the node)
+mavlink.param_ext_request_read(
+    target_component=25 + (node_id - 1),
+    param_id="ESC_INDEX"
+)
+
+# Option B: Explicit interface (set preference parameter first)
+mavlink.param_set("CAN_PARAM_IFACE", 1)  # Use CAN1
+mavlink.param_ext_request_read(
+    target_component=25 + (node_id - 1),
+    param_id="ESC_INDEX"
+)
+```
 
 ## Conclusion
 
-**The component ID space in MAVLink is insufficient for 128 DroneCAN nodes.**
+**Component ID is a byte (0-255) - this is the fundamental constraint.**
 
-We have three options:
-1. ✅ **Accept limitations** (27 nodes max via PARAM_EXT)
-2. ⚠️ **Revert to name encoding** (16-char limit problem)
-3. ✅ **Extend MAVLink protocol** (proper long-term solution)
+**MAVLink USER range (25-99) is the best solution:**
+- ✅ **75 DroneCAN nodes supported** (nodes 1-75)
+- ✅ **No conflicts** with standard components
+- ✅ **Covers >95% of practical systems**
+- ✅ **Clean mapping**: Component (25 + node_id - 1)
+- ✅ **Legitimate use** of USER range
+- ✅ **Compatible with mavcan-cli** (just change base from 240 to 25)
 
-**Recommended path forward:**
-1. Implement hybrid solution (components 113-139, nodes 1-27)
-2. Document limitations clearly
-3. Begin MAVLink protocol extension proposal
-4. Coordinate with mavcan-cli developer on limitations and long-term solution
+**Rejected alternatives:**
+- ❌ Name encoding (CANn.Nxxx.PARAM): 16-character limit blocks most DroneCAN parameters
+- ❌ Ranges 113-139 or 240+: Too few nodes (27 and 11 respectively) or conflicts
+- ❌ Protocol extension: Would tightly couple MAVLink and DroneCAN (bad architecture)
+
+**Implementation:**
+```cpp
+// Map component IDs 25-99 to DroneCAN nodes 1-75
+if (target_component >= 25 && target_component <= 99) {
+    uint8_t node_id = target_component - 24;
+    // Auto-discover interface via DNA server, or use CAN_PARAM_IFACE preference
+}
+```
+
+**Path forward:**
+1. ✅ Use USER range (25-99) for nodes 1-75
+2. ✅ Auto-discover CAN interface via DNA server tracking
+3. ✅ Optional CAN_PARAM_IFACE parameter for explicit interface selection
+4. ✅ Document: "Nodes 76+ not supported via PARAM_EXT"
+5. ✅ Coordinate with mavcan-cli team on component base change (240 → 25)
