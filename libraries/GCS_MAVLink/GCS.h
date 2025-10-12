@@ -507,6 +507,13 @@ public:
 
     // queue of pending PARAM_EXT requests for DroneCAN nodes
     static ObjectBuffer<pending_param_ext_request> param_ext_requests;
+
+    // PARAM_EXT send functions (must be public for static callbacks)
+    // node_id is used to set correct source component ID (25 + node_id - 1)
+    void send_param_ext_value(const char *param_name, const char *param_value,
+                              uint8_t param_type, uint8_t node_id);
+    void send_param_ext_ack(const char *param_name, const char *param_value,
+                            uint8_t param_type, uint8_t param_result, uint8_t node_id);
 #endif // HAL_ENABLE_DRONECAN_DRIVERS
 
 protected:
@@ -1006,13 +1013,6 @@ private:
     void handle_param_ext_request_list(const mavlink_message_t &msg);
     void handle_param_ext_set(const mavlink_message_t &msg);
     void handle_common_param_ext_message(const mavlink_message_t &msg);
-
-    // PARAM_EXT send functions
-    // node_id is used to set correct source component ID (25 + node_id - 1)
-    void send_param_ext_value(const char *param_name, const char *param_value,
-                              uint8_t param_type, uint8_t node_id);
-    void send_param_ext_ack(const char *param_name, const char *param_value,
-                            uint8_t param_type, uint8_t param_result, uint8_t node_id);
 #endif // HAL_ENABLE_DRONECAN_DRIVERS
 
 #if AP_MAVLINK_FTP_ENABLED
