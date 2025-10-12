@@ -16,8 +16,8 @@ SERIAL2_PROTOCOL 5
 SERIAL2_BAUD 38400
 
 # MAVLink Options for SERIAL1 (mLRS connection)
-# Bit 2: Ignore Streamrate - prevents GCS from changing stream rates
-MAV1_OPTIONS 4
+# Removed MAV1_OPTIONS to allow GCS to set stream rates
+# MAV1_OPTIONS 0
 
 # Enable DroneCAN on CAN port 1
 CAN_P1_DRIVER 1
@@ -155,6 +155,18 @@ SR0_PARAMS 10      # Parameter transfers - keep fast for configuration
 # ADSB - disabled for rovers
 SR0_ADSB 0         # ADS-B data - not relevant for ground vehicles
 
+# MAVLink Stream Rates for SERIAL1 (mLRS telemetry)
+SR1_EXT_STAT 2     # System status, GPS at 2Hz
+SR1_POSITION 2     # Position at 2Hz
+SR1_EXTRA1 2       # Attitude, ESC telemetry at 2Hz
+SR1_EXTRA2 1       # VFR HUD at 1Hz
+SR1_EXTRA3 1       # Battery, rangefinder at 1Hz
+SR1_RAW_SENS 1     # IMU data at 1Hz
+SR1_RC_CHAN 2      # RC channels at 2Hz
+SR1_RAW_CTRL 0.1   # Raw servo control at 0.1Hz
+SR1_PARAMS 10      # Parameter transfers at 10Hz
+SR1_ADSB 0         # ADSB disabled
+
 # DroneCAN ESC Configuration - RPM-based control already enabled
 # CAN_D1_UC_ESC_BM 1 enables ESC RPM feedback (already configured above)
 # CAN_D1_UC_ESC_CM 1 enables ESC command output (already configured above)
@@ -162,3 +174,4 @@ SR0_ADSB 0         # ADS-B data - not relevant for ground vehicles
 # Failsafe Configuration for GCS Compatibility
 FS_GCS_ENABL 0     # GCS failsafe disabled by default
 FS_THR_ENABLE 0    # Throttle failsafe disabled for DroneCAN ESCs
+BATT_SERIAL_NUM -1

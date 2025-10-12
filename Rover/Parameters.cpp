@@ -634,7 +634,7 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     AP_SUBGROUPINFO(mode_circle, "CIRC", 57, ParametersG2, ModeCircle),
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // @Group: ESP32
+    // @Group: ESP32_
     // @Path: ../libraries/AP_HAL_ESP32/ESP32_Params.cpp
     AP_SUBGROUPINFO(esp32_params, "ESP32", 58, ParametersG2, ESP32::ESP32Params),
 #endif
@@ -898,5 +898,26 @@ void Rover::load_parameters(void)
         AP_Param::convert_old_parameters(&gcs_conversion_info[0], ARRAY_SIZE(gcs_conversion_info));
     }
 #endif  // HAL_GCS_ENABLED
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // PARAMETER_CONVERSION - Added: Oct-2025 for consolidating ESP32 parameters
+    // Migrate old ESP32DEBUG_LVL and ESP32LOG_MAV to new ESP32_DEBUG_LVL and ESP32_LOG_MAV
+    // The old parameters used inconsistent group naming, new ones use unified ESP32 prefix
+    {
+        // Check for and migrate ESP32DEBUG_LVL -> ESP32_DEBUG_LVL
+        const AP_Param::ConversionInfo esp32_debug_lvl_info = { Parameters::k_param_g2, 58*256 + 1, AP_PARAM_INT8, "ESP32_DEBUG_LVL" };
+        AP_Int8 old_debug_lvl;
+        if (AP_Param::find_old_parameter(&esp32_debug_lvl_info, &old_debug_lvl)) {
+            AP_Param::convert_old_parameter(&esp32_debug_lvl_info, 1.0f);
+        }
+
+        // Check for and migrate ESP32LOG_MAV -> ESP32_LOG_MAV
+        const AP_Param::ConversionInfo esp32_log_mav_info = { Parameters::k_param_g2, 58*256 + 2, AP_PARAM_INT8, "ESP32_LOG_MAV" };
+        AP_Int8 old_log_mav;
+        if (AP_Param::find_old_parameter(&esp32_log_mav_info, &old_log_mav)) {
+            AP_Param::convert_old_parameter(&esp32_log_mav_info, 1.0f);
+        }
+    }
+#endif  // CONFIG_HAL_BOARD == HAL_BOARD_ESP32
 
 }

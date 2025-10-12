@@ -73,6 +73,9 @@ bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
     }
 
     twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(tx_pin, rx_pin, TWAI_MODE_NORMAL);
+    g_config.intr_flags = ESP_INTR_FLAG_LEVEL2;  // Higher priority than UART to prevent MAVLink blocking CAN
+    g_config.alerts_enabled = TWAI_ALERT_ALL;  // Enable all alerts for debugging
+
     twai_timing_config_t t_config;
     switch (bitrate) {
     case 1000000:
@@ -109,17 +112,24 @@ bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
     }
     CAN_DEBUG_INFO("TWAI started successfully");
 
+    // Log initial error counters after start
+    twai_status_info_t init_status;
+    if (twai_get_status_info(&init_status) == ESP_OK) {
+        CAN_DEBUG_INFO("Initial state after start: state=%d, TX_ERR=%u, RX_ERR=%u",
+                      init_status.state, init_status.tx_error_counter, init_status.rx_error_counter);
+    }
+
     // Wait for bus to become ready (needs to see 11 recessive bits)
     // The TWAI controller may stay in STOPPED state until it detects bus activity
-    twai_status_info_t init_status;
     uint32_t wait_start_ms = AP_HAL::millis();
     bool bus_ready = false;
 
     while ((AP_HAL::millis() - wait_start_ms) < 2000) {  // Wait up to 2 seconds
         if (twai_get_status_info(&init_status) == ESP_OK) {
             if (init_status.state == TWAI_STATE_RUNNING) {
-                CAN_DEBUG_INFO("TWAI transitioned to RUNNING state after %lums",
-                              (unsigned long)(AP_HAL::millis() - wait_start_ms));
+                CAN_DEBUG_INFO("TWAI transitioned to RUNNING state after %lums, TX_ERR=%u, RX_ERR=%u",
+                              (unsigned long)(AP_HAL::millis() - wait_start_ms),
+                              init_status.tx_error_counter, init_status.rx_error_counter);
                 bus_ready = true;
                 break;
             }
@@ -130,8 +140,8 @@ bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
     if (!bus_ready) {
         // Log warning but don't fail - the bus might become ready later when other nodes appear
         if (twai_get_status_info(&init_status) == ESP_OK) {
-            CAN_DEBUG_WARN("TWAI did not reach RUNNING state after 2s (state=%d). Bus may need other nodes.",
-                          init_status.state);
+            CAN_DEBUG_WARN("TWAI did not reach RUNNING state after 2s (state=%d, TX_ERR=%u, RX_ERR=%u). Bus may need other nodes.",
+                          init_status.state, init_status.tx_error_counter, init_status.rx_error_counter);
         } else {
             CAN_DEBUG_WARN("TWAI did not reach RUNNING state after 2s. Bus may need other nodes.");
         }
@@ -548,7 +558,55 @@ void CANIface::tx_task(void *arg)
             }
         }
 #endif
-        
+
+#if CAN_LOGLEVEL >= 2
+        // Periodic error counter monitoring - check regardless of TX result to catch failures
+        // Only enabled at CAN_LOGLEVEL >= 2 to reduce log verbosity
+        static uint32_t last_health_check_ms = 0;
+        static uint32_t last_tx_err = 0;
+        static uint32_t last_rx_err = 0;
+        uint32_t now_ms = AP_HAL::millis();
+
+        if (now_ms - last_health_check_ms >= 1000) {  // Check every 1 second for faster detection
+            twai_status_info_t health_status;
+            if (twai_get_status_info(&health_status) == ESP_OK) {
+                int32_t tx_delta = (int32_t)health_status.tx_error_counter - (int32_t)last_tx_err;
+                int32_t rx_delta = (int32_t)health_status.rx_error_counter - (int32_t)last_rx_err;
+
+                // Log at key thresholds or every 5 seconds when healthy
+                bool should_log = false;
+                const char* reason = "";
+
+                if (health_status.tx_error_counter > 0 && last_tx_err == 0) {
+                    should_log = true;
+                    reason = " [FIRST ERROR]";
+                } else if (health_status.tx_error_counter >= 96 && last_tx_err < 96) {
+                    should_log = true;
+                    reason = " [WARNING: approaching bus-off at 128]";
+                } else if (health_status.tx_error_counter >= 128) {
+                    should_log = true;
+                    reason = " [BUS-OFF THRESHOLD]";
+                } else if ((now_ms / 1000) % 5 == 0 && (now_ms - last_health_check_ms) < 2000) {
+                    // Log every 5 seconds when healthy (check time delta to avoid duplicate logs)
+                    should_log = true;
+                    reason = "";
+                }
+
+                if (should_log) {
+                    ESP_LOGI("CAN_HEALTH", "T+%lus: TX_ERR=%u (%+ld), RX_ERR=%u (%+ld), state=%d%s",
+                             (unsigned long)(now_ms / 1000),
+                             health_status.tx_error_counter, (long)tx_delta,
+                             health_status.rx_error_counter, (long)rx_delta,
+                             health_status.state, reason);
+                }
+
+                last_tx_err = health_status.tx_error_counter;
+                last_rx_err = health_status.rx_error_counter;
+            }
+            last_health_check_ms = now_ms;
+        }
+#endif // CAN_LOGLEVEL >= 2
+
         if (result == ESP_OK) {
             // Track for self-reception filtering
             iface->tx_tracker[iface->tx_tracker_index].can_id = message.identifier;
@@ -577,25 +635,49 @@ void CANIface::tx_task(void *arg)
                 }
 #endif
             } else if (result == ESP_FAIL) {
-                // TX failed - check bus state
+                // TX failed - check bus state and log error counters
                 twai_status_info_t twai_status;
                 if (twai_get_status_info(&twai_status) == ESP_OK) {
+                    // Track error counter progression
+                    static uint32_t last_tx_err = 0;
+                    static uint32_t last_rx_err = 0;
+                    static uint32_t last_fail_log_ms = 0;
+                    uint32_t now_ms = AP_HAL::millis();
+
+                    uint32_t tx_delta = (twai_status.tx_error_counter > last_tx_err) ?
+                                       (twai_status.tx_error_counter - last_tx_err) : 0;
+                    uint32_t rx_delta = (twai_status.rx_error_counter > last_rx_err) ?
+                                       (twai_status.rx_error_counter - last_rx_err) : 0;
+
                     if (twai_status.state == TWAI_STATE_BUS_OFF) {
                         // Bus-off condition detected - use rate-limited logging
+                        ESP_LOGE("CAN", "TX failed led to BUS_OFF: TX_ERR=%u (+%lu), RX_ERR=%u (+%lu)",
+                                 twai_status.tx_error_counter, (unsigned long)tx_delta,
+                                 twai_status.rx_error_counter, (unsigned long)rx_delta);
                         iface->log_bus_state(BusState::BUS_OFF);
                         iface->update_error_stats(0x01); // Bus-off error code
 
                         // Attempt bus recovery
+                        ESP_LOGI("CAN", "Initiating recovery from BUS_OFF (software-triggered)");
                         twai_initiate_recovery();
-                        // Note: Recovery is automatic in TWAI driver
+                    } else if (now_ms - last_fail_log_ms > 1000) {
+                        // Log error counter progression every second
+                        ESP_LOGW("CAN", "TX failures accumulating: TX_ERR=%u (+%lu), RX_ERR=%u (+%lu), state=%d",
+                                 twai_status.tx_error_counter, (unsigned long)tx_delta,
+                                 twai_status.rx_error_counter, (unsigned long)rx_delta,
+                                 twai_status.state);
+                        last_fail_log_ms = now_ms;
                     }
+
+                    last_tx_err = twai_status.tx_error_counter;
+                    last_rx_err = twai_status.rx_error_counter;
                 }
                 // Reduce log spam - only log occasionally
                 static uint32_t fail_count = 0;
                 fail_count++;
                 if (fail_count <= 5 || (fail_count % 100) == 0) {
-                    CAN_DEBUG_ERROR("Failed to transmit message ID=0x%08X, error=%d (count=%lu)", 
-                                    (unsigned)(tx_item.frame.id & AP_HAL::CANFrame::MaskExtID), 
+                    CAN_DEBUG_ERROR("Failed to transmit message ID=0x%08X, error=%d (count=%lu)",
+                                    (unsigned)(tx_item.frame.id & AP_HAL::CANFrame::MaskExtID),
                                     result, (unsigned long)fail_count);
                 }
             } else if (result == ESP_ERR_INVALID_STATE) {
@@ -671,13 +753,48 @@ void CANIface::tx_task(void *arg)
                     } else if (got_status) {
                         // Try recovery based on current state
                         if (diagnostic_status.state == TWAI_STATE_STOPPED) {
-                            // Try to start the bus again, but with backoff
-                            CAN_DEBUG_INFO("TWAI is STOPPED, attempting to start (attempt %lu, backoff=%lums)",
+                            // Before restarting, initiate recovery to clear error counters
+                            // CRITICAL: TWAI may still have TX_ERR=128 from previous failure
+                            CAN_DEBUG_INFO("TWAI is STOPPED, initiating recovery to clear error counters");
+                            twai_initiate_recovery();
+
+                            // Brief delay to let recovery process
+                            hal.scheduler->delay_microseconds(10000); // 10ms
+
+                            // Now try to start the bus
+                            CAN_DEBUG_INFO("Starting TWAI after recovery (attempt %lu, backoff=%lums)",
                                           (unsigned long)consecutive_failures,
                                           (unsigned long)recovery_backoff_ms);
                             esp_err_t start_res = twai_start();
                             if (start_res != ESP_OK) {
                                 CAN_DEBUG_ERROR("Failed to restart TWAI: %d", start_res);
+                            } else {
+                                // Verify error counters are cleared after restart
+                                twai_status_info_t verify_status;
+                                if (twai_get_status_info(&verify_status) == ESP_OK) {
+                                    ESP_LOGI("CAN", "TWAI restarted: state=%d, TX_ERR=%u, RX_ERR=%u",
+                                            verify_status.state,
+                                            verify_status.tx_error_counter,
+                                            verify_status.rx_error_counter);
+                                    if (verify_status.tx_error_counter > 0 || verify_status.rx_error_counter > 0) {
+                                        ESP_LOGW("CAN", "WARNING: Error counters not cleared after restart!");
+                                    }
+                                }
+
+                                // After successful recovery, add delay before processing queued messages
+                                // This gives other nodes time to stabilize and prevents flooding the bus
+                                ESP_LOGI("CAN", "Delaying 200ms before processing queued messages (recovery grace period)");
+                                hal.scheduler->delay(200); // 200ms recovery grace period
+
+                                // Also consider clearing the TX queue to prevent sending stale messages
+                                if (iface->tx_queue) {
+                                    uint32_t queued_msgs = uxQueueMessagesWaiting(iface->tx_queue);
+                                    if (queued_msgs > 10) {
+                                        ESP_LOGW("CAN", "Clearing %lu stale messages from TX queue after recovery",
+                                                (unsigned long)queued_msgs);
+                                        xQueueReset(iface->tx_queue);
+                                    }
+                                }
                             }
                         } else if (diagnostic_status.state == TWAI_STATE_BUS_OFF) {
                             // Need recovery - but let it recover naturally first
@@ -817,7 +934,7 @@ bool CANIface::configure_hw_filters(const CanFilterConfig* filter_configs, uint1
     g_config.alerts_enabled = TWAI_ALERT_ALL;  // Enable all alerts
     g_config.clkout_divider = 0;  // No clock output
     g_config.tx_queue_len = 20;   // Increase TX queue
-    g_config.intr_flags = ESP_INTR_FLAG_LEVEL1;  // Level 1 interrupt
+    g_config.intr_flags = ESP_INTR_FLAG_LEVEL2;  // Higher priority than UART to prevent MAVLink blocking CAN
     
     twai_timing_config_t t_config;
     
@@ -972,8 +1089,9 @@ void CANIface::check_bus_health()
         // Attempt basic recovery every 5 seconds
         if (now_ms - last_recovery_attempt_ms > 5000) {
             consecutive_bus_off_count++;
-            CAN_DEBUG_INFO("Attempting bus recovery (attempt #%u)",
-                           (unsigned)consecutive_bus_off_count);
+            ESP_LOGI("CAN", "Attempting bus recovery (attempt #%u): TX_ERR=%u, RX_ERR=%u",
+                    (unsigned)consecutive_bus_off_count,
+                    twai_status.tx_error_counter, twai_status.rx_error_counter);
 
             // If we've had persistent bus-off conditions, try full driver restart
             if (consecutive_bus_off_count > 5 && (now_ms - last_full_restart_ms > 30000)) {
@@ -1045,42 +1163,14 @@ void CANIface::log_bus_state(BusState new_state)
                 ESP_LOGI("CAN", "Bus initialized to GOOD state");
             }
         } else if (new_state == BusState::BUS_OFF) {
-            // Get detailed diagnostics when entering BUS_OFF (power failure indicator)
-            twai_status_info_t diag;
-            if (twai_get_status_info(&diag) == ESP_OK) {
-                // Track error counter history for rate-of-change analysis
-                static uint32_t last_tx_err = 0;
-                static uint32_t last_rx_err = 0;
-                static uint32_t last_check_ms = 0;
-                uint32_t delta_ms = (last_check_ms > 0) ? (now_ms - last_check_ms) : 0;
-                uint32_t tx_delta = (diag.tx_error_counter > last_tx_err) ?
-                                    (diag.tx_error_counter - last_tx_err) : 0;
-                uint32_t rx_delta = (diag.rx_error_counter > last_rx_err) ?
-                                    (diag.rx_error_counter - last_rx_err) : 0;
-
-                ESP_LOGE("CAN_POWER", "=== BUS_OFF POWER/EMI DIAGNOSTICS ===");
-                ESP_LOGE("CAN_POWER", "Error counters: TX=%u (+%lu in %lums), RX=%u (+%lu in %lums)",
-                         (unsigned)diag.tx_error_counter, (unsigned long)tx_delta, (unsigned long)delta_ms,
-                         (unsigned)diag.rx_error_counter, (unsigned long)rx_delta, (unsigned long)delta_ms);
-                ESP_LOGE("CAN_POWER", "Msgs pending: TX=%lu, RX=%lu",
-                         (unsigned long)diag.msgs_to_tx, (unsigned long)diag.msgs_to_rx);
-                ESP_LOGE("CAN_POWER", "Heap: free=%lu min=%lu",
-                         (unsigned long)esp_get_free_heap_size(),
-                         (unsigned long)esp_get_minimum_free_heap_size());
-                ESP_LOGE("CAN_POWER", "Uptime: %lums since boot", (unsigned long)now_ms);
-                ESP_LOGE("CAN_POWER", "");
-                ESP_LOGE("CAN_POWER", "DIAGNOSIS GUIDE:");
-                ESP_LOGE("CAN_POWER", "  POWER DROP: Both TX/RX deltas >50, sudden failure, heap stable");
-                ESP_LOGE("CAN_POWER", "  EMI (mLRS): TX delta >50, RX delta <20, correlates with RF TX");
-                ESP_LOGE("CAN_POWER", "  SOFTWARE: Heap decreasing, one counter stuck, gradual degradation");
-                ESP_LOGE("CAN_POWER", "====================================");
-
-                // Update history
-                last_tx_err = diag.tx_error_counter;
-                last_rx_err = diag.rx_error_counter;
-                last_check_ms = now_ms;
+            // Get error counters to diagnose why we went BUS_OFF
+            twai_status_info_t status;
+            if (twai_get_status_info(&status) == ESP_OK) {
+                ESP_LOGE("CAN", "Bus entered BUS_OFF: TX_ERR=%u, RX_ERR=%u, msgs_pending: TX=%lu RX=%lu",
+                         status.tx_error_counter, status.rx_error_counter,
+                         (unsigned long)status.msgs_to_tx, (unsigned long)status.msgs_to_rx);
             } else {
-                ESP_LOGE("CAN", "Bus entered BUS_OFF state (cannot read diagnostics)");
+                ESP_LOGE("CAN", "Bus entered BUS_OFF state");
             }
         } else if (new_state == BusState::STOPPED) {
             ESP_LOGE("CAN", "Bus entered STOPPED state");
