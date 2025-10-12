@@ -27,6 +27,7 @@
 
 #if HAL_ENABLE_DRONECAN_DRIVERS
 #include <AP_DroneCAN/AP_DroneCAN.h>
+#include <AP_CANManager/AP_CANManager_config.h>
 #endif
 
 extern const AP_HAL::HAL& hal;
@@ -758,7 +759,7 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
     AP_DroneCAN *ap_dronecan = nullptr;
     uint8_t can_driver_index = 0;
 
-    for (uint8_t i = 0; i < AP_DRONECAN_MAX_INSTANCES; i++) {
+    for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
         AP_DroneCAN *candidate = AP_DroneCAN::get_dronecan(i);
         if (candidate != nullptr &&
             candidate->get_dna_server().node_seen.get(node_id)) {
@@ -834,7 +835,7 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
     AP_DroneCAN *ap_dronecan = nullptr;
     uint8_t can_driver_index = 0;
 
-    for (uint8_t i = 0; i < AP_DRONECAN_MAX_INSTANCES; i++) {
+    for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
         AP_DroneCAN *candidate = AP_DroneCAN::get_dronecan(i);
         if (candidate != nullptr &&
             candidate->get_dna_server().node_seen.get(node_id)) {
