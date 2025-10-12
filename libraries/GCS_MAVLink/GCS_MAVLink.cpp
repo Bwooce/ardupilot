@@ -209,6 +209,36 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
     }
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Periodic MAVLink throughput logging for debugging telemetry issues
+    static uint32_t send_count[MAVLINK_COMM_NUM_BUFFERS] = {};
+    static uint32_t send_bytes[MAVLINK_COMM_NUM_BUFFERS] = {};
+    static uint32_t last_stats_log_ms[MAVLINK_COMM_NUM_BUFFERS] = {};
+
+    send_count[chan]++;
+    send_bytes[chan] += len;
+
+    uint32_t now_ms = AP_HAL::millis();
+    if (now_ms - last_stats_log_ms[chan] >= 10000) {  // Log every 10 seconds
+        mavlink_status_t *status = mavlink_get_channel_status(chan);
+        if (status) {
+            float duration_sec = (now_ms - last_stats_log_ms[chan]) / 1000.0f;
+            if (duration_sec > 0) {
+                float msgs_per_sec = send_count[chan] / duration_sec;
+                float bytes_per_sec = send_bytes[chan] / duration_sec;
+
+                ESP_LOGI("MAVLINK", "Ch%d: TX=%lu msgs (%.1f msg/s, %.0f B/s), RX_OK=%u, RX_DROP=%u",
+                         chan,
+                         (unsigned long)send_count[chan], msgs_per_sec, bytes_per_sec,
+                         status->packet_rx_success_count, status->packet_rx_drop_count);
+            }
+        }
+
+        // Reset counters
+        send_count[chan] = 0;
+        send_bytes[chan] = 0;
+        last_stats_log_ms[chan] = now_ms;
+    }
+
     // ESP32: Check heap integrity before processing MAVLink messages (with recursion guard)
     // Use thread-local storage to prevent recursion per-task
     static __thread bool in_heap_check = false;
