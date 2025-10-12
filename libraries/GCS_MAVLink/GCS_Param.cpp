@@ -762,7 +762,7 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
     for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
         AP_DroneCAN *candidate = AP_DroneCAN::get_dronecan(i);
         if (candidate != nullptr &&
-            candidate->get_dna_server().node_seen.get(node_id)) {
+            candidate->get_dna_server().is_node_seen(node_id)) {
             ap_dronecan = candidate;
             can_driver_index = i;
             break;  // Use first interface that has this node
@@ -838,7 +838,7 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
     for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
         AP_DroneCAN *candidate = AP_DroneCAN::get_dronecan(i);
         if (candidate != nullptr &&
-            candidate->get_dna_server().node_seen.get(node_id)) {
+            candidate->get_dna_server().is_node_seen(node_id)) {
             ap_dronecan = candidate;
             can_driver_index = i;
             break;  // Use first interface that has this node

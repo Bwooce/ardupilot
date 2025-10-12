@@ -159,6 +159,9 @@ public:
     bool has_healthy_nodes() { return node_healthy.count() > 0; }
     bool all_nodes_healthy() { return node_healthy == node_verified && node_verified.count() > 0; }
 
+    // Check if a specific node has been seen (for parameter access via MAVLink)
+    bool is_node_seen(uint8_t node_id) { return node_seen.get(node_id); }
+
     // Get node counts excluding local node (for display purposes)
     uint8_t get_remote_healthy_count() {
         uint8_t count = node_healthy.count();
