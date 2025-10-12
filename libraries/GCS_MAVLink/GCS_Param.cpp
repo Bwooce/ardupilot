@@ -228,7 +228,7 @@ static bool dronecan_param_enum_float_cb_wrapper(void* obj, AP_DroneCAN* ap_dron
         mavlink_message_t msg;
         mavlink_msg_param_ext_value_pack(
             mavlink_system.sysid,
-            25 + (node_id - 1),  // Source component = node's component ID
+            node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
             &msg,
             name,
             value_str,
@@ -266,7 +266,7 @@ static bool dronecan_param_enum_int_cb_wrapper(void* obj, AP_DroneCAN* ap_dronec
         mavlink_message_t msg;
         mavlink_msg_param_ext_value_pack(
             mavlink_system.sysid,
-            25 + (node_id - 1),  // Source component = node's component ID
+            node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
             &msg,
             name,
             value_str,
@@ -306,7 +306,7 @@ static bool dronecan_param_enum_string_cb_wrapper(void* obj, AP_DroneCAN* ap_dro
         mavlink_message_t msg;
         mavlink_msg_param_ext_value_pack(
             mavlink_system.sysid,
-            25 + (node_id - 1),  // Source component = node's component ID
+            node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
             &msg,
             name,
             value_str,
@@ -577,28 +577,15 @@ void GCS_MAVLINK::handle_param_set(const mavlink_message_t &msg)
     char key[AP_MAX_NAME_SIZE+1];
     strncpy(key, (char *)packet.param_id, AP_MAX_NAME_SIZE);
     key[AP_MAX_NAME_SIZE] = 0;
-    
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Debug: Log parameter set request
-    hal.console->printf("PARAM_SET: Received request for '%s' = %.4f\n", key, packet.param_value);
-#endif
 
     // find existing param so we can get the old value
     uint16_t parameter_flags = 0;
     vp = AP_Param::find(key, &var_type, &parameter_flags);
     if (vp == nullptr || isnan(packet.param_value) || isinf(packet.param_value)) {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        hal.console->printf("PARAM_SET: Failed - param not found or invalid value (vp=%p, nan=%d, inf=%d)\n", 
-                 vp, isnan(packet.param_value), isinf(packet.param_value));
-#endif
         return;
     }
 
     float old_value = vp->cast_to_float(var_type);
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    hal.console->printf("PARAM_SET: Found param, old_value=%.4f, type=%d, flags=0x%04x\n", 
-             old_value, (int)var_type, parameter_flags);
-#endif
 
     if (!vp->allow_set_via_mavlink(parameter_flags)) {
         // don't warn the user about this failure if we are dropping
@@ -615,9 +602,6 @@ void GCS_MAVLINK::handle_param_set(const mavlink_message_t &msg)
 
     // set the value
     vp->set_float(packet.param_value, var_type);
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    hal.console->printf("PARAM_SET: Called set_float with value=%.4f\n", packet.param_value);
-#endif
 
     /*
       we force the save if the value is not equal to the old
@@ -627,16 +611,9 @@ void GCS_MAVLINK::handle_param_set(const mavlink_message_t &msg)
       save the change
      */
     bool force_save = !is_equal(packet.param_value, old_value);
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    hal.console->printf("PARAM_SET: force_save=%d (old=%.4f, new=%.4f, equal=%d)\n", 
-             force_save, old_value, packet.param_value, is_equal(packet.param_value, old_value));
-#endif
 
     // save the change
     vp->save(force_save);
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    hal.console->printf("PARAM_SET: Saved parameter, new value=%.4f\n", vp->cast_to_float(var_type));
-#endif
 
     if (force_save && (parameter_flags & AP_PARAM_FLAG_ENABLE)) {
         AP_Param::invalidate_count();
@@ -650,10 +627,6 @@ void GCS_MAVLINK::handle_param_set(const mavlink_message_t &msg)
 #endif
 
     // send confirmation back to GCS with the new value
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    float final_value = vp->cast_to_float(var_type);
-    hal.console->printf("PARAM_SET: Sending confirmation, param='%s', value=%.4f\n", key, final_value);
-#endif
     send_parameter_value(key, var_type, vp->cast_to_float(var_type));
 }
 
@@ -855,14 +828,15 @@ void GCS_MAVLINK::handle_param_ext_request_list(const mavlink_message_t &msg)
     mavlink_param_ext_request_list_t packet;
     mavlink_msg_param_ext_request_list_decode(&msg, &packet);
 
-    // Check if component ID is in USER range for DroneCAN nodes
-    if (packet.target_component < 25 || packet.target_component > 99) {
-        // Not a DroneCAN node request
+    // Per MAVLink UAVCAN spec: Component ID = Node ID (1:1 mapping)
+    // Valid DroneCAN node IDs are 1-127
+    if (packet.target_component < 1 || packet.target_component > 127) {
+        // Not a valid DroneCAN node ID
         return;
     }
 
-    // Extract node ID from component ID
-    uint8_t node_id = packet.target_component - 24;  // Component 25 → node 1
+    // Per MAVLink UAVCAN bridging spec: component_id = node_id (1:1)
+    uint8_t node_id = packet.target_component;
 
     // Find which CAN interface has this node
     AP_DroneCAN *ap_dronecan = nullptr;
@@ -893,14 +867,15 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
     mavlink_param_ext_request_read_t packet;
     mavlink_msg_param_ext_request_read_decode(&msg, &packet);
 
-    // Check if component ID is in USER range for DroneCAN nodes
-    if (packet.target_component < 25 || packet.target_component > 99) {
-        // Not a DroneCAN node request
+    // Per MAVLink UAVCAN spec: Component ID = Node ID (1:1 mapping)
+    // Valid DroneCAN node IDs are 1-127
+    if (packet.target_component < 1 || packet.target_component > 127) {
+        // Not a valid DroneCAN node ID
         return;
     }
 
-    // Extract node ID from component ID
-    uint8_t node_id = packet.target_component - 24;  // Component 25 → node 1
+    // Per MAVLink UAVCAN bridging spec: component_id = node_id (1:1)
+    uint8_t node_id = packet.target_component;
 
     // Find which CAN interface has this node
     AP_DroneCAN *ap_dronecan = nullptr;
@@ -969,14 +944,15 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
     mavlink_param_ext_set_t packet;
     mavlink_msg_param_ext_set_decode(&msg, &packet);
 
-    // Check if component ID is in USER range for DroneCAN nodes
-    if (packet.target_component < 25 || packet.target_component > 99) {
-        // Not a DroneCAN node request
+    // Per MAVLink UAVCAN spec: Component ID = Node ID (1:1 mapping)
+    // Valid DroneCAN node IDs are 1-127
+    if (packet.target_component < 1 || packet.target_component > 127) {
+        // Not a valid DroneCAN node ID
         return;
     }
 
-    // Extract node ID from component ID
-    uint8_t node_id = packet.target_component - 24;  // Component 25 → node 1
+    // Per MAVLink UAVCAN bridging spec: component_id = node_id (1:1)
+    uint8_t node_id = packet.target_component;
 
     // Find which CAN interface has this node
     AP_DroneCAN *ap_dronecan = nullptr;
@@ -1072,7 +1048,7 @@ void GCS_MAVLINK::send_param_ext_value(const char *param_name, const char *param
     mavlink_message_t msg;
     mavlink_msg_param_ext_value_pack(
         mavlink_system.sysid,
-        25 + (node_id - 1),  // Source component = node's component ID
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
         &msg,
         param_name,
         param_value,
@@ -1092,7 +1068,7 @@ void GCS_MAVLINK::send_param_ext_ack(const char *param_name, const char *param_v
     mavlink_message_t msg;
     mavlink_msg_param_ext_ack_pack(
         mavlink_system.sysid,
-        25 + (node_id - 1),  // Source component = node's component ID
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
         &msg,
         param_name,
         param_value,
