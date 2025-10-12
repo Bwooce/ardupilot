@@ -31,6 +31,11 @@ extern const AP_HAL::HAL& hal;
 ObjectBuffer<GCS_MAVLINK::pending_param_request> GCS_MAVLINK::param_requests(20);
 ObjectBuffer<GCS_MAVLINK::pending_param_reply> GCS_MAVLINK::param_replies(5);
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
+// queue of pending PARAM_EXT requests for DroneCAN nodes
+ObjectBuffer<GCS_MAVLINK::pending_param_ext_request> GCS_MAVLINK::param_ext_requests(5);
+#endif
+
 bool GCS_MAVLINK::param_timer_registered;
 
 /**
@@ -468,5 +473,140 @@ void GCS_MAVLINK::handle_common_param_message(const mavlink_message_t &msg)
         break;
     }
 }
+
+#if HAL_ENABLE_DRONECAN_DRIVERS
+/*
+  Parse DroneCAN parameter name in format: CANn.Nxxx.PARAM_NAME
+  Where:
+    n = CAN interface (1-9)
+    xxx = Node ID (001-127, zero-padded 3 digits)
+    PARAM_NAME = DroneCAN parameter name (max 16 chars)
+
+  Example: "CAN1.N042.ESC_INDEX"
+  Returns: can_driver_index=0, node_id=42, param_name="ESC_INDEX"
+*/
+bool GCS_MAVLINK::parse_dronecan_param_name(const char *full_name,
+                                             uint8_t &can_driver_index,
+                                             uint8_t &node_id,
+                                             char *param_name,
+                                             uint8_t param_name_len)
+{
+    // Minimum valid length: "CAN1.N001.X" = 11 chars
+    if (full_name == nullptr || strlen(full_name) < 11) {
+        return false;
+    }
+
+    // Check "CAN" prefix (bytes 0-2)
+    if (strncmp(full_name, "CAN", 3) != 0) {
+        return false;
+    }
+
+    // Parse interface number (byte 3): '1'-'9'
+    const char iface_char = full_name[3];
+    if (iface_char < '1' || iface_char > '9') {
+        return false;
+    }
+    can_driver_index = iface_char - '1';  // Convert to 0-based index
+
+    // Check dot separator (byte 4)
+    if (full_name[4] != '.') {
+        return false;
+    }
+
+    // Check 'N' prefix (byte 5)
+    if (full_name[5] != 'N') {
+        return false;
+    }
+
+    // Parse 3-digit node ID (bytes 6-8)
+    if (!isdigit(full_name[6]) || !isdigit(full_name[7]) || !isdigit(full_name[8])) {
+        return false;
+    }
+    const uint16_t parsed_node_id = (full_name[6] - '0') * 100 +
+                                    (full_name[7] - '0') * 10 +
+                                    (full_name[8] - '0');
+
+    // Validate node ID range (1-127 for DroneCAN)
+    if (parsed_node_id < 1 || parsed_node_id > 127) {
+        return false;
+    }
+    node_id = parsed_node_id;
+
+    // Check dot separator (byte 9)
+    if (full_name[9] != '.') {
+        return false;
+    }
+
+    // Extract parameter name (starts at byte 10)
+    const char *param_start = &full_name[10];
+    const size_t remaining_len = strlen(param_start);
+
+    // DroneCAN parameter names are max 16 characters
+    if (remaining_len == 0 || remaining_len > 16) {
+        return false;
+    }
+
+    // Check buffer has space
+    if (remaining_len >= param_name_len) {
+        return false;
+    }
+
+    // Copy parameter name
+    strncpy(param_name, param_start, param_name_len - 1);
+    param_name[param_name_len - 1] = '\0';
+
+    return true;
+}
+
+void GCS_MAVLINK::handle_common_param_ext_message(const mavlink_message_t &msg)
+{
+    switch (msg.msgid) {
+    case MAVLINK_MSG_ID_PARAM_EXT_REQUEST_LIST:
+        handle_param_ext_request_list(msg);
+        break;
+    case MAVLINK_MSG_ID_PARAM_EXT_REQUEST_READ:
+        handle_param_ext_request_read(msg);
+        break;
+    case MAVLINK_MSG_ID_PARAM_EXT_SET:
+        handle_param_ext_set(msg);
+        break;
+    }
+}
+
+void GCS_MAVLINK::handle_param_ext_request_list(const mavlink_message_t &msg)
+{
+    // PARAM_EXT_REQUEST_LIST is not supported for DroneCAN nodes
+    // DroneCAN protocol doesn't provide a way to list all parameters
+    // Send a PARAM_EXT_ACK with result PARAM_ACK_FAILED to indicate not supported
+    mavlink_param_ext_request_list_t packet;
+    mavlink_msg_param_ext_request_list_decode(&msg, &packet);
+
+    // Note: We could send an empty list, but it's clearer to just not respond
+    // GCS should use PARAM_EXT_REQUEST_READ for specific parameters
+}
+
+void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
+{
+    // Implementation placeholder - will be filled in next commit
+}
+
+void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
+{
+    // Implementation placeholder - will be filled in next commit
+}
+
+void GCS_MAVLINK::send_param_ext_value(const char *param_name, const char *param_value,
+                                        uint8_t param_type, uint8_t param_result)
+{
+    // Implementation placeholder - will be filled in next commit
+}
+
+void GCS_MAVLINK::send_param_ext_ack(const char *param_name, const char *param_value,
+                                      uint8_t param_type, uint8_t param_result)
+{
+    // Implementation placeholder - will be filled in next commit
+}
+
+#endif // HAL_ENABLE_DRONECAN_DRIVERS
 
 #endif  // HAL_GCS_ENABLED
