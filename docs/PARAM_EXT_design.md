@@ -13,6 +13,46 @@ Examples:
 - `CAN1.N042.MOTOR_KV`
 - `CAN2.N127.PARAM_NAME`
 
+#### Why Interface Number is Required (Redundant Node Support)
+
+In redundant DroneCAN configurations, a **single physical node** has the **same node ID** on multiple CAN buses. Our naming convention requires specifying **which CAN interface** to use to access it.
+
+**Redundant Node Example:**
+- Physical ESC with node ID 42 is connected to both CAN1 and CAN2 for redundancy
+- `CAN1.N042.ESC_INDEX` → Access node 42's parameter via CAN1 interface
+- `CAN2.N042.ESC_INDEX` → Access the same physical node via CAN2 interface
+
+**Why this is necessary:**
+
+1. **ArduPilot Architecture**: Each CAN interface has a separate `AP_DroneCAN` driver instance. When calling `get_parameter_on_node()`, you must specify which driver instance to use, which determines which physical bus the request is sent on.
+
+2. **Testing/Debugging**: You may want to test each interface independently:
+   - "Is CAN1 working? Try `CAN1.N042.ESC_INDEX`"
+   - "Is CAN2 working? Try `CAN2.N042.ESC_INDEX`"
+
+3. **Interface-Specific Issues**: If one bus is experiencing problems, you can explicitly use the other:
+   - "CAN1 is lossy, use CAN2: `CAN2.N042.ESC_INDEX`"
+
+4. **DroneCAN Protocol Requirement**: The protocol requires sending on a specific bus. Even with redundant nodes listening on multiple buses, the **request** must be sent on **one specific interface**.
+
+5. **Explicit Routing Topology**: The naming reflects reality - you're not just addressing "node X", you're addressing "node X **via** interface Y". This makes the routing path explicit and deterministic.
+
+**Alternative Would Be Problematic:**
+If we used just `N042.ESC_INDEX` without the interface number:
+- ArduPilot wouldn't know which `AP_DroneCAN` driver instance to use
+- No way to specify which physical bus to send the request on
+- No way to test/debug individual interfaces in redundant setups
+- Ambiguous behavior when node is on multiple interfaces
+
+**Implementation:**
+```cpp
+// Parse "CAN1.N042.ESC_INDEX" → can_driver_index=0, node_id=42, param="ESC_INDEX"
+AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(can_driver_index);
+ap_dronecan->get_parameter_on_node(node_id, param_name, callback);
+```
+
+The interface number directly maps to the driver instance, making routing explicit and unambiguous.
+
 ### Message Flow
 
 1. **PARAM_EXT_REQUEST_READ** → Parse name → DroneCAN get_parameter_on_node() → Callback → **PARAM_EXT_VALUE**
