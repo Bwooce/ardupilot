@@ -153,6 +153,27 @@ public:
     //report the server state, along with failure message if any
     bool prearm_check(char* fail_msg, uint8_t fail_msg_len) const;
 
+    // Get node health statistics for LED display
+    uint8_t get_healthy_node_count() { return node_healthy.count(); }
+    uint8_t get_verified_node_count() { return node_verified.count(); }
+    uint8_t get_seen_node_count() { return node_seen.count(); }
+    bool has_healthy_nodes() { return node_healthy.count() > 0; }
+    bool all_nodes_healthy() { return node_healthy == node_verified && node_verified.count() > 0; }
+
+    // Check if a specific node has been seen (for parameter access via MAVLink)
+    bool is_node_seen(uint8_t node_id) { return node_seen.get(node_id); }
+
+    // Get node counts excluding local node (for display purposes)
+    uint8_t get_remote_healthy_count() {
+        uint8_t count = node_healthy.count();
+        return (node_healthy.get(self_node_id) && count > 0) ? count - 1 : count;
+    }
+    uint8_t get_remote_verified_count() {
+        uint8_t count = node_verified.count();
+        return (node_verified.get(self_node_id) && count > 0) ? count - 1 : count;
+    }
+
+
     // canard message handler callbacks
     void handle_allocation(const CanardRxTransfer& transfer, const uavcan_protocol_dynamic_node_id_Allocation& msg);
     void handleNodeStatus(const CanardRxTransfer& transfer, const uavcan_protocol_NodeStatus& msg);
