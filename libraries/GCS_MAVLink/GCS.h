@@ -983,13 +983,13 @@ private:
     uint8_t send_parameter_async_replies();
 
 #if HAL_ENABLE_DRONECAN_DRIVERS
-    // PARAM_EXT support for DroneCAN parameter access
+    // PARAM_EXT support for DroneCAN parameter access via USER range (25-99)
+    // Component ID = 25 + (node_id - 1), supports nodes 1-75
     struct pending_param_ext_request {
         mavlink_channel_t chan;
         uint8_t can_driver_index;  // 0-based index (0-8 for CAN1-CAN9)
         uint8_t node_id;           // DroneCAN node ID (1-127)
         char param_name[17];       // DroneCAN param name (max 16 chars + null)
-        char full_param_name[AP_MAX_NAME_SIZE+1];  // Full CANn.Nxxx.PARAM for response
         uint8_t param_type;        // MAV_PARAM_EXT_TYPE
         char param_value[128];     // Extended parameter value buffer
         bool is_set;               // true=set, false=get
@@ -1006,18 +1006,11 @@ private:
     void handle_common_param_ext_message(const mavlink_message_t &msg);
 
     // PARAM_EXT send functions
+    // node_id is used to set correct source component ID (25 + node_id - 1)
     void send_param_ext_value(const char *param_name, const char *param_value,
-                              uint8_t param_type, uint8_t param_result);
+                              uint8_t param_type, uint8_t node_id);
     void send_param_ext_ack(const char *param_name, const char *param_value,
-                            uint8_t param_type, uint8_t param_result);
-
-    // Parse DroneCAN parameter name (CANn.Nxxx.PARAM_NAME format)
-    // Returns true if valid, fills can_driver_index, node_id, and param_name
-    static bool parse_dronecan_param_name(const char *full_name,
-                                          uint8_t &can_driver_index,
-                                          uint8_t &node_id,
-                                          char *param_name,
-                                          uint8_t param_name_len);
+                            uint8_t param_type, uint8_t param_result, uint8_t node_id);
 #endif // HAL_ENABLE_DRONECAN_DRIVERS
 
 #if AP_MAVLINK_FTP_ENABLED

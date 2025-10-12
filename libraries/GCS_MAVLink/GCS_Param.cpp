@@ -72,12 +72,12 @@ static bool dronecan_param_get_set_float_cb(AP_DroneCAN* ap_dronecan, const uint
     if (gcs_chan != nullptr) {
         if (req.is_set) {
             // This was a set operation - send PARAM_EXT_ACK
-            gcs_chan->send_param_ext_ack(req.full_param_name, value_str,
-                                         MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_ACCEPTED);
+            gcs_chan->send_param_ext_ack(req.param_name, value_str,
+                                         MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_ACCEPTED, node_id);
         } else {
             // This was a get operation - send PARAM_EXT_VALUE
-            gcs_chan->send_param_ext_value(req.full_param_name, value_str,
-                                           MAV_PARAM_EXT_TYPE_REAL32, 0);
+            gcs_chan->send_param_ext_value(req.param_name, value_str,
+                                           MAV_PARAM_EXT_TYPE_REAL32, node_id);
         }
     }
 
@@ -118,12 +118,12 @@ static bool dronecan_param_get_set_int_cb(AP_DroneCAN* ap_dronecan, const uint8_
     if (gcs_chan != nullptr) {
         if (req.is_set) {
             // This was a set operation - send PARAM_EXT_ACK
-            gcs_chan->send_param_ext_ack(req.full_param_name, value_str,
-                                         MAV_PARAM_EXT_TYPE_INT32, PARAM_ACK_ACCEPTED);
+            gcs_chan->send_param_ext_ack(req.param_name, value_str,
+                                         MAV_PARAM_EXT_TYPE_INT32, PARAM_ACK_ACCEPTED, node_id);
         } else {
             // This was a get operation - send PARAM_EXT_VALUE
-            gcs_chan->send_param_ext_value(req.full_param_name, value_str,
-                                           MAV_PARAM_EXT_TYPE_INT32, 0);
+            gcs_chan->send_param_ext_value(req.param_name, value_str,
+                                           MAV_PARAM_EXT_TYPE_INT32, node_id);
         }
     }
 
@@ -166,12 +166,12 @@ static bool dronecan_param_get_set_string_cb(AP_DroneCAN* ap_dronecan, const uin
     if (gcs_chan != nullptr) {
         if (req.is_set) {
             // This was a set operation - send PARAM_EXT_ACK
-            gcs_chan->send_param_ext_ack(req.full_param_name, value_str,
-                                         MAV_PARAM_EXT_TYPE_CUSTOM, PARAM_ACK_ACCEPTED);
+            gcs_chan->send_param_ext_ack(req.param_name, value_str,
+                                         MAV_PARAM_EXT_TYPE_CUSTOM, PARAM_ACK_ACCEPTED, node_id);
         } else {
             // This was a get operation - send PARAM_EXT_VALUE
-            gcs_chan->send_param_ext_value(req.full_param_name, value_str,
-                                           MAV_PARAM_EXT_TYPE_CUSTOM, 0);
+            gcs_chan->send_param_ext_value(req.param_name, value_str,
+                                           MAV_PARAM_EXT_TYPE_CUSTOM, node_id);
         }
     }
 
@@ -688,88 +688,6 @@ void GCS_MAVLINK::handle_common_param_message(const mavlink_message_t &msg)
 }
 
 #if HAL_ENABLE_DRONECAN_DRIVERS
-/*
-  Parse DroneCAN parameter name in format: CANn.Nxxx.PARAM_NAME
-  Where:
-    n = CAN interface (1-9)
-    xxx = Node ID (001-127, zero-padded 3 digits)
-    PARAM_NAME = DroneCAN parameter name (max 16 chars)
-
-  Example: "CAN1.N042.ESC_INDEX"
-  Returns: can_driver_index=0, node_id=42, param_name="ESC_INDEX"
-*/
-bool GCS_MAVLINK::parse_dronecan_param_name(const char *full_name,
-                                             uint8_t &can_driver_index,
-                                             uint8_t &node_id,
-                                             char *param_name,
-                                             uint8_t param_name_len)
-{
-    // Minimum valid length: "CAN1.N001.X" = 11 chars
-    if (full_name == nullptr || strlen(full_name) < 11) {
-        return false;
-    }
-
-    // Check "CAN" prefix (bytes 0-2)
-    if (strncmp(full_name, "CAN", 3) != 0) {
-        return false;
-    }
-
-    // Parse interface number (byte 3): '1'-'9'
-    const char iface_char = full_name[3];
-    if (iface_char < '1' || iface_char > '9') {
-        return false;
-    }
-    can_driver_index = iface_char - '1';  // Convert to 0-based index
-
-    // Check dot separator (byte 4)
-    if (full_name[4] != '.') {
-        return false;
-    }
-
-    // Check 'N' prefix (byte 5)
-    if (full_name[5] != 'N') {
-        return false;
-    }
-
-    // Parse 3-digit node ID (bytes 6-8)
-    if (!isdigit(full_name[6]) || !isdigit(full_name[7]) || !isdigit(full_name[8])) {
-        return false;
-    }
-    const uint16_t parsed_node_id = (full_name[6] - '0') * 100 +
-                                    (full_name[7] - '0') * 10 +
-                                    (full_name[8] - '0');
-
-    // Validate node ID range (1-127 for DroneCAN)
-    if (parsed_node_id < 1 || parsed_node_id > 127) {
-        return false;
-    }
-    node_id = parsed_node_id;
-
-    // Check dot separator (byte 9)
-    if (full_name[9] != '.') {
-        return false;
-    }
-
-    // Extract parameter name (starts at byte 10)
-    const char *param_start = &full_name[10];
-    const size_t remaining_len = strlen(param_start);
-
-    // DroneCAN parameter names are max 16 characters
-    if (remaining_len == 0 || remaining_len > 16) {
-        return false;
-    }
-
-    // Check buffer has space
-    if (remaining_len >= param_name_len) {
-        return false;
-    }
-
-    // Copy parameter name
-    strncpy(param_name, param_start, param_name_len - 1);
-    param_name[param_name_len - 1] = '\0';
-
-    return true;
-}
 
 void GCS_MAVLINK::handle_common_param_ext_message(const mavlink_message_t &msg)
 {
@@ -803,78 +721,75 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
     mavlink_param_ext_request_read_t packet;
     mavlink_msg_param_ext_request_read_decode(&msg, &packet);
 
-    // Extract parameter name (ensure null termination)
-    char param_id[17];
-    memcpy(param_id, packet.param_id, 16);
-    param_id[16] = '\0';
-
-    // Parse DroneCAN parameter name
-    uint8_t can_driver_index;
-    uint8_t node_id;
-    char dronecan_param_name[17];
-
-    if (!parse_dronecan_param_name(param_id, can_driver_index, node_id,
-                                    dronecan_param_name, sizeof(dronecan_param_name))) {
-        // Not a DroneCAN parameter name, ignore
+    // Check if component ID is in USER range for DroneCAN nodes
+    if (packet.target_component < 25 || packet.target_component > 99) {
+        // Not a DroneCAN node request
         return;
     }
 
-    // Get DroneCAN driver instance
-    AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(can_driver_index);
+    // Extract node ID from component ID
+    uint8_t node_id = packet.target_component - 24;  // Component 25 → node 1
+
+    // Find which CAN interface has this node
+    AP_DroneCAN *ap_dronecan = nullptr;
+    uint8_t can_driver_index = 0;
+
+    for (uint8_t i = 0; i < AP_DRONECAN_MAX_INSTANCES; i++) {
+        AP_DroneCAN *candidate = AP_DroneCAN::get_dronecan(i);
+        if (candidate != nullptr &&
+            candidate->get_dna_server().node_seen.get(node_id)) {
+            ap_dronecan = candidate;
+            can_driver_index = i;
+            break;  // Use first interface that has this node
+        }
+    }
+
     if (ap_dronecan == nullptr) {
-        // DroneCAN driver not available
-        send_param_ext_ack(param_id, "", MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED);
+        // Node not found on any interface
+        send_param_ext_ack(packet.param_id, "",
+                          MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED, node_id);
         return;
     }
+
+    // Extract parameter name
+    char param_name[17];
+    memcpy(param_name, packet.param_id, 16);
+    param_name[16] = '\0';
 
     // Create pending request
     pending_param_ext_request req;
     req.chan = chan;
     req.can_driver_index = can_driver_index;
     req.node_id = node_id;
-    strncpy(req.param_name, dronecan_param_name, sizeof(req.param_name) - 1);
+    strncpy(req.param_name, param_name, sizeof(req.param_name) - 1);
     req.param_name[sizeof(req.param_name) - 1] = '\0';
-    strncpy(req.full_param_name, param_id, sizeof(req.full_param_name) - 1);
-    req.full_param_name[sizeof(req.full_param_name) - 1] = '\0';
     req.is_set = false;
     req.request_time_ms = AP_HAL::millis();
 
-    // Try to initiate DroneCAN parameter get
-    // Try float first (most common)
+    // Try to initiate DroneCAN parameter get (try float first, most common)
     static AP_DroneCAN::ParamGetSetFloatCb float_cb(dronecan_param_get_set_float_cb);
-    if (ap_dronecan->get_parameter_on_node(node_id, dronecan_param_name, &float_cb)) {
-        // Queue the request
-        if (!param_ext_requests.push(req)) {
-            // Queue full
-            send_param_ext_ack(param_id, "", MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED);
-        }
+    if (ap_dronecan->get_parameter_on_node(node_id, param_name, &float_cb)) {
+        param_ext_requests.push(req);
         return;
     }
 
     // Try integer
     static AP_DroneCAN::ParamGetSetIntCb int_cb(dronecan_param_get_set_int_cb);
-    if (ap_dronecan->get_parameter_on_node(node_id, dronecan_param_name, &int_cb)) {
-        // Queue the request
-        if (!param_ext_requests.push(req)) {
-            // Queue full
-            send_param_ext_ack(param_id, "", MAV_PARAM_EXT_TYPE_INT32, PARAM_ACK_FAILED);
-        }
+    if (ap_dronecan->get_parameter_on_node(node_id, param_name, &int_cb)) {
+        param_ext_requests.push(req);
         return;
     }
 
     // Try string
     static AP_DroneCAN::ParamGetSetStringCb string_cb(dronecan_param_get_set_string_cb);
-    if (ap_dronecan->get_parameter_on_node(node_id, dronecan_param_name, &string_cb)) {
-        // Queue the request
-        if (!param_ext_requests.push(req)) {
-            // Queue full
-            send_param_ext_ack(param_id, "", MAV_PARAM_EXT_TYPE_CUSTOM, PARAM_ACK_FAILED);
-        }
+    if (ap_dronecan->get_parameter_on_node(node_id, param_name, &string_cb)) {
+        param_ext_requests.push(req);
         return;
     }
 
     // All attempts failed - probably busy
-    send_param_ext_ack(param_id, "", MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED);
+    send_param_ext_ack(packet.param_id, "",
+                      MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED, node_id);
 }
 
 void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
@@ -882,32 +797,42 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
     mavlink_param_ext_set_t packet;
     mavlink_msg_param_ext_set_decode(&msg, &packet);
 
-    // Extract parameter name (ensure null termination)
-    char param_id[17];
-    memcpy(param_id, packet.param_id, 16);
-    param_id[16] = '\0';
+    // Check if component ID is in USER range for DroneCAN nodes
+    if (packet.target_component < 25 || packet.target_component > 99) {
+        // Not a DroneCAN node request
+        return;
+    }
+
+    // Extract node ID from component ID
+    uint8_t node_id = packet.target_component - 24;  // Component 25 → node 1
+
+    // Find which CAN interface has this node
+    AP_DroneCAN *ap_dronecan = nullptr;
+    uint8_t can_driver_index = 0;
+
+    for (uint8_t i = 0; i < AP_DRONECAN_MAX_INSTANCES; i++) {
+        AP_DroneCAN *candidate = AP_DroneCAN::get_dronecan(i);
+        if (candidate != nullptr &&
+            candidate->get_dna_server().node_seen.get(node_id)) {
+            ap_dronecan = candidate;
+            can_driver_index = i;
+            break;  // Use first interface that has this node
+        }
+    }
+
+    // Extract parameter name
+    char param_name[17];
+    memcpy(param_name, packet.param_id, 16);
+    param_name[16] = '\0';
 
     // Extract parameter value (ensure null termination)
     char param_value[129];
     memcpy(param_value, packet.param_value, 128);
     param_value[128] = '\0';
 
-    // Parse DroneCAN parameter name
-    uint8_t can_driver_index;
-    uint8_t node_id;
-    char dronecan_param_name[17];
-
-    if (!parse_dronecan_param_name(param_id, can_driver_index, node_id,
-                                    dronecan_param_name, sizeof(dronecan_param_name))) {
-        // Not a DroneCAN parameter name, ignore
-        return;
-    }
-
-    // Get DroneCAN driver instance
-    AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(can_driver_index);
     if (ap_dronecan == nullptr) {
-        // DroneCAN driver not available
-        send_param_ext_ack(param_id, param_value, packet.param_type, PARAM_ACK_FAILED);
+        // Node not found on any interface
+        send_param_ext_ack(packet.param_id, param_value, packet.param_type, PARAM_ACK_FAILED, node_id);
         return;
     }
 
@@ -916,10 +841,8 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
     req.chan = chan;
     req.can_driver_index = can_driver_index;
     req.node_id = node_id;
-    strncpy(req.param_name, dronecan_param_name, sizeof(req.param_name) - 1);
+    strncpy(req.param_name, param_name, sizeof(req.param_name) - 1);
     req.param_name[sizeof(req.param_name) - 1] = '\0';
-    strncpy(req.full_param_name, param_id, sizeof(req.full_param_name) - 1);
-    req.full_param_name[sizeof(req.full_param_name) - 1] = '\0';
     strncpy(req.param_value, param_value, sizeof(req.param_value) - 1);
     req.param_value[sizeof(req.param_value) - 1] = '\0';
     req.param_type = packet.param_type;
@@ -933,13 +856,13 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
     case MAV_PARAM_EXT_TYPE_REAL32: {
         float value = atof(param_value);
         static AP_DroneCAN::ParamGetSetFloatCb float_cb(dronecan_param_get_set_float_cb);
-        success = ap_dronecan->set_parameter_on_node(node_id, dronecan_param_name, value, &float_cb);
+        success = ap_dronecan->set_parameter_on_node(node_id, param_name, value, &float_cb);
         break;
     }
     case MAV_PARAM_EXT_TYPE_INT32: {
         int32_t value = atol(param_value);
         static AP_DroneCAN::ParamGetSetIntCb int_cb(dronecan_param_get_set_int_cb);
-        success = ap_dronecan->set_parameter_on_node(node_id, dronecan_param_name, value, &int_cb);
+        success = ap_dronecan->set_parameter_on_node(node_id, param_name, value, &int_cb);
         break;
     }
     case MAV_PARAM_EXT_TYPE_CUSTOM: {
@@ -950,12 +873,12 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
         }
         memcpy(value.data, param_value, value.len);
         static AP_DroneCAN::ParamGetSetStringCb string_cb(dronecan_param_get_set_string_cb);
-        success = ap_dronecan->set_parameter_on_node(node_id, dronecan_param_name, value, &string_cb);
+        success = ap_dronecan->set_parameter_on_node(node_id, param_name, value, &string_cb);
         break;
     }
     default:
         // Unsupported parameter type
-        send_param_ext_ack(param_id, param_value, packet.param_type, PARAM_ACK_VALUE_UNSUPPORTED);
+        send_param_ext_ack(packet.param_id, param_value, packet.param_type, PARAM_ACK_VALUE_UNSUPPORTED, node_id);
         return;
     }
 
@@ -963,21 +886,21 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
         // Queue the request
         if (!param_ext_requests.push(req)) {
             // Queue full
-            send_param_ext_ack(param_id, param_value, packet.param_type, PARAM_ACK_FAILED);
+            send_param_ext_ack(packet.param_id, param_value, packet.param_type, PARAM_ACK_FAILED, node_id);
         }
     } else {
         // DroneCAN call failed - probably busy
-        send_param_ext_ack(param_id, param_value, packet.param_type, PARAM_ACK_FAILED);
+        send_param_ext_ack(packet.param_id, param_value, packet.param_type, PARAM_ACK_FAILED, node_id);
     }
 }
 
 void GCS_MAVLINK::send_param_ext_value(const char *param_name, const char *param_value,
-                                        uint8_t param_type, uint8_t param_result)
+                                        uint8_t param_type, uint8_t node_id)
 {
     mavlink_message_t msg;
     mavlink_msg_param_ext_value_pack(
         mavlink_system.sysid,
-        mavlink_system.compid,
+        25 + (node_id - 1),  // Source component = node's component ID
         &msg,
         param_name,
         param_value,
@@ -992,12 +915,12 @@ void GCS_MAVLINK::send_param_ext_value(const char *param_name, const char *param
 }
 
 void GCS_MAVLINK::send_param_ext_ack(const char *param_name, const char *param_value,
-                                      uint8_t param_type, uint8_t param_result)
+                                      uint8_t param_type, uint8_t param_result, uint8_t node_id)
 {
     mavlink_message_t msg;
     mavlink_msg_param_ext_ack_pack(
         mavlink_system.sysid,
-        mavlink_system.compid,
+        25 + (node_id - 1),  // Source component = node's component ID
         &msg,
         param_name,
         param_value,
