@@ -29,3 +29,56 @@
 - Don't use --verbose on anything unless you really need it as it just burns tokens for no gain
 - UART2 is currently the GPS at 4800 baud
 - use the ESP or HAL debugging only, and if the ESP ensure that the tag is configured on in the ESP HAL debug code configuration.
+
+## PARAM_EXT Development for DroneCAN Parameter Access (Oct 2025)
+
+### Goal
+Implement MAVLink PARAM_EXT protocol (messages 320-324) to enable GCS tools like mavcan-cli to get/set DroneCAN node parameters via MAVLink. This bridges MAVLink Extended Parameter Protocol with existing AP_DroneCAN parameter functions.
+
+### Development Workflow (Option 2: Develop on Branch, Extract to Master)
+
+**Branch Strategy:**
+1. Create feature branch from `esp32-build-refactor`: `git checkout -b param-ext-dronecan esp32-build-refactor`
+2. Implement and test with ESP32 hardware on this branch
+3. Once working, create clean upstream branch: `git checkout -b param-ext-dronecan-upstream origin/master`
+4. Cherry-pick PARAM_EXT commits to upstream branch: `git cherry-pick <commit-hash>`
+5. Submit upstream branch as PR to ArduPilot
+6. Merge feature branch back to esp32-build-refactor: `git merge param-ext-dronecan`
+
+**Critical Rules:**
+- **PARAM_EXT commits MUST be completely separate from ESP32-specific changes**
+- Each PARAM_EXT commit must compile and work independently
+- No ESP32 debug code, no hwdef changes, no defaults.parm changes in PARAM_EXT commits
+- Keep commits focused and atomic for clean cherry-picking
+
+**Files Being Modified (PARAM_EXT only):**
+- `libraries/GCS_MAVLink/GCS_Param.cpp` - New PARAM_EXT message handlers
+- `libraries/GCS_MAVLink/GCS.h` - Function declarations, queues
+- `libraries/GCS_MAVLink/GCS_Common.cpp` - Message routing for PARAM_EXT
+
+These files are identical between master and esp32-build-refactor, so cherry-picking will be clean.
+
+**Parameter Naming Convention:**
+- Format: `CANn.Nxxx.PARAM_NAME` where n=CAN interface (1-9), xxx=node ID (001-127, zero-padded 3 digits)
+- Examples: `CAN1.N001.ESC_INDEX`, `CAN1.N042.MOTOR_KV`, `CAN2.N127.PARAM_NAME`
+- This encodes the routing information in the parameter name for stateless MAVLink protocol
+- Supports full DroneCAN node ID range (1-127) and up to 9 CAN interfaces
+
+**Implementation Components:**
+1. PARAM_EXT message handlers (5 new handlers mirroring existing PARAM handlers)
+2. DroneCAN parameter request queue (async operations)
+3. Parameter name parser (extract CAN interface, node ID, param name)
+4. Protocol bridge (PARAM_EXT → AP_DroneCAN function calls)
+5. Async callback handlers (DroneCAN response → PARAM_EXT_VALUE/ACK)
+
+**Testing:**
+- Test on esp32-build-refactor with actual ESP32 hardware and DroneCAN nodes
+- Verify with mavcan-cli tool
+- Test parameter get, set, and save operations
+- Verify timeout handling and error cases
+
+**Upstreaming:**
+- Cherry-pick only PARAM_EXT commits to param-ext-dronecan-upstream branch
+- Verify clean cherry-pick (no conflicts, no ESP32-specific code)
+- Test on SITL or non-ESP32 hardware if possible
+- Submit PR to ArduPilot master with clear description of functionality
