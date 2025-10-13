@@ -171,6 +171,15 @@ void AP_DroneCAN_DNA_Server::Database::reset()
             hal.scheduler->delay_microseconds(100);
         }
         hal.console->printf("DNA: Storage flush complete (%d flush cycles)\n", max_flush_cycles);
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // Verify storage health after flush
+        if (hal.storage->healthy()) {
+            ESP_LOGI("DNA_SERVER", "Storage reports HEALTHY after flush");
+        } else {
+            ESP_LOGE("DNA_SERVER", "Storage reports UNHEALTHY after flush - writes may not have persisted!");
+        }
+#endif
     }
 }
 

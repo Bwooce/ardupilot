@@ -155,9 +155,24 @@ void Storage::_flash_write(uint16_t line)
 #ifdef STORAGEDEBUG
     printf("%s:%d \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
-    if (_flash.write(line*STORAGE_LINE_SIZE, STORAGE_LINE_SIZE)) {
+    bool write_result = _flash.write(line*STORAGE_LINE_SIZE, STORAGE_LINE_SIZE);
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Debug critical storage writes (line 0 contains magic number)
+    if (line == 0 || !write_result) {
+        ESP_LOGI("STORAGE", "_flash_write line %d: %s", line, write_result ? "SUCCESS" : "FAILED");
+        if (!write_result) {
+            ESP_LOGE("STORAGE", "AP_FlashStorage write failed for line %d - data NOT persisted!", line);
+        }
+    }
+#endif
+
+    if (write_result) {
         // mark the line clean
         _dirty_mask.clear(line);
+    } else {
+        // Write failed - keep line dirty for retry
+        ESP_LOGE("STORAGE", "Flash write failed for line %d, keeping dirty bit set", line);
     }
 }
 
@@ -170,13 +185,29 @@ bool Storage::_flash_write_data(uint8_t sector, uint32_t offset, const uint8_t *
     printf("%s:%d  \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
     size_t address = sector * STORAGE_SECTOR_SIZE + offset;
-    bool ret = esp_partition_write(p, address, data, length) == ESP_OK;
+    esp_err_t err = esp_partition_write(p, address, data, length);
+    bool ret = (err == ESP_OK);
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Debug flash writes, especially failures
+    if (!ret) {
+        ESP_LOGE("STORAGE", "esp_partition_write FAILED: sector=%d offset=%lu length=%d addr=0x%lx err=%s (%d)",
+                 sector, (unsigned long)offset, length, (unsigned long)address,
+                 esp_err_to_name(err), err);
+    } else if (address < 32) {
+        // Log writes to the critical first bytes (magic number area)
+        ESP_LOGI("STORAGE", "esp_partition_write SUCCESS: sector=%d offset=%lu length=%d addr=0x%lx",
+                 sector, (unsigned long)offset, length, (unsigned long)address);
+    }
+#endif
+
     if (!ret && _flash_erase_ok()) {
         // we are getting flash write errors while disarmed. Try
         // re-writing all of flash
         uint32_t now = AP_HAL::millis();
         if (now - _last_re_init_ms > 5000) {
             _last_re_init_ms = now;
+            ESP_LOGW("STORAGE", "Flash write failed, attempting re-initialization...");
             bool ok = _flash.re_initialise();
             DEV_PRINTF("Storage: failed at %u:%u for %u - re-init %u\n",
                                 (unsigned)sector, (unsigned)offset, (unsigned)length, (unsigned)ok);
@@ -184,6 +215,7 @@ bool Storage::_flash_write_data(uint8_t sector, uint32_t offset, const uint8_t *
             printf("Storage: failed at %u:%u for %u - re-init %u\n",
                    (unsigned)sector, (unsigned)offset, (unsigned)length, (unsigned)ok);
 #endif
+            ESP_LOGI("STORAGE", "Re-initialization %s", ok ? "SUCCEEDED" : "FAILED");
         }
     }
     return ret;
