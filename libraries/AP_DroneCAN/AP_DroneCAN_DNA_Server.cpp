@@ -747,17 +747,29 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
 void AP_DroneCAN_DNA_Server::send_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg)
 {
 #if HAL_GCS_ENABLED
-    // Send UAVCAN_NODE_STATUS MAVLink message (ID 310)
-    mavlink_uavcan_node_status_t pkt;
-    pkt.time_usec = AP_HAL::micros64();
-    pkt.uptime_sec = msg.uptime_sec;
-    pkt.health = msg.health;
-    pkt.mode = msg.mode;
-    pkt.sub_mode = msg.sub_mode;
-    pkt.vendor_specific_status_code = msg.vendor_specific_status_code;
+    // Pack the message with the node ID as the component ID (per MAVLink UAVCAN spec)
+    mavlink_message_t mavlink_msg;
+    mavlink_msg_uavcan_node_status_pack(
+        mavlink_system.sysid,
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
+        &mavlink_msg,
+        AP_HAL::micros64(),
+        msg.uptime_sec,
+        msg.health,
+        msg.mode,
+        msg.sub_mode,
+        msg.vendor_specific_status_code
+    );
 
-    // Send to all active MAVLink channels using the correct method
-    gcs().send_to_active_channels(MAVLINK_MSG_ID_UAVCAN_NODE_STATUS, (const char *)&pkt);
+    // Send to all active MAVLink channels
+    for (uint8_t i=0; i<gcs().num_gcs(); i++) {
+        GCS_MAVLINK *c = gcs().chan(i);
+        if (c != nullptr && !c->is_private() && c->is_active()) {
+            MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+            uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &mavlink_msg);
+            comm_send_buffer((mavlink_channel_t)i, (uint8_t*)buf, len);
+        }
+    }
 #endif
 }
 
@@ -826,25 +838,42 @@ void AP_DroneCAN_DNA_Server::report_node_health_change(uint8_t node_id, uint8_t 
 void AP_DroneCAN_DNA_Server::send_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg)
 {
 #if HAL_GCS_ENABLED
-    // Send UAVCAN_NODE_INFO MAVLink message (ID 311)
-    mavlink_uavcan_node_info_t pkt;
-    pkt.time_usec = AP_HAL::micros64();
-    pkt.uptime_sec = msg.status.uptime_sec;
-    memcpy(pkt.name, msg.name.data, MIN(msg.name.len, sizeof(pkt.name)));
-    pkt.name[sizeof(pkt.name)-1] = '\0';  // Ensure null termination
-    pkt.hw_version_major = msg.hardware_version.major;
-    pkt.hw_version_minor = msg.hardware_version.minor;
-    memcpy(pkt.hw_unique_id, msg.hardware_version.unique_id, sizeof(pkt.hw_unique_id));
-    pkt.sw_version_major = msg.software_version.major;
-    pkt.sw_version_minor = msg.software_version.minor;
-    pkt.sw_vcs_commit = msg.software_version.vcs_commit;
+    // Prepare node name with null termination
+    char node_name[81];
+    size_t name_len = MIN(msg.name.len, sizeof(node_name) - 1);
+    memcpy(node_name, msg.name.data, name_len);
+    node_name[name_len] = '\0';
 
-    // Send to all active MAVLink channels using the correct method
-    gcs().send_to_active_channels(MAVLINK_MSG_ID_UAVCAN_NODE_INFO, (const char *)&pkt);
+    // Pack the message with the node ID as the component ID (per MAVLink UAVCAN spec)
+    mavlink_message_t mavlink_msg;
+    mavlink_msg_uavcan_node_info_pack(
+        mavlink_system.sysid,
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
+        &mavlink_msg,
+        AP_HAL::micros64(),
+        msg.status.uptime_sec,
+        node_name,
+        msg.hardware_version.major,
+        msg.hardware_version.minor,
+        msg.hardware_version.unique_id,
+        msg.software_version.major,
+        msg.software_version.minor,
+        msg.software_version.vcs_commit
+    );
+
+    // Send to all active MAVLink channels
+    for (uint8_t i=0; i<gcs().num_gcs(); i++) {
+        GCS_MAVLINK *c = gcs().chan(i);
+        if (c != nullptr && !c->is_private() && c->is_active()) {
+            MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+            uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &mavlink_msg);
+            comm_send_buffer((mavlink_channel_t)i, (uint8_t*)buf, len);
+        }
+    }
 
     // Also send a text message for human-readable notification
     GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN Node %d: %s v%d.%d online",
-                  node_id, msg.name.data,
+                  node_id, node_name,
                   msg.software_version.major, msg.software_version.minor);
 #endif
 }
