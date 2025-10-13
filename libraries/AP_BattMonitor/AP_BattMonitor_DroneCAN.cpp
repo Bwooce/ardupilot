@@ -143,9 +143,13 @@ AP_BattMonitor_DroneCAN* AP_BattMonitor_DroneCAN::get_dronecan_backend(AP_DroneC
         }
     }
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGW("BATTERY", "No available DroneCAN battery monitor instance for node %d battery_id=%d (instances=%d)",
-             node_id, battery_id, batt._num_instances);
-    ESP_LOGW("BATTERY", "Check BATT_SERIAL_NUM parameter - must be -1 (accept all) or match battery_id=%d", battery_id);
+    // Only warn if battery monitors have been initialized (instances > 0)
+    // During early boot, battery data may arrive before AP_BattMonitor::init() runs
+    if (batt._num_instances > 0) {
+        ESP_LOGW("BATTERY", "No available DroneCAN battery monitor instance for node %d battery_id=%d (instances=%d)",
+                 node_id, battery_id, batt._num_instances);
+        ESP_LOGW("BATTERY", "Check BATT_SERIAL_NUM parameter - must be -1 (accept all) or match battery_id=%d", battery_id);
+    }
 #endif
     return nullptr;
 }
@@ -269,9 +273,7 @@ void AP_BattMonitor_DroneCAN::handle_battery_info_trampoline(AP_DroneCAN *ap_dro
 #endif
     AP_BattMonitor_DroneCAN* driver = get_dronecan_backend(ap_dronecan, transfer.source_node_id, msg.battery_id);
     if (driver == nullptr) {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP_LOGW("BATTERY", "No backend found for node %d battery_id=%d", transfer.source_node_id, msg.battery_id);
-#endif
+        // get_dronecan_backend() already logged appropriate warning if needed
         return;
     }
     driver->handle_battery_info(msg);
