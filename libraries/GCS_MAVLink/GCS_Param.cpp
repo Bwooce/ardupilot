@@ -859,13 +859,17 @@ void GCS_MAVLINK::handle_param_ext_request_list(const mavlink_message_t &msg)
     }
 
     if (ap_dronecan == nullptr) {
-        // Node not found on any interface
-        hal.console->printf("GCS: Node %d not found on any CAN interface\n", node_id);
+        // Node not found on any interface - not seen at all (no NodeStatus messages)
+        hal.console->printf("GCS: Node %d NOT SEEN - rejecting PARAM_EXT request\n", node_id);
         send_param_ext_ack("", "", MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED, node_id);
         return;
     }
 
-    hal.console->printf("GCS: Starting parameter enumeration for node %d on CAN%d\n", node_id, can_driver_index);
+    // Node is seen - log its status
+    // Note: Nodes in INITIALIZATION mode (mode=1) can still respond to parameter requests
+    // so we allow enumeration for all seen nodes regardless of mode/health
+    hal.console->printf("GCS: Node %d SEEN on CAN%d - starting parameter enumeration\n",
+                       node_id, can_driver_index);
 
     // Start parameter enumeration
     start_param_enumeration(chan, can_driver_index, node_id);
