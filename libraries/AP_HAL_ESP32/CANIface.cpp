@@ -347,12 +347,7 @@ void CANIface::rx_task(void *arg)
                             (unsigned long)rx_count_summary, (unsigned)message.identifier);
         }
 #elif CAN_LOGLEVEL >= 2
-        // WARN level - summary every 1000 frames (less verbose)
-        static uint32_t rx_count_warn = 0;
-        rx_count_warn++;
-        if ((rx_count_warn % 1000) == 0) {
-            CAN_DEBUG_WARN("CAN traffic detected: %lu frames received", (unsigned long)rx_count_warn);
-        }
+        // WARN level - summary disabled (use CAN stats via MAVLink instead)
 #endif
 
         CanRxItem rx_item;
