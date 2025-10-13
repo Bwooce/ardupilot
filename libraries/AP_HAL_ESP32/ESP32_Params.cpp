@@ -154,8 +154,8 @@ void ESP32Params::apply_log_level() {
     // ESP32 CPU statistics (only appears in debug builds)
     esp_log_level_set("ESP32_CPU", ESP_LOG_INFO);
 
-    // Reduce storage and parameter debugging
-    esp_log_level_set("STORAGE", ESP_LOG_WARN);
+    // Enable storage debugging to diagnose persistence issues
+    esp_log_level_set("STORAGE", ESP_LOG_INFO);  // Show storage write success/failures
     esp_log_level_set("PARAM", ESP_LOG_WARN);
     
     // MAVLink debugging - use INFO level to see warnings but avoid ERROR popups in QGC
