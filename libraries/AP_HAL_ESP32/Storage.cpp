@@ -157,9 +157,12 @@ void Storage::_flash_load(void)
 #ifdef STORAGEDEBUG
     printf("%s:%d \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
+    hal.console->printf("STORAGE: _flash_load() calling AP_FlashStorage::init()\n");
     if (!_flash.init()) {
+        hal.console->printf("STORAGE: ERROR - AP_FlashStorage::init() FAILED!\n");
         AP_HAL::panic("unable to init flash storage");
     }
+    hal.console->printf("STORAGE: AP_FlashStorage::init() completed successfully\n");
 }
 
 /*
@@ -257,26 +260,33 @@ bool Storage::_flash_read_data(uint8_t sector, uint32_t offset, uint8_t *data, u
 #ifdef STORAGEDEBUG
     printf("%s:%d  -> sec:%u off:%d len:%d addr:%d\n", __PRETTY_FUNCTION__, __LINE__,sector,offset,length,address);
 #endif
-    
-    // Debug: Check if we're reading FRAME_CLASS parameter area
-    // FRAME_CLASS is typically in the first few sectors
-    if (sector == 0 && offset < 100) {
-        ESP_LOGI("STORAGE", "Reading sector %u offset %u len %u (possible param area)", 
-                 sector, offset, length);
+
+    // Log sector header reads during init (first 96 bytes of each sector)
+    static bool init_phase = true;
+    if (init_phase && offset < 96) {
+        hal.console->printf("STORAGE: Reading sector %d offset %lu len %d (init phase, checking headers)\n",
+                           sector, (unsigned long)offset, length);
     }
-    
+
     esp_err_t err = esp_partition_read(p, address, data, length);
     if (err != ESP_OK) {
-        ESP_LOGE("STORAGE", "Read failed at addr 0x%x: %s", address, esp_err_to_name(err));
+        hal.console->printf("STORAGE: Read FAILED at addr 0x%lx: %s\n",
+                           (unsigned long)address, esp_err_to_name(err));
         return false;
     }
-    
-    // Debug: Log first few bytes if in param area
-    if (sector == 0 && offset < 100 && length > 0) {
-        ESP_LOGI("STORAGE", "Read data[0-3]: 0x%02X 0x%02X 0x%02X 0x%02X",
+
+    // Log first few bytes of sector header reads
+    if (init_phase && offset < 96 && length >= 4) {
+        hal.console->printf("STORAGE: Read data[0-3]: 0x%02X 0x%02X 0x%02X 0x%02X\n",
                  data[0], data[1], data[2], data[3]);
     }
-    
+
+    // After init completes, stop spamming logs
+    if (init_phase && offset > 500) {
+        init_phase = false;
+        hal.console->printf("STORAGE: Init phase complete, disabling verbose read logging\n");
+    }
+
     return true;
 }
 
@@ -289,7 +299,11 @@ bool Storage::_flash_erase_sector(uint8_t sector)
     printf("%s:%d  \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
     size_t address = sector * STORAGE_SECTOR_SIZE;
-    return esp_partition_erase_range(p, address, STORAGE_SECTOR_SIZE) == ESP_OK;
+    hal.console->printf("STORAGE: _flash_erase_sector(%d) at addr=0x%lx ERASING %lu bytes!\n",
+                       sector, (unsigned long)address, (unsigned long)STORAGE_SECTOR_SIZE);
+    bool result = esp_partition_erase_range(p, address, STORAGE_SECTOR_SIZE) == ESP_OK;
+    hal.console->printf("STORAGE: Sector %d erase: %s\n", sector, result ? "OK" : "FAILED");
+    return result;
 }
 
 /*
