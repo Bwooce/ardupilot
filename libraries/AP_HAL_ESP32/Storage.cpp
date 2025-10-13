@@ -110,6 +110,13 @@ void Storage::write_block(uint16_t loc, const void *src, size_t n)
 void Storage::_timer_tick(void)
 {
     if (!_initialised) {
+        // Use printf since ESP_LOG may not be configured yet during early boot
+        static uint32_t last_uninit_warning = 0;
+        uint32_t now = AP_HAL::millis();
+        if (now - last_uninit_warning > 1000) {
+            hal.console->printf("STORAGE: _timer_tick called but storage NOT initialized!\n");
+            last_uninit_warning = now;
+        }
         return;
     }
     if (_dirty_mask.empty()) {
@@ -127,7 +134,15 @@ void Storage::_timer_tick(void)
     }
     if (i == STORAGE_NUM_LINES) {
         // this shouldn't be possible
+        hal.console->printf("STORAGE: ERROR - dirty_mask not empty but no dirty lines found!\n");
         return;
+    }
+
+    // Debug: log which line we're flushing (use printf for early boot visibility)
+    static uint32_t flush_count = 0;
+    flush_count++;
+    if (i == 0 || flush_count <= 10 || (flush_count % 100) == 0) {
+        hal.console->printf("STORAGE: Flushing line %d (flush #%lu)\n", i, (unsigned long)flush_count);
     }
 
     // save to storage backend
@@ -157,22 +172,20 @@ void Storage::_flash_write(uint16_t line)
 #endif
     bool write_result = _flash.write(line*STORAGE_LINE_SIZE, STORAGE_LINE_SIZE);
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Debug critical storage writes (line 0 contains magic number)
+    // Use printf for critical debug (works regardless of log level config timing)
     if (line == 0 || !write_result) {
-        ESP_LOGI("STORAGE", "_flash_write line %d: %s", line, write_result ? "SUCCESS" : "FAILED");
+        hal.console->printf("STORAGE: _flash_write line %d: %s\n", line, write_result ? "SUCCESS" : "FAILED");
         if (!write_result) {
-            ESP_LOGE("STORAGE", "AP_FlashStorage write failed for line %d - data NOT persisted!", line);
+            hal.console->printf("STORAGE: ERROR - AP_FlashStorage write failed for line %d!\n", line);
         }
     }
-#endif
 
     if (write_result) {
         // mark the line clean
         _dirty_mask.clear(line);
     } else {
         // Write failed - keep line dirty for retry
-        ESP_LOGE("STORAGE", "Flash write failed for line %d, keeping dirty bit set", line);
+        hal.console->printf("STORAGE: ERROR - Keeping line %d dirty for retry\n", line);
     }
 }
 
@@ -184,22 +197,25 @@ bool Storage::_flash_write_data(uint8_t sector, uint32_t offset, const uint8_t *
 #ifdef STORAGEDEBUG
     printf("%s:%d  \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
+
+    if (p == nullptr) {
+        hal.console->printf("STORAGE: ERROR - Flash partition not initialized!\n");
+        return false;
+    }
+
     size_t address = sector * STORAGE_SECTOR_SIZE + offset;
     esp_err_t err = esp_partition_write(p, address, data, length);
     bool ret = (err == ESP_OK);
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Debug flash writes, especially failures
+    // Use printf for all flash writes during critical operations (works regardless of log config)
     if (!ret) {
-        ESP_LOGE("STORAGE", "esp_partition_write FAILED: sector=%d offset=%lu length=%d addr=0x%lx err=%s (%d)",
+        hal.console->printf("STORAGE: esp_partition_write FAILED: sector=%d offset=%lu len=%d addr=0x%lx err=%s (%d)\n",
                  sector, (unsigned long)offset, length, (unsigned long)address,
                  esp_err_to_name(err), err);
-    } else if (address < 32) {
-        // Log writes to the critical first bytes (magic number area)
-        ESP_LOGI("STORAGE", "esp_partition_write SUCCESS: sector=%d offset=%lu length=%d addr=0x%lx",
+    } else if (address < 128) {  // Log all writes to first 128 bytes (magic + node records)
+        hal.console->printf("STORAGE: esp_partition_write OK: sector=%d offset=%lu len=%d addr=0x%lx\n",
                  sector, (unsigned long)offset, length, (unsigned long)address);
     }
-#endif
 
     if (!ret && _flash_erase_ok()) {
         // we are getting flash write errors while disarmed. Try
@@ -207,15 +223,10 @@ bool Storage::_flash_write_data(uint8_t sector, uint32_t offset, const uint8_t *
         uint32_t now = AP_HAL::millis();
         if (now - _last_re_init_ms > 5000) {
             _last_re_init_ms = now;
-            ESP_LOGW("STORAGE", "Flash write failed, attempting re-initialization...");
+            hal.console->printf("STORAGE: Flash write failed, attempting re-initialization...\n");
             bool ok = _flash.re_initialise();
-            DEV_PRINTF("Storage: failed at %u:%u for %u - re-init %u\n",
-                                (unsigned)sector, (unsigned)offset, (unsigned)length, (unsigned)ok);
-#ifdef STORAGEDEBUG
-            printf("Storage: failed at %u:%u for %u - re-init %u\n",
-                   (unsigned)sector, (unsigned)offset, (unsigned)length, (unsigned)ok);
-#endif
-            ESP_LOGI("STORAGE", "Re-initialization %s", ok ? "SUCCEEDED" : "FAILED");
+            hal.console->printf("STORAGE: Re-init at sector %u offset %lu for %u bytes: %s\n",
+                                (unsigned)sector, (unsigned long)offset, (unsigned)length, ok ? "OK" : "FAILED");
         }
     }
     return ret;
