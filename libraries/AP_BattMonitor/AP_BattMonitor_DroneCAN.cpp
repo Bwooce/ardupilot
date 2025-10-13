@@ -76,7 +76,7 @@ bool AP_BattMonitor_DroneCAN::match_battery_id(uint8_t instance, uint8_t battery
 {
     const auto serial_num = AP::battery().get_serial_number(instance);
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGW("BATTERY", "match_battery_id: instance=%d, battery_id=%d, serial_num=%d, match=%s",
+    ESP_LOGD("BATTERY", "match_battery_id: instance=%d, battery_id=%d, serial_num=%d, match=%s",
              instance, battery_id, serial_num,
              (serial_num < 0 || serial_num == (int32_t)battery_id) ? "YES" : "NO");
 #endif
