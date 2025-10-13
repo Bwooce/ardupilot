@@ -2035,6 +2035,57 @@ void AP_DroneCAN::send_reboot_request(uint8_t node_id)
     restart_node_client.request(node_id, request);
 }
 
+/*
+  begin actuator enumeration (for MAV_CMD_PREFLIGHT_UAVCAN)
+  sends enumeration Begin request to all active nodes
+ */
+void AP_DroneCAN::begin_actuator_enumeration()
+{
+    uavcan_protocol_enumeration_BeginRequest request {};
+
+    // Set timeout to 60 seconds (autodetect parameter name)
+    request.timeout_sec = 60;
+
+    // Leave parameter_name empty for autodetection (recommended practice)
+    request.parameter_name.len = 0;
+
+    // Broadcast to all nodes
+    // DroneCAN enumeration uses broadcast with node filtering on the receiving end
+    // Each node that supports enumeration will respond
+    for (uint8_t node_id = 1; node_id <= 127; node_id++) {
+        if (_dna_server.is_node_seen(node_id)) {
+            enumeration_begin_client.request(node_id, request);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            hal.console->printf("DroneCAN: Sent enumeration Begin to node %u\n", node_id);
+#endif
+        }
+    }
+}
+
+/*
+  handle enumeration Begin response
+ */
+void AP_DroneCAN::handle_enumeration_begin_response(const CanardRxTransfer& transfer, const uavcan_protocol_enumeration_BeginResponse& msg)
+{
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    hal.console->printf("DroneCAN: Enumeration Begin response from node %u: error=%u\n",
+                       transfer.source_node_id, msg.error);
+#endif
+
+    // Report status to GCS
+    if (msg.error == UAVCAN_PROTOCOL_ENUMERATION_BEGIN_RESPONSE_ERROR_OK) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN: Node %u enumeration started", transfer.source_node_id);
+    } else if (msg.error == UAVCAN_PROTOCOL_ENUMERATION_BEGIN_RESPONSE_ERROR_INVALID_MODE) {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "DroneCAN: Node %u cannot enumerate (invalid mode)", transfer.source_node_id);
+    } else if (msg.error == UAVCAN_PROTOCOL_ENUMERATION_BEGIN_RESPONSE_ERROR_INVALID_PARAMETER) {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "DroneCAN: Node %u cannot enumerate (invalid parameter)", transfer.source_node_id);
+    } else if (msg.error == UAVCAN_PROTOCOL_ENUMERATION_BEGIN_RESPONSE_ERROR_UNSUPPORTED) {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "DroneCAN: Node %u does not support enumeration", transfer.source_node_id);
+    } else {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "DroneCAN: Node %u enumeration error %u", transfer.source_node_id, msg.error);
+    }
+}
+
 // check if a option is set and if it is then reset it to 0.
 // return true if it was set
 bool AP_DroneCAN::check_and_reset_option(Options option)
