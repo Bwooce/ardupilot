@@ -5776,6 +5776,39 @@ MAV_RESULT GCS_MAVLINK::handle_command_int_packet(const mavlink_command_int_t &p
             return MAV_RESULT_UNSUPPORTED;
         }
     }
+
+    case MAV_CMD_PREFLIGHT_UAVCAN: {
+        // Trigger UAVCAN/DroneCAN actuator enumeration
+        // Per MAVLink spec: Command 243
+        // param1: 1=begin enumeration, 0=cancel
+        if (is_equal(packet.param1, 0.0f)) {
+            // Cancel enumeration - not implemented yet
+            return MAV_RESULT_UNSUPPORTED;
+        } else if (is_equal(packet.param1, 1.0f)) {
+            // Begin enumeration
+            hal.console->printf("MAVLink: Received MAV_CMD_PREFLIGHT_UAVCAN (begin enumeration)\n");
+
+            bool found_interfaces = false;
+            for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
+                AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(i);
+                if (ap_dronecan != nullptr) {
+                    ap_dronecan->begin_actuator_enumeration();
+                    found_interfaces = true;
+                }
+            }
+
+            if (found_interfaces) {
+                send_text(MAV_SEVERITY_INFO, "DroneCAN: Actuator enumeration started");
+                hal.console->printf("MAVLink: MAV_CMD_PREFLIGHT_UAVCAN processed\n");
+                return MAV_RESULT_ACCEPTED;
+            } else {
+                hal.console->printf("MAVLink: No DroneCAN interfaces found\n");
+                return MAV_RESULT_UNSUPPORTED;
+            }
+        } else {
+            return MAV_RESULT_DENIED;
+        }
+    }
 #endif  // HAL_ENABLE_DRONECAN_DRIVERS
 
     case MAV_CMD_DO_SET_SAFETY_SWITCH_STATE:
