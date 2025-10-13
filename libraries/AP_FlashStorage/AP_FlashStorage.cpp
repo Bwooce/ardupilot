@@ -109,13 +109,19 @@ bool AP_FlashStorage::init(void)
     // clear any write error
     write_error = false;
     reserved_space = 0;
-    
+
     // if the first sector is full then write out all data so we can erase it
     if (states[first_sector] == SECTOR_STATE_FULL) {
         current_sector = first_sector ^ 1;
         if (!write_all()) {
             return erase_all();
         }
+    } else if (states[first_sector] == SECTOR_STATE_IN_USE) {
+        // Continue writing to the in-use sector
+        current_sector = first_sector;
+    } else {
+        // Both sectors available - start with sector 0
+        current_sector = 0;
     }
 
     // erase any sectors marked full
