@@ -127,7 +127,10 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
         // find free node ID, starting at the max as prescribed by the standard
         resp_node_id = MAX_NODE_ID;
         while (resp_node_id > 0) {
-            if (!node_registered.get(resp_node_id)) {
+            // Check both registered (in DNA database) and seen (currently active)
+            // This prevents allocating IDs used by active MAVLink components or unregistered nodes
+            if (!node_registered.get(resp_node_id) &&
+                !(node_seen && node_seen->get(resp_node_id))) {
                 break;
             }
             resp_node_id--;
