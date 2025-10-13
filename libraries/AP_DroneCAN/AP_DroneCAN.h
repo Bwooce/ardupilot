@@ -149,6 +149,9 @@ public:
     // Save parameters
     bool save_parameters_on_node(uint8_t node_id, ParamSaveCb *cb);
 
+    // Begin actuator enumeration on all nodes (for MAV_CMD_PREFLIGHT_UAVCAN)
+    void begin_actuator_enumeration();
+
     // options bitmask
     enum class Options : uint16_t {
         DNA_CLEAR_DATABASE        = (1U<<0),
@@ -379,6 +382,11 @@ private:
     void handle_restart_node_response(const CanardRxTransfer& transfer, const uavcan_protocol_RestartNodeResponse& msg) {}
     Canard::ObjCallback<AP_DroneCAN, uavcan_protocol_RestartNodeResponse> restart_node_res_cb{this, &AP_DroneCAN::handle_restart_node_response};
     Canard::Client<uavcan_protocol_RestartNodeResponse> restart_node_client{canard_iface, restart_node_res_cb};
+
+    // enumeration client (for MAV_CMD_PREFLIGHT_UAVCAN)
+    void handle_enumeration_begin_response(const CanardRxTransfer& transfer, const uavcan_protocol_enumeration_BeginResponse& msg);
+    Canard::ObjCallback<AP_DroneCAN, uavcan_protocol_enumeration_BeginResponse> enumeration_begin_res_cb{this, &AP_DroneCAN::handle_enumeration_begin_response};
+    Canard::Client<uavcan_protocol_enumeration_BeginResponse> enumeration_begin_client{canard_iface, enumeration_begin_res_cb};
 
     uavcan_protocol_param_ExecuteOpcodeRequest param_save_req;
     uavcan_protocol_param_GetSetRequest param_getset_req;
