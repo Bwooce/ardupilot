@@ -145,6 +145,15 @@ void AP_DroneCAN_DNA_Server::Database::reset()
             ESP_LOGE("DNA_SERVER", "MAGIC READBACK MISMATCH! Write succeeded but read failed!");
         }
 #endif
+
+        // CRITICAL: Force immediate flush to flash
+        // ESP32 Storage uses delayed writes via _timer_tick(). The magic number write
+        // goes to RAM buffer but won't persist to flash until timer tick runs.
+        // During early boot or quick reboots, timer tick may not run, causing the
+        // write to be lost. Force an immediate flush to ensure persistence.
+        hal.console->printf("DNA: Forcing storage flush to flash...\n");
+        hal.storage->_timer_tick();
+        hal.console->printf("DNA: Storage flush complete\n");
     }
 }
 
