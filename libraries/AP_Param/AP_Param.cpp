@@ -1641,6 +1641,31 @@ bool AP_Param::load_all()
         if (is_sentinal(phdr)) {
             // we've reached the sentinal
             sentinal_offset = ofs;
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            // ESP32: Ensure BATT_SERIAL_NUM is set to -1 for DroneCAN battery support
+            // This allows accepting battery data from any node (required for proper operation)
+            // Added Oct 2025 - can be removed after sufficient time (e.g., mid-2026)
+            enum ap_var_type ptype;
+            AP_Param *batt_serial_num = AP_Param::find("BATT_SERIAL_NUM", &ptype);
+            if (batt_serial_num != nullptr && ptype == AP_PARAM_INT32) {
+                AP_Int32 *param = (AP_Int32 *)batt_serial_num;
+                int32_t current_value = param->get();
+
+                if (current_value != -1) {
+                    // Need to update to -1
+                    hal.console->printf("ESP32: Migrating BATT_SERIAL_NUM from %d to -1 (accept all)\n",
+                                       (int)current_value);
+
+                    // Set to -1 and save
+                    param->set(-1);
+                    param->save(true);  // force save
+
+                    hal.console->printf("ESP32: BATT_SERIAL_NUM migration complete\n");
+                }
+            }
+#endif
+
             return true;
         }
 
@@ -1650,27 +1675,6 @@ bool AP_Param::load_all()
         info = find_by_header(phdr, &ptr);
         if (info != nullptr) {
             _storage.read_block(ptr, ofs+sizeof(phdr), type_size((enum ap_var_type)phdr.type));
-            
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            // Debug: Log FRAME_CLASS parameter loading
-            if (info->name && strcmp(info->name, "FRAME_CLASS") == 0) {
-                float value = 0;
-                if (phdr.type == AP_PARAM_FLOAT) {
-                    value = *(float*)ptr;
-                } else if (phdr.type == AP_PARAM_INT8) {
-                    value = *(int8_t*)ptr;
-                } else if (phdr.type == AP_PARAM_INT16) {
-                    value = *(int16_t*)ptr;
-                } else if (phdr.type == AP_PARAM_INT32) {
-                    value = *(int32_t*)ptr;
-                }
-                // Use console and ESP_LOG for visibility
-                hal.console->printf("ESP32: Loaded FRAME_CLASS = %.1f from storage (type=%d)\n", 
-                                   value, phdr.type);
-                // Also use ESP_LOG which will definitely show up
-                ESP_LOGI("PARAM", "FRAME_CLASS loaded from storage = %.1f (type=%d)", value, phdr.type);
-            }
-#endif
         }
 
         ofs += type_size((enum ap_var_type)phdr.type) + sizeof(phdr);
