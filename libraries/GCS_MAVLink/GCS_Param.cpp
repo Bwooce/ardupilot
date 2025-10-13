@@ -222,6 +222,9 @@ static bool dronecan_param_enum_float_cb_wrapper(void* obj, AP_DroneCAN* ap_dron
     char value_str[128];
     snprintf(value_str, sizeof(value_str), "%.6f", value);
 
+    hal.console->printf("GCS: Enum float param[%d] '%s'=%.6f on node %d\n",
+                       GCS_MAVLINK::param_enum_state.current_index, name, value, node_id);
+
     // Send PARAM_EXT_VALUE to GCS with index and count
     GCS_MAVLINK *gcs_chan = gcs().chan(GCS_MAVLINK::param_enum_state.chan);
     if (gcs_chan != nullptr) {
@@ -828,10 +831,13 @@ void GCS_MAVLINK::handle_param_ext_request_list(const mavlink_message_t &msg)
     mavlink_param_ext_request_list_t packet;
     mavlink_msg_param_ext_request_list_decode(&msg, &packet);
 
+    hal.console->printf("GCS: PARAM_EXT_REQUEST_LIST for component %d\n", packet.target_component);
+
     // Per MAVLink UAVCAN spec: Component ID = Node ID (1:1 mapping)
     // Valid DroneCAN node IDs are 1-127
     if (packet.target_component < 1 || packet.target_component > 127) {
         // Not a valid DroneCAN node ID
+        hal.console->printf("GCS: Invalid component ID %d (must be 1-127)\n", packet.target_component);
         return;
     }
 
@@ -854,9 +860,12 @@ void GCS_MAVLINK::handle_param_ext_request_list(const mavlink_message_t &msg)
 
     if (ap_dronecan == nullptr) {
         // Node not found on any interface
+        hal.console->printf("GCS: Node %d not found on any CAN interface\n", node_id);
         send_param_ext_ack("", "", MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED, node_id);
         return;
     }
+
+    hal.console->printf("GCS: Starting parameter enumeration for node %d on CAN%d\n", node_id, can_driver_index);
 
     // Start parameter enumeration
     start_param_enumeration(chan, can_driver_index, node_id);
@@ -866,6 +875,11 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
 {
     mavlink_param_ext_request_read_t packet;
     mavlink_msg_param_ext_request_read_decode(&msg, &packet);
+
+    char param_id[17];
+    memcpy(param_id, packet.param_id, 16);
+    param_id[16] = '\0';
+    hal.console->printf("GCS: PARAM_EXT_REQUEST_READ node=%d param='%s'\n", packet.target_component, param_id);
 
     // Per MAVLink UAVCAN spec: Component ID = Node ID (1:1 mapping)
     // Valid DroneCAN node IDs are 1-127
@@ -916,6 +930,7 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
     // Try to initiate DroneCAN parameter get (try float first, most common)
     AP_DroneCAN::ParamGetSetFloatCb float_cb(nullptr, dronecan_param_get_set_float_cb_wrapper);
     if (ap_dronecan->get_parameter_on_node(node_id, param_name, &float_cb)) {
+        hal.console->printf("GCS: Queued float param request for '%s' on node %d\n", param_name, node_id);
         param_ext_requests.push(req);
         return;
     }
@@ -923,6 +938,7 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
     // Try integer
     AP_DroneCAN::ParamGetSetIntCb int_cb(nullptr, dronecan_param_get_set_int_cb_wrapper);
     if (ap_dronecan->get_parameter_on_node(node_id, param_name, &int_cb)) {
+        hal.console->printf("GCS: Queued int param request for '%s' on node %d\n", param_name, node_id);
         param_ext_requests.push(req);
         return;
     }
@@ -930,11 +946,13 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
     // Try string
     AP_DroneCAN::ParamGetSetStringCb string_cb(nullptr, dronecan_param_get_set_string_cb_wrapper);
     if (ap_dronecan->get_parameter_on_node(node_id, param_name, &string_cb)) {
+        hal.console->printf("GCS: Queued string param request for '%s' on node %d\n", param_name, node_id);
         param_ext_requests.push(req);
         return;
     }
 
     // All attempts failed - probably busy
+    hal.console->printf("GCS: Failed to queue param request for '%s' on node %d (busy)\n", param_name, node_id);
     send_param_ext_ack(packet.param_id, "",
                       MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED, node_id);
 }
