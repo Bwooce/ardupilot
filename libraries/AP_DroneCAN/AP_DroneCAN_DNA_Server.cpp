@@ -209,25 +209,19 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
 #endif
 
     if (resp_node_id != 0) {
-        // UID found in database with existing node ID assignment
-        // Check if this node ID is currently in use by checking node_seen
-        // If it's in use, there might be a conflict (different device using this ID)
-        // Clear the stale registration and assign a new ID to avoid conflicts
-        if (node_seen && node_seen->get(resp_node_id)) {
+        // UID found in database - return the existing node ID allocation
+        // This handles both cases:
+        // 1. Device coming back online after being offline (node not in node_seen)
+        // 2. Device requesting allocation while already active (e.g., after reboot/state loss)
+        // In both cases, we return the same node ID to maintain stable addressing
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            ESP_LOGW("DNA_DB", "Node %d in use - clearing stale registration, will reallocate (may get same ID if free)", resp_node_id);
+        const char* status = (node_seen && node_seen->get(resp_node_id)) ? "active" : "offline";
+        ESP_LOGD("DNA_DB", "UID found with node %d (%s), returning existing allocation, UID=%02X%02X%02X%02X%02X%02X...",
+                 resp_node_id, status,
+                 unique_id[0], unique_id[1], unique_id[2],
+                 unique_id[3], unique_id[4], unique_id[5]);
 #endif
-            delete_registration(resp_node_id);
-            resp_node_id = 0; // Force new allocation below
-        } else {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            ESP_LOGD("DNA_DB", "UID found with node %d (not in use), re-assigning, UID=%02X%02X%02X%02X%02X%02X...",
-                     resp_node_id,
-                     unique_id[0], unique_id[1], unique_id[2],
-                     unique_id[3], unique_id[4], unique_id[5]);
-#endif
-            return resp_node_id; // Safe to return - node not currently active
-        }
+        return resp_node_id;
     }
 
     if (resp_node_id == 0) {
