@@ -71,11 +71,11 @@ void AP_DroneCAN_DNA_Server::Database::init(StorageAccess *storage_)
 
     // validate magic number
     uint16_t magic = storage->read_uint16(0);
-    
+
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGD("DNA_SERVER", "Database init: magic=0x%04x (expected 0x%04x)", 
+    ESP_LOGD("DNA_SERVER", "Database init: magic=0x%04x (expected 0x%04x)",
              magic, NODERECORD_MAGIC);
-    hal.console->printf("DNA: Database magic=0x%04x (expected 0x%04x)\n", 
+    hal.console->printf("DNA: Database magic=0x%04x (expected 0x%04x)\n",
                        magic, NODERECORD_MAGIC);
 #endif
     

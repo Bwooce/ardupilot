@@ -36,24 +36,20 @@ void Storage::_storage_open(void)
     if (_initialised) {
         return;
     }
-#ifdef STORAGEDEBUG
-    printf("%s:%d _storage_open \n", __PRETTY_FUNCTION__, __LINE__);
-#endif
-    // Opening storage partition
-    
+
     _dirty_mask.clearall();
     p = esp_partition_find_first((esp_partition_type_t)0x45, ESP_PARTITION_SUBTYPE_ANY, nullptr);
-    
+
     if (p == nullptr) {
         ESP_LOGE("STORAGE", "ERROR - No storage partition found (type 0x45)!");
         hal.console->printf("Storage: ERROR - No storage partition found (type 0x45)!\n");
     } else {
 #ifdef STORAGEDEBUG
-        ESP_LOGI("STORAGE", "Found partition '%s' at 0x%08lx, size %lu bytes", 
+        ESP_LOGI("STORAGE", "Found partition '%s' at 0x%08lx, size %lu bytes",
                  p->label, (unsigned long)p->address, (unsigned long)p->size);
 #endif
     }
-    
+
     // load from storage backend
     _flash_load();
     _initialised = true;
@@ -110,13 +106,6 @@ void Storage::write_block(uint16_t loc, const void *src, size_t n)
 void Storage::_timer_tick(void)
 {
     if (!_initialised) {
-        // Use printf since ESP_LOG may not be configured yet during early boot
-        static uint32_t last_uninit_warning = 0;
-        uint32_t now = AP_HAL::millis();
-        if (now - last_uninit_warning > 1000) {
-            hal.console->printf("STORAGE: _timer_tick called but storage NOT initialized!\n");
-            last_uninit_warning = now;
-        }
         return;
     }
     if (_dirty_mask.empty()) {
@@ -134,15 +123,7 @@ void Storage::_timer_tick(void)
     }
     if (i == STORAGE_NUM_LINES) {
         // this shouldn't be possible
-        hal.console->printf("STORAGE: ERROR - dirty_mask not empty but no dirty lines found!\n");
         return;
-    }
-
-    // Debug: log which line we're flushing (use printf for early boot visibility)
-    static uint32_t flush_count = 0;
-    flush_count++;
-    if (i == 0 || flush_count <= 10 || (flush_count % 100) == 0) {
-        hal.console->printf("STORAGE: Flushing line %d (flush #%lu)\n", i, (unsigned long)flush_count);
     }
 
     // save to storage backend
@@ -154,15 +135,10 @@ void Storage::_timer_tick(void)
  */
 void Storage::_flash_load(void)
 {
-#ifdef STORAGEDEBUG
-    printf("%s:%d \n", __PRETTY_FUNCTION__, __LINE__);
-#endif
-    hal.console->printf("STORAGE: _flash_load() calling AP_FlashStorage::init()\n");
     if (!_flash.init()) {
-        hal.console->printf("STORAGE: ERROR - AP_FlashStorage::init() FAILED!\n");
+        ESP_LOGE("STORAGE", "AP_FlashStorage::init() FAILED!");
         AP_HAL::panic("unable to init flash storage");
     }
-    hal.console->printf("STORAGE: AP_FlashStorage::init() completed successfully\n");
 }
 
 /*
@@ -174,34 +150,11 @@ void Storage::_flash_write(uint16_t line)
     printf("%s:%d \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
 
-    // Calculate storage offset for this line
-    uint16_t offset = line * STORAGE_LINE_SIZE;
-
-    // Log writes in critical areas: line 0, DNA database (15232-16256), or failures
-    // DNA database: StorageCANDNA at offset 15232, size 1024 = lines 1904-2031
-    bool is_dna_area = (line >= 1904 && line <= 2031);
-
-    if (line == 0 || is_dna_area) {
-        hal.console->printf("STORAGE: _flash_write line %d (offset %d) CALLING AP_FlashStorage::write()\n",
-                           line, offset);
-    }
-
     bool write_result = _flash.write(line*STORAGE_LINE_SIZE, STORAGE_LINE_SIZE);
-
-    if (line == 0 || is_dna_area || !write_result) {
-        hal.console->printf("STORAGE: _flash_write line %d (offset %d): %s\n",
-                           line, offset, write_result ? "SUCCESS" : "FAILED");
-        if (!write_result) {
-            hal.console->printf("STORAGE: ERROR - AP_FlashStorage write failed for line %d!\n", line);
-        }
-    }
 
     if (write_result) {
         // mark the line clean
         _dirty_mask.clear(line);
-    } else {
-        // Write failed - keep line dirty for retry
-        hal.console->printf("STORAGE: ERROR - Keeping line %d dirty for retry\n", line);
     }
 }
 
@@ -215,26 +168,12 @@ bool Storage::_flash_write_data(uint8_t sector, uint32_t offset, const uint8_t *
 #endif
 
     if (p == nullptr) {
-        hal.console->printf("STORAGE: ERROR - Flash partition not initialized!\n");
         return false;
     }
 
     size_t address = sector * STORAGE_SECTOR_SIZE + offset;
-
-    // Log ALL partition write attempts to see if this callback is ever called
-    hal.console->printf("STORAGE: _flash_write_data CALLED: sector=%d offset=%lu len=%d addr=0x%lx\n",
-             sector, (unsigned long)offset, length, (unsigned long)address);
-
     esp_err_t err = esp_partition_write(p, address, data, length);
     bool ret = (err == ESP_OK);
-
-    // Log result
-    if (!ret) {
-        hal.console->printf("STORAGE: esp_partition_write FAILED: err=%s (%d)\n",
-                 esp_err_to_name(err), err);
-    } else {
-        hal.console->printf("STORAGE: esp_partition_write OK\n");
-    }
 
     if (!ret && _flash_erase_ok()) {
         // we are getting flash write errors while disarmed. Try
@@ -242,10 +181,7 @@ bool Storage::_flash_write_data(uint8_t sector, uint32_t offset, const uint8_t *
         uint32_t now = AP_HAL::millis();
         if (now - _last_re_init_ms > 5000) {
             _last_re_init_ms = now;
-            hal.console->printf("STORAGE: Flash write failed, attempting re-initialization...\n");
-            bool ok = _flash.re_initialise();
-            hal.console->printf("STORAGE: Re-init at sector %u offset %lu for %u bytes: %s\n",
-                                (unsigned)sector, (unsigned long)offset, (unsigned)length, ok ? "OK" : "FAILED");
+            _flash.re_initialise();
         }
     }
     return ret;
@@ -261,33 +197,8 @@ bool Storage::_flash_read_data(uint8_t sector, uint32_t offset, uint8_t *data, u
     printf("%s:%d  -> sec:%u off:%d len:%d addr:%d\n", __PRETTY_FUNCTION__, __LINE__,sector,offset,length,address);
 #endif
 
-    // Log sector header reads during init (first 96 bytes of each sector)
-    static bool init_phase = true;
-    if (init_phase && offset < 96) {
-        hal.console->printf("STORAGE: Reading sector %d offset %lu len %d (init phase, checking headers)\n",
-                           sector, (unsigned long)offset, length);
-    }
-
     esp_err_t err = esp_partition_read(p, address, data, length);
-    if (err != ESP_OK) {
-        hal.console->printf("STORAGE: Read FAILED at addr 0x%lx: %s\n",
-                           (unsigned long)address, esp_err_to_name(err));
-        return false;
-    }
-
-    // Log first few bytes of sector header reads
-    if (init_phase && offset < 96 && length >= 4) {
-        hal.console->printf("STORAGE: Read data[0-3]: 0x%02X 0x%02X 0x%02X 0x%02X\n",
-                 data[0], data[1], data[2], data[3]);
-    }
-
-    // After init completes, stop spamming logs
-    if (init_phase && offset > 500) {
-        init_phase = false;
-        hal.console->printf("STORAGE: Init phase complete, disabling verbose read logging\n");
-    }
-
-    return true;
+    return (err == ESP_OK);
 }
 
 /*
@@ -299,11 +210,7 @@ bool Storage::_flash_erase_sector(uint8_t sector)
     printf("%s:%d  \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
     size_t address = sector * STORAGE_SECTOR_SIZE;
-    hal.console->printf("STORAGE: _flash_erase_sector(%d) at addr=0x%lx ERASING %lu bytes!\n",
-                       sector, (unsigned long)address, (unsigned long)STORAGE_SECTOR_SIZE);
-    bool result = esp_partition_erase_range(p, address, STORAGE_SECTOR_SIZE) == ESP_OK;
-    hal.console->printf("STORAGE: Sector %d erase: %s\n", sector, result ? "OK" : "FAILED");
-    return result;
+    return esp_partition_erase_range(p, address, STORAGE_SECTOR_SIZE) == ESP_OK;
 }
 
 /*
