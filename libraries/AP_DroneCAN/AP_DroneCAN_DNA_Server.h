@@ -59,7 +59,7 @@ class AP_DroneCAN_DNA_Server
         bool handle_node_info(uint8_t source_node_id, const uint8_t unique_id[], const Bitmask<128> *node_healthy);
 
         // handle the allocation message. returns the allocated node ID, or 0 if allocation failed
-        uint8_t handle_allocation(const uint8_t unique_id[], const Bitmask<128> *node_seen);
+        uint8_t handle_allocation(const uint8_t unique_id[], uint8_t uid_len, const Bitmask<128> *node_seen);
 
     private:
         // retrieve node ID that matches the given unique ID. returns 0 if not found

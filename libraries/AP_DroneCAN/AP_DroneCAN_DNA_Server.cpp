@@ -194,11 +194,11 @@ bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, 
 }
 
 // handle the allocation message. returns the allocated node ID, or 0 if allocation failed
-uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique_id[], const Bitmask<128> *node_seen)
+uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique_id[], uint8_t uid_len, const Bitmask<128> *node_seen)
 {
     WITH_SEMAPHORE(sem);
 
-    uint8_t resp_node_id = find_node_id(unique_id, 16);
+    uint8_t resp_node_id = find_node_id(unique_id, uid_len);
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     if (resp_node_id == 0) {
@@ -239,11 +239,11 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
 
         if (resp_node_id != 0) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            ESP_LOGD("DNA_DB", "Assigning new node ID %d, UID=%02X%02X%02X%02X%02X%02X...", resp_node_id,
+            ESP_LOGD("DNA_DB", "Assigning new node ID %d, UID=%02X%02X%02X%02X%02X%02X... (len=%d)", resp_node_id,
                      unique_id[0], unique_id[1], unique_id[2],
-                     unique_id[3], unique_id[4], unique_id[5]);
+                     unique_id[3], unique_id[4], unique_id[5], uid_len);
 #endif
-            create_registration(resp_node_id, unique_id, 16);
+            create_registration(resp_node_id, unique_id, uid_len);
         } else {
             debug_dronecan(AP_CANManager::LOG_ERROR, "DNA_DB ERROR: No free node IDs available in database");
             GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "DroneCAN DNA allocation failed - database full");
@@ -1108,7 +1108,7 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
         // and we couldn't guarantee it anyway. we will always remember and
         // re-assign node IDs consistently, so the node could send a status
         // with a particular ID once then switch back to no preference for DNA
-        rsp.node_id = db.handle_allocation(rcvd_unique_id, &node_seen);
+        rsp.node_id = db.handle_allocation(rcvd_unique_id, rcvd_unique_id_offset, &node_seen);
 
         // For the final allocation response with the echoed UID:
         // Since we require ≥12 bytes, this is always a multi-frame transfer
