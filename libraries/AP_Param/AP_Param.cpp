@@ -1246,6 +1246,13 @@ void AP_Param::save_sync(bool force_save, bool send_to_gcs)
     uint16_t ofs;
     if (scan(&phdr, &ofs)) {
         // found an existing copy of the variable
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // Debug: Log parameter writes around offset 96 (line 12)
+        if (ofs >= 88 && ofs <= 104) {
+            hal.console->printf("PARAM: Updating '%s' at offset %u (line %u)\n",
+                              name, ofs, ofs / 8);
+        }
+#endif
         if (!eeprom_write_check(ap, ofs+sizeof(phdr), type_size((enum ap_var_type)phdr.type))) {
             // Write failed, error already reported by eeprom_write_check
             return;
@@ -1296,6 +1303,13 @@ void AP_Param::save_sync(bool force_save, bool send_to_gcs)
     }
 
     // write a new sentinal, then the data, then the header
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Debug: Log parameter writes around offset 96 (line 12)
+    if (ofs >= 88 && ofs <= 104) {
+        hal.console->printf("PARAM: Writing NEW '%s' at offset %u (line %u)\n",
+                          name, ofs, ofs / 8);
+    }
+#endif
     write_sentinal(ofs + sizeof(phdr) + type_size((enum ap_var_type)phdr.type));
     if (!eeprom_write_check(ap, ofs+sizeof(phdr), type_size((enum ap_var_type)phdr.type))) {
         // Write failed, error already reported by eeprom_write_check
