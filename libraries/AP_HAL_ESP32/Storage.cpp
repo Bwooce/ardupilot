@@ -170,7 +170,6 @@ void Storage::_flash_write(uint16_t line)
 #ifdef STORAGEDEBUG
     printf("%s:%d \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
-    bool write_result = _flash.write(line*STORAGE_LINE_SIZE, STORAGE_LINE_SIZE);
 
     // Calculate storage offset for this line
     uint16_t offset = line * STORAGE_LINE_SIZE;
@@ -178,6 +177,13 @@ void Storage::_flash_write(uint16_t line)
     // Log writes in critical areas: line 0, DNA database (15232-16256), or failures
     // DNA database: StorageCANDNA at offset 15232, size 1024 = lines 1904-2031
     bool is_dna_area = (line >= 1904 && line <= 2031);
+
+    if (line == 0 || is_dna_area) {
+        hal.console->printf("STORAGE: _flash_write line %d (offset %d) CALLING AP_FlashStorage::write()\n",
+                           line, offset);
+    }
+
+    bool write_result = _flash.write(line*STORAGE_LINE_SIZE, STORAGE_LINE_SIZE);
 
     if (line == 0 || is_dna_area || !write_result) {
         hal.console->printf("STORAGE: _flash_write line %d (offset %d): %s\n",
@@ -211,17 +217,20 @@ bool Storage::_flash_write_data(uint8_t sector, uint32_t offset, const uint8_t *
     }
 
     size_t address = sector * STORAGE_SECTOR_SIZE + offset;
+
+    // Log ALL partition write attempts to see if this callback is ever called
+    hal.console->printf("STORAGE: _flash_write_data CALLED: sector=%d offset=%lu len=%d addr=0x%lx\n",
+             sector, (unsigned long)offset, length, (unsigned long)address);
+
     esp_err_t err = esp_partition_write(p, address, data, length);
     bool ret = (err == ESP_OK);
 
-    // Use printf for all flash writes during critical operations (works regardless of log config)
+    // Log result
     if (!ret) {
-        hal.console->printf("STORAGE: esp_partition_write FAILED: sector=%d offset=%lu len=%d addr=0x%lx err=%s (%d)\n",
-                 sector, (unsigned long)offset, length, (unsigned long)address,
+        hal.console->printf("STORAGE: esp_partition_write FAILED: err=%s (%d)\n",
                  esp_err_to_name(err), err);
-    } else if (address < 128) {  // Log all writes to first 128 bytes (magic + node records)
-        hal.console->printf("STORAGE: esp_partition_write OK: sector=%d offset=%lu len=%d addr=0x%lx\n",
-                 sector, (unsigned long)offset, length, (unsigned long)address);
+    } else {
+        hal.console->printf("STORAGE: esp_partition_write OK\n");
     }
 
     if (!ret && _flash_erase_ok()) {
