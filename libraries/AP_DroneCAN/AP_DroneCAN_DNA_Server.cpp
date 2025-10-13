@@ -626,16 +626,31 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
 // Request node info for all seen nodes (for MAV_CMD_UAVCAN_GET_NODE_INFO)
 void AP_DroneCAN_DNA_Server::request_all_node_info()
 {
-    hal.console->printf("MAVLink: Requesting node info for all %d seen nodes\n", node_seen.count());
+    uint8_t node_count = node_seen.count() - (node_seen.get(self_node_id) ? 1 : 0);
+    hal.console->printf("MAVLink: Requesting node info for %d seen nodes\n", node_count);
 
-    // Send GetNodeInfo requests for all seen nodes
+    // NOTE: The Client class can only track ONE outstanding request at a time
+    // (it has a single server_node_id and transfer_id member). If we send multiple
+    // requests in rapid succession, only the LAST request's response will be accepted.
+    //
+    // Solution: Mark all nodes as unverified and trigger immediate verification.
+    // The verify_nodes() function will send ONE request per 5-second cycle.
+    // This ensures responses are properly tracked and UAVCAN_NODE_INFO messages
+    // are sent to the GCS as each response arrives.
+
+    // Mark all seen nodes as unverified to ensure fresh requests are sent
     for (uint8_t i = 1; i <= MAX_NODE_ID; i++) {
         if (node_seen.get(i) && i != self_node_id) {
-            uavcan_protocol_GetNodeInfoRequest request;
-            node_info_client.request(i, request);
-            hal.console->printf("MAVLink: Sent GetNodeInfo request to node %d\n", i);
+            node_verified.clear(i);
         }
     }
+
+    // Force immediate verification cycle by resetting the timer
+    // This will cause verify_nodes() to run on the next main loop iteration
+    last_verification_request = 0;
+
+    hal.console->printf("MAVLink: Triggered verification for %d nodes - info will arrive over ~%d seconds\n",
+                       node_count, node_count * 5);
 }
 
 //report the server state, along with failure message if any
