@@ -5738,6 +5738,31 @@ MAV_RESULT GCS_MAVLINK::handle_command_int_packet(const mavlink_command_int_t &p
     case MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN:
         return handle_preflight_reboot(packet, msg);
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    case MAV_CMD_UAVCAN_GET_NODE_INFO: {
+        // Request node info for all seen UAVCAN/DroneCAN nodes
+        // Per MAVLink spec: Command 5200
+        hal.console->printf("MAVLink: Received MAV_CMD_UAVCAN_GET_NODE_INFO\n");
+
+        bool found_nodes = false;
+        for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
+            AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(i);
+            if (ap_dronecan != nullptr) {
+                ap_dronecan->get_dna_server().request_all_node_info();
+                found_nodes = true;
+            }
+        }
+
+        if (found_nodes) {
+            hal.console->printf("MAVLink: MAV_CMD_UAVCAN_GET_NODE_INFO processed\n");
+            return MAV_RESULT_ACCEPTED;
+        } else {
+            hal.console->printf("MAVLink: No DroneCAN interfaces found\n");
+            return MAV_RESULT_UNSUPPORTED;
+        }
+    }
+#endif  // HAL_ENABLE_DRONECAN_DRIVERS
+
     case MAV_CMD_DO_SET_SAFETY_SWITCH_STATE:
         return handle_do_set_safety_switch_state(packet, msg);
 
