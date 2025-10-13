@@ -517,6 +517,7 @@ public:
         uint16_t current_index;     // current parameter index
         uint32_t start_time_ms;     // when enumeration started
         uint16_t param_count;       // total parameters discovered
+        uint8_t tried_types;        // bitmask of callback types tried for current_index (bit 0=int, 1=float, 2=string)
     };
     static struct param_enumeration_state param_enum_state;
 

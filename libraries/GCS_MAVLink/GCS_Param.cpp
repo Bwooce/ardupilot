@@ -218,6 +218,16 @@ static bool dronecan_param_enum_float_cb_wrapper(void* obj, AP_DroneCAN* ap_dron
         return false;
     }
 
+    // Check for EMPTY response (end of parameter list)
+    // Empty name is the signal from AP_DroneCAN that we got union_tag=EMPTY
+    if (name[0] == '\0') {
+        hal.console->printf("GCS: Enum complete - received EMPTY response at index %d (total: %d params)\n",
+                           GCS_MAVLINK::param_enum_state.current_index,
+                           GCS_MAVLINK::param_enum_state.param_count);
+        GCS_MAVLINK::param_enum_state.active = false;
+        return false;
+    }
+
     // Format value as string
     char value_str[128];
     snprintf(value_str, sizeof(value_str), "%.6f", value);
@@ -248,6 +258,7 @@ static bool dronecan_param_enum_float_cb_wrapper(void* obj, AP_DroneCAN* ap_dron
     // Update state for next parameter
     GCS_MAVLINK::param_enum_state.current_index++;
     GCS_MAVLINK::param_enum_state.param_count++;
+    GCS_MAVLINK::param_enum_state.tried_types = 0;  // Reset for next index
 
     return true;
 }
@@ -256,6 +267,16 @@ static bool dronecan_param_enum_int_cb_wrapper(void* obj, AP_DroneCAN* ap_dronec
                                                 const char* name, int32_t &value)
 {
     if (!GCS_MAVLINK::param_enum_state.active) {
+        return false;
+    }
+
+    // Check for EMPTY response (end of parameter list)
+    // Empty name is the signal from AP_DroneCAN that we got union_tag=EMPTY
+    if (name[0] == '\0') {
+        hal.console->printf("GCS: Enum complete - received EMPTY response at index %d (total: %d params)\n",
+                           GCS_MAVLINK::param_enum_state.current_index,
+                           GCS_MAVLINK::param_enum_state.param_count);
+        GCS_MAVLINK::param_enum_state.active = false;
         return false;
     }
 
@@ -286,6 +307,7 @@ static bool dronecan_param_enum_int_cb_wrapper(void* obj, AP_DroneCAN* ap_dronec
     // Update state for next parameter
     GCS_MAVLINK::param_enum_state.current_index++;
     GCS_MAVLINK::param_enum_state.param_count++;
+    GCS_MAVLINK::param_enum_state.tried_types = 0;  // Reset for next index
 
     return true;
 }
@@ -294,6 +316,16 @@ static bool dronecan_param_enum_string_cb_wrapper(void* obj, AP_DroneCAN* ap_dro
                                                     const char* name, AP_DroneCAN::string &value)
 {
     if (!GCS_MAVLINK::param_enum_state.active) {
+        return false;
+    }
+
+    // Check for EMPTY response (end of parameter list)
+    // Empty name is the signal from AP_DroneCAN that we got union_tag=EMPTY
+    if (name[0] == '\0') {
+        hal.console->printf("GCS: Enum complete - received EMPTY response at index %d (total: %d params)\n",
+                           GCS_MAVLINK::param_enum_state.current_index,
+                           GCS_MAVLINK::param_enum_state.param_count);
+        GCS_MAVLINK::param_enum_state.active = false;
         return false;
     }
 
@@ -326,6 +358,7 @@ static bool dronecan_param_enum_string_cb_wrapper(void* obj, AP_DroneCAN* ap_dro
     // Update state for next parameter
     GCS_MAVLINK::param_enum_state.current_index++;
     GCS_MAVLINK::param_enum_state.param_count++;
+    GCS_MAVLINK::param_enum_state.tried_types = 0;  // Reset for next index
 
     return true;
 }
@@ -932,7 +965,10 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
     req.request_time_ms = AP_HAL::millis();
 
     // Try to initiate DroneCAN parameter get (try float first, most common)
-    AP_DroneCAN::ParamGetSetFloatCb float_cb(nullptr, dronecan_param_get_set_float_cb_wrapper);
+    // NOTE: Callbacks must be static to avoid use-after-scope bug
+    // The DroneCAN API stores a pointer to these callbacks, which must remain valid
+    // until the async response arrives
+    static AP_DroneCAN::ParamGetSetFloatCb float_cb(nullptr, dronecan_param_get_set_float_cb_wrapper);
     if (ap_dronecan->get_parameter_on_node(node_id, param_name, &float_cb)) {
         hal.console->printf("GCS: Queued float param request for '%s' on node %d\n", param_name, node_id);
         param_ext_requests.push(req);
@@ -940,7 +976,7 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
     }
 
     // Try integer
-    AP_DroneCAN::ParamGetSetIntCb int_cb(nullptr, dronecan_param_get_set_int_cb_wrapper);
+    static AP_DroneCAN::ParamGetSetIntCb int_cb(nullptr, dronecan_param_get_set_int_cb_wrapper);
     if (ap_dronecan->get_parameter_on_node(node_id, param_name, &int_cb)) {
         hal.console->printf("GCS: Queued int param request for '%s' on node %d\n", param_name, node_id);
         param_ext_requests.push(req);
@@ -948,7 +984,7 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
     }
 
     // Try string
-    AP_DroneCAN::ParamGetSetStringCb string_cb(nullptr, dronecan_param_get_set_string_cb_wrapper);
+    static AP_DroneCAN::ParamGetSetStringCb string_cb(nullptr, dronecan_param_get_set_string_cb_wrapper);
     if (ap_dronecan->get_parameter_on_node(node_id, param_name, &string_cb)) {
         hal.console->printf("GCS: Queued string param request for '%s' on node %d\n", param_name, node_id);
         param_ext_requests.push(req);
@@ -1022,17 +1058,22 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
     // Parse value and call appropriate DroneCAN set function
     bool success = false;
 
+    // NOTE: Callbacks must be static to avoid use-after-scope bug
+    // The DroneCAN API stores a pointer to these callbacks, which must remain valid
+    // until the async response arrives
+    static AP_DroneCAN::ParamGetSetFloatCb float_cb_set(nullptr, dronecan_param_get_set_float_cb_wrapper);
+    static AP_DroneCAN::ParamGetSetIntCb int_cb_set(nullptr, dronecan_param_get_set_int_cb_wrapper);
+    static AP_DroneCAN::ParamGetSetStringCb string_cb_set(nullptr, dronecan_param_get_set_string_cb_wrapper);
+
     switch (packet.param_type) {
     case MAV_PARAM_EXT_TYPE_REAL32: {
         float value = atof(param_value);
-        AP_DroneCAN::ParamGetSetFloatCb float_cb(nullptr, dronecan_param_get_set_float_cb_wrapper);
-        success = ap_dronecan->set_parameter_on_node(node_id, param_name, value, &float_cb);
+        success = ap_dronecan->set_parameter_on_node(node_id, param_name, value, &float_cb_set);
         break;
     }
     case MAV_PARAM_EXT_TYPE_INT32: {
         int32_t value = atol(param_value);
-        AP_DroneCAN::ParamGetSetIntCb int_cb(nullptr, dronecan_param_get_set_int_cb_wrapper);
-        success = ap_dronecan->set_parameter_on_node(node_id, param_name, value, &int_cb);
+        success = ap_dronecan->set_parameter_on_node(node_id, param_name, value, &int_cb_set);
         break;
     }
     case MAV_PARAM_EXT_TYPE_CUSTOM: {
@@ -1042,8 +1083,7 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
             value.len = sizeof(value.data);
         }
         memcpy(value.data, param_value, value.len);
-        AP_DroneCAN::ParamGetSetStringCb string_cb(nullptr, dronecan_param_get_set_string_cb_wrapper);
-        success = ap_dronecan->set_parameter_on_node(node_id, param_name, value, &string_cb);
+        success = ap_dronecan->set_parameter_on_node(node_id, param_name, value, &string_cb_set);
         break;
     }
     default:
@@ -1118,6 +1158,7 @@ void GCS_MAVLINK::start_param_enumeration(mavlink_channel_t chan, uint8_t can_dr
     param_enum_state.current_index = 0;
     param_enum_state.start_time_ms = AP_HAL::millis();
     param_enum_state.param_count = 0;
+    param_enum_state.tried_types = 0;  // Reset type tracking
 
     // Start enumeration by requesting parameter at index 0
     // This will be processed by continue_param_enumeration() on next loop
@@ -1142,31 +1183,52 @@ void GCS_MAVLINK::continue_param_enumeration()
         return;
     }
 
-    // Try to request the next parameter by index (try float first, most common)
-    AP_DroneCAN::ParamGetSetFloatCb float_cb(nullptr, dronecan_param_enum_float_cb_wrapper);
-    if (ap_dronecan->get_parameter_by_index_on_node(param_enum_state.node_id,
-                                                      param_enum_state.current_index,
-                                                      &float_cb)) {
-        return;  // Request queued successfully
+    // Check if all types have been tried for this index
+    if (param_enum_state.tried_types == 0x07) {  // All 3 bits set (int, float, string)
+        // All callback types exhausted for this index - move to next
+        param_enum_state.current_index++;
+        param_enum_state.tried_types = 0;  // Reset for next index
+        // Will try again on next loop with new index
+        return;
     }
 
-    // Try integer
-    AP_DroneCAN::ParamGetSetIntCb int_cb(nullptr, dronecan_param_enum_int_cb_wrapper);
-    if (ap_dronecan->get_parameter_by_index_on_node(param_enum_state.node_id,
-                                                      param_enum_state.current_index,
-                                                      &int_cb)) {
-        return;  // Request queued successfully
+    // Try to request the next parameter by index (try int first since it covers both int and bool)
+    // NOTE: Callbacks must be static to avoid use-after-scope bug
+    // The DroneCAN API stores a pointer to these callbacks, which must remain valid
+    // until the async response arrives
+    static AP_DroneCAN::ParamGetSetIntCb int_cb_enum(nullptr, dronecan_param_enum_int_cb_wrapper);
+    if (!(param_enum_state.tried_types & 0x01)) {  // Bit 0 = int type
+        if (ap_dronecan->get_parameter_by_index_on_node(param_enum_state.node_id,
+                                                          param_enum_state.current_index,
+                                                          &int_cb_enum)) {
+            param_enum_state.tried_types |= 0x01;  // Mark int as tried
+            return;  // Request queued successfully
+        }
+    }
+
+    // Try float
+    static AP_DroneCAN::ParamGetSetFloatCb float_cb_enum(nullptr, dronecan_param_enum_float_cb_wrapper);
+    if (!(param_enum_state.tried_types & 0x02)) {  // Bit 1 = float type
+        if (ap_dronecan->get_parameter_by_index_on_node(param_enum_state.node_id,
+                                                          param_enum_state.current_index,
+                                                          &float_cb_enum)) {
+            param_enum_state.tried_types |= 0x02;  // Mark float as tried
+            return;  // Request queued successfully
+        }
     }
 
     // Try string
-    AP_DroneCAN::ParamGetSetStringCb string_cb(nullptr, dronecan_param_enum_string_cb_wrapper);
-    if (ap_dronecan->get_parameter_by_index_on_node(param_enum_state.node_id,
-                                                      param_enum_state.current_index,
-                                                      &string_cb)) {
-        return;  // Request queued successfully
+    static AP_DroneCAN::ParamGetSetStringCb string_cb_enum(nullptr, dronecan_param_enum_string_cb_wrapper);
+    if (!(param_enum_state.tried_types & 0x04)) {  // Bit 2 = string type
+        if (ap_dronecan->get_parameter_by_index_on_node(param_enum_state.node_id,
+                                                          param_enum_state.current_index,
+                                                          &string_cb_enum)) {
+            param_enum_state.tried_types |= 0x04;  // Mark string as tried
+            return;  // Request queued successfully
+        }
     }
 
-    // All attempts failed - this could mean:
+    // All attempts failed to queue - this could mean:
     // 1. DroneCAN is busy (pending request) - we'll try again next loop
     // 2. Index is beyond parameter count - enumeration is complete
     // We can't distinguish these cases, so we rely on timeout
