@@ -1652,6 +1652,13 @@ void GCS_MAVLINK::update_send()
     // check for any in-progress tasks; check_tasks does its own rate-limiting
     GCS_MAVLINK_InProgress::check_tasks();
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    // Continue any active PARAM_EXT enumeration for DroneCAN nodes
+    // This must be called unconditionally (not tied to stream rates) because
+    // PARAM_EXT enumeration is initiated by explicit GCS requests
+    continue_param_enumeration();
+#endif
+
     const uint32_t start = AP_HAL::millis();
     const uint16_t start16 = start & 0xFFFF;
     while (AP_HAL::millis() - start < 5) { // spend a max of 5ms sending messages.  This should never trigger - out_of_time() should become true
