@@ -150,10 +150,24 @@ void AP_DroneCAN_DNA_Server::Database::reset()
         // ESP32 Storage uses delayed writes via _timer_tick(). The magic number write
         // goes to RAM buffer but won't persist to flash until timer tick runs.
         // During early boot or quick reboots, timer tick may not run, causing the
-        // write to be lost. Force an immediate flush to ensure persistence.
+        // write to be lost.
+        //
+        // Note: _timer_tick() only flushes ONE dirty line per call to minimize latency.
+        // After clearing all node records, many lines are dirty. We need to call it
+        // multiple times to flush everything.
+        //
+        // Storage has STORAGE_NUM_LINES = STORAGE_SIZE / STORAGE_LINE_SIZE lines.
+        // For ESP32: 4096 bytes / 8 bytes = 512 lines maximum.
+        // We call _timer_tick() enough times to flush all possible dirty lines.
+        // Once the dirty mask is empty, subsequent calls return immediately (no-op).
         hal.console->printf("DNA: Forcing storage flush to flash...\n");
-        hal.storage->_timer_tick();
-        hal.console->printf("DNA: Storage flush complete\n");
+        const uint16_t max_flush_cycles = 1000; // More than enough for 512 lines
+        for (uint16_t i = 0; i < max_flush_cycles; i++) {
+            hal.storage->_timer_tick();
+            // Small delay to allow flash writes to complete
+            hal.scheduler->delay_microseconds(100);
+        }
+        hal.console->printf("DNA: Storage flush complete (%d flush cycles)\n", max_flush_cycles);
     }
 }
 
