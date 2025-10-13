@@ -119,19 +119,26 @@ void AP_DroneCAN_DNA_Server::Database::reset()
 
     // mark the magic at the start to indicate a valid (and reset) database
     uint16_t magic = NODERECORD_MAGIC;
+    hal.console->printf("DNA: Writing magic 0xAC02 to storage offset 0\n");
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     ESP_LOGI("DNA_SERVER", "Writing magic 0xAC02 to storage offset 0");
 #endif
     if (!storage->write_block(0, &magic, sizeof(magic))) {
         debug_dronecan(AP_CANManager::LOG_ERROR, "DNA_DB CRITICAL: Failed to write magic number during database reset");
         GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "DroneCAN DNA storage write failed");
+        hal.console->printf("DNA: CRITICAL - Magic write FAILED!\n");
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         ESP_LOGE("DNA_SERVER", "MAGIC WRITE FAILED!");
 #endif
     } else {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         // Verify the write by reading back
         uint16_t verify_magic = storage->read_uint16(0);
+        hal.console->printf("DNA: Magic write succeeded, readback=0x%04X (expected 0x%04X)\n",
+                           verify_magic, NODERECORD_MAGIC);
+        if (verify_magic != NODERECORD_MAGIC) {
+            hal.console->printf("DNA: ERROR - Magic readback MISMATCH! Write succeeded but read failed!\n");
+        }
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         ESP_LOGI("DNA_SERVER", "Magic write succeeded, readback=0x%04X (expected 0x%04X)",
                  verify_magic, NODERECORD_MAGIC);
         if (verify_magic != NODERECORD_MAGIC) {
