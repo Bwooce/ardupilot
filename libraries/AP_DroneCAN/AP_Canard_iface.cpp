@@ -489,8 +489,17 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
                 rejection_slot = (rejection_slot + 1) % 10;
             }
         } else if (reject_count % 100 == 0) {
-            // Periodic summary for known unknown messages
-            ESP_LOGI("CAN_RX", "Unknown messages: %lu total rejected", (unsigned long)reject_count);
+            // Periodic summary with tracked message types
+            char msg_summary[128] = {0};
+            int offset = 0;
+            for (uint8_t i = 0; i < 10 && last_rejected_dtype[i] != 0; i++) {
+                const char* xfer_str = (last_rejected_xfer_type[i] == CanardTransferTypeResponse) ? "RSP" :
+                                       (last_rejected_xfer_type[i] == CanardTransferTypeRequest) ? "REQ" : "BRC";
+                offset += snprintf(msg_summary + offset, sizeof(msg_summary) - offset,
+                                 "dtype=%d(%s) ", last_rejected_dtype[i], xfer_str);
+            }
+            ESP_LOGI("CAN_RX", "Unknown messages: %lu total rejected. Types: %s",
+                     (unsigned long)reject_count, msg_summary);
         }
     } else {
         // Log all accepted messages at DEBUG level
