@@ -2001,15 +2001,38 @@ bool AP_DroneCAN::get_parameter_by_index_on_node(uint8_t node_id, uint16_t index
 void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer, const uavcan_protocol_param_GetSetResponse& rsp)
 {
     WITH_SEMAPHORE(_param_sem);
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Debug: Log callback entry and response details
+    hal.console->printf("PARAM_HANDLER: Callback invoked for node %d\n", transfer.source_node_id);
+    hal.console->printf("PARAM_HANDLER:   Response name='%.*s', index=%d\n",
+                       rsp.name.len, rsp.name.data, rsp.index);
+    hal.console->printf("PARAM_HANDLER:   Response type=%d (1=EMPTY, 2=INT, 3=FLOAT, 4=BOOL, 5=STRING)\n",
+                       rsp.value.union_tag);
+    hal.console->printf("PARAM_HANDLER:   Registered callbacks: int=%s, float=%s, string=%s\n",
+                       param_int_cb ? "YES" : "NO",
+                       param_float_cb ? "YES" : "NO",
+                       param_string_cb ? "YES" : "NO");
+#endif
+
     if (!param_int_cb &&
         !param_float_cb &&
         !param_string_cb) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        hal.console->printf("PARAM_HANDLER: ERROR - No callbacks registered, returning early\n");
+#endif
         return;
     }
     if ((rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) && param_int_cb) {
         int32_t val = rsp.value.integer_value;
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        hal.console->printf("PARAM_HANDLER: Matched INTEGER type, calling int_cb\n");
+#endif
         if ((*param_int_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val)) {
             // we want the parameter to be set with val
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            hal.console->printf("PARAM_HANDLER: int_cb returned TRUE, queuing SET request\n");
+#endif
             param_getset_req.index = 0;
             memcpy(param_getset_req.name.data, rsp.name.data, rsp.name.len);
             param_getset_req.value.integer_value = val;
@@ -2019,10 +2042,19 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
             param_request_node_id = transfer.source_node_id;
             return;
         }
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        hal.console->printf("PARAM_HANDLER: int_cb returned FALSE, continuing to cleanup\n");
+#endif
     } else if ((rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) && param_float_cb) {
         float val = rsp.value.real_value;
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        hal.console->printf("PARAM_HANDLER: Matched FLOAT type, calling float_cb\n");
+#endif
         if ((*param_float_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val)) {
             // we want the parameter to be set with val
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            hal.console->printf("PARAM_HANDLER: float_cb returned TRUE, queuing SET request\n");
+#endif
             param_getset_req.index = 0;
             memcpy(param_getset_req.name.data, rsp.name.data, rsp.name.len);
             param_getset_req.value.real_value = val;
@@ -2032,11 +2064,20 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
             param_request_node_id = transfer.source_node_id;
             return;
         }
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        hal.console->printf("PARAM_HANDLER: float_cb returned FALSE, continuing to cleanup\n");
+#endif
     } else if ((rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_STRING_VALUE) && param_string_cb) {
         string val;
         memcpy(&val, &rsp.value.string_value, sizeof(val));
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        hal.console->printf("PARAM_HANDLER: Matched STRING type, calling string_cb\n");
+#endif
         if ((*param_string_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val)) {
             // we want the parameter to be set with val
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            hal.console->printf("PARAM_HANDLER: string_cb returned TRUE, queuing SET request\n");
+#endif
             param_getset_req.index = 0;
             memcpy(param_getset_req.name.data, rsp.name.data, rsp.name.len);
             memcpy(&param_getset_req.value.string_value, &val, sizeof(val));
@@ -2046,8 +2087,20 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
             param_request_node_id = transfer.source_node_id;
             return;
         }
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        hal.console->printf("PARAM_HANDLER: string_cb returned FALSE, continuing to cleanup\n");
+#endif
     }
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    else {
+        hal.console->printf("PARAM_HANDLER: NO TYPE MATCH! Response type=%d doesn't match any registered callback\n",
+                           rsp.value.union_tag);
+    }
+#endif
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    hal.console->printf("PARAM_HANDLER: Clearing callbacks and completing request\n");
+#endif
     param_request_sent_ms = 0;
     param_int_cb = nullptr;
     param_float_cb = nullptr;
