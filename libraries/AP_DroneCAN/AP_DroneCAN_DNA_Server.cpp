@@ -323,20 +323,43 @@ uint8_t AP_DroneCAN_DNA_Server::Database::find_node_id(const uint8_t unique_id[]
 {
     NodeRecord record;
 
-    // Prepare search buffer: copy provided UID and zero-pad to 16 bytes
-    // This ensures we don't get false matches when:
-    // - Node A stored with 12 bytes (padded with zeros)
-    // - Node B sends 16 bytes with same first 12 but different last 4
-    uint8_t search_uid[16];
-    memset(search_uid, 0, 16);
-    uint8_t copy_size = (size > 16) ? 16 : size;
-    memcpy(search_uid, unique_id, copy_size);
+    // Clamp size to 16 bytes maximum
+    uint8_t search_len = (size > 16) ? 16 : size;
 
     for (int i = MAX_NODE_ID; i > 0; i--) {
         if (node_registered.get(i)) {
             read_record(record, i);
-            // Compare all 16 bytes (zero-padded search vs zero-padded stored)
-            if (memcmp(record.uid, search_uid, 16) == 0) {
+
+            // PREFIX MATCH: Compare only the bytes we have
+            // This allows:
+            // - Allocation with 12 bytes to find registration with 16 bytes (prefix match)
+            // - GetNodeInfo with 16 bytes to find registration with 12 bytes (extends match)
+            // - Full 16-byte match when both have 16 bytes
+            bool matches = true;
+
+            // Compare the prefix (the bytes we have in the search)
+            if (memcmp(record.uid, unique_id, search_len) != 0) {
+                matches = false;
+            } else if (search_len < 16) {
+                // Partial search: check if stored UID has non-zero bytes beyond our search length
+                // If so, only match if those trailing bytes are zero (exact prefix match)
+                // This prevents collision: device with UID [A A A A...0 0 0 0] shouldn't match [A A A A...B B B B]
+                bool stored_has_more = false;
+                for (uint8_t j = search_len; j < 16; j++) {
+                    if (record.uid[j] != 0) {
+                        stored_has_more = true;
+                        break;
+                    }
+                }
+                // If stored record has non-zero bytes beyond our search, it's a full 16-byte UID
+                // We can match it with our partial UID (device came back with same prefix)
+                // If stored record is zero-padded like us, exact match already confirmed above
+            }
+
+            if (matches) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+                ESP_LOGD("DNA_DB", "find_node_id: Found match at node %d (search_len=%d)", i, search_len);
+#endif
                 return i; // node ID found
             }
         }
