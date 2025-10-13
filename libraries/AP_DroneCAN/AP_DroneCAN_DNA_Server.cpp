@@ -100,6 +100,9 @@ void AP_DroneCAN_DNA_Server::Database::init(StorageAccess *storage_)
     ESP_LOGD("DNA_SERVER", "Found %d existing node registrations in database", registered_count);
     hal.console->printf("DNA: Found %d existing node registrations\n", registered_count);
 #endif
+
+    // Mark database as initialized - operations are now safe
+    initialized = true;
 }
 
 // remove all registrations from the database
@@ -243,6 +246,15 @@ bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, 
 uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique_id[], uint8_t uid_len, const Bitmask<128> *node_seen)
 {
     WITH_SEMAPHORE(sem);
+
+    // Reject operations before database is initialized
+    // init() validates magic number and resets if needed - must complete before allocations
+    if (!initialized) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        ESP_LOGW("DNA_DB", "Allocation requested before database initialized - ignoring");
+#endif
+        return 0;  // Allocation failed - database not ready
+    }
 
     uint8_t resp_node_id = find_node_id(unique_id, uid_len);
 

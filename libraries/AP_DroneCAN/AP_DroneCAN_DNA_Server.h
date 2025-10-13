@@ -91,6 +91,7 @@ class AP_DroneCAN_DNA_Server
 
         StorageAccess *storage;
         HAL_Semaphore sem;
+        bool initialized;  // true after init() validates/resets database
     };
 
     static Database db;
