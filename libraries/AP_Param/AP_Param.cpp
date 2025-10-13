@@ -1642,35 +1642,6 @@ bool AP_Param::load_all()
             // we've reached the sentinal
             sentinal_offset = ofs;
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            // ESP32: Ensure all BATT*_SERIAL_NUM parameters are set to -1 for DroneCAN battery support
-            // This allows accepting battery data from any node (required for proper operation)
-            // Added Oct 2025 - can be removed after sufficient time (e.g., mid-2026)
-            const char* param_names[] = {"BATT_SERIAL_NUM", "BATT2_SERIAL_NUM", "BATT3_SERIAL_NUM",
-                                         "BATT4_SERIAL_NUM", "BATT5_SERIAL_NUM", "BATT6_SERIAL_NUM",
-                                         "BATT7_SERIAL_NUM", "BATT8_SERIAL_NUM", "BATT9_SERIAL_NUM"};
-            for (uint8_t i = 0; i < ARRAY_SIZE(param_names); i++) {
-                enum ap_var_type ptype;
-                AP_Param *batt_serial_num = AP_Param::find(param_names[i], &ptype);
-                if (batt_serial_num != nullptr && ptype == AP_PARAM_INT32) {
-                    AP_Int32 *param = (AP_Int32 *)batt_serial_num;
-                    int32_t current_value = param->get();
-
-                    if (current_value != -1) {
-                        // Need to update to -1
-                        hal.console->printf("ESP32: Migrating %s from %d to -1 (accept all)\n",
-                                           param_names[i], (int)current_value);
-
-                        // Set to -1 and save
-                        param->set(-1);
-                        param->save(true);  // force save
-
-                        hal.console->printf("ESP32: %s migration complete\n", param_names[i]);
-                    }
-                }
-            }
-#endif
-
             return true;
         }
 
