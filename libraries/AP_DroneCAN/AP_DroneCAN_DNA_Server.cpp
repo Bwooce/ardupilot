@@ -340,21 +340,10 @@ uint8_t AP_DroneCAN_DNA_Server::Database::find_node_id(const uint8_t unique_id[]
             // Compare the prefix (the bytes we have in the search)
             if (memcmp(record.uid, unique_id, search_len) != 0) {
                 matches = false;
-            } else if (search_len < 16) {
-                // Partial search: check if stored UID has non-zero bytes beyond our search length
-                // If so, only match if those trailing bytes are zero (exact prefix match)
-                // This prevents collision: device with UID [A A A A...0 0 0 0] shouldn't match [A A A A...B B B B]
-                bool stored_has_more = false;
-                for (uint8_t j = search_len; j < 16; j++) {
-                    if (record.uid[j] != 0) {
-                        stored_has_more = true;
-                        break;
-                    }
-                }
-                // If stored record has non-zero bytes beyond our search, it's a full 16-byte UID
-                // We can match it with our partial UID (device came back with same prefix)
-                // If stored record is zero-padded like us, exact match already confirmed above
             }
+            // Note: For partial searches (search_len < 16), we accept prefix matches
+            // This allows allocation with 12 bytes to find registration with 16 bytes
+            // and GetNodeInfo with 16 bytes to find registration with 12 bytes
 
             if (matches) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
