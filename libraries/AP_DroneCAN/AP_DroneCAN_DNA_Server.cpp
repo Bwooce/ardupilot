@@ -1389,6 +1389,21 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
 #endif
 }
 
+// Request node info for all seen nodes (for MAV_CMD_UAVCAN_GET_NODE_INFO)
+void AP_DroneCAN_DNA_Server::request_all_node_info()
+{
+    hal.console->printf("MAVLink: Requesting node info for all %d seen nodes\n", node_seen.count());
+
+    // Send GetNodeInfo requests for all seen nodes
+    for (uint8_t i = 1; i <= MAX_NODE_ID; i++) {
+        if (node_seen.get(i) && i != self_node_id) {
+            uavcan_protocol_GetNodeInfoRequest request;
+            node_info_client.request(i, request);
+            hal.console->printf("MAVLink: Sent GetNodeInfo request to node %d\n", i);
+        }
+    }
+}
+
 //report the server state, along with failure message if any
 bool AP_DroneCAN_DNA_Server::prearm_check(char* fail_msg, uint8_t fail_msg_len) const
 {
