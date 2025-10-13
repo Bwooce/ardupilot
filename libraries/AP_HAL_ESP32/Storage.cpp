@@ -181,7 +181,10 @@ bool Storage::_flash_write_data(uint8_t sector, uint32_t offset, const uint8_t *
         uint32_t now = AP_HAL::millis();
         if (now - _last_re_init_ms > 5000) {
             _last_re_init_ms = now;
-            (void)_flash.re_initialise();
+            bool reinit_ok = _flash.re_initialise();
+            // We don't propagate the reinit result - original write already failed
+            // and we'll retry on the next write attempt
+            (void)reinit_ok;
         }
     }
     return ret;
