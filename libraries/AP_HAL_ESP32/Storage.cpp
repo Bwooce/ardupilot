@@ -172,9 +172,16 @@ void Storage::_flash_write(uint16_t line)
 #endif
     bool write_result = _flash.write(line*STORAGE_LINE_SIZE, STORAGE_LINE_SIZE);
 
-    // Use printf for critical debug (works regardless of log level config timing)
-    if (line == 0 || !write_result) {
-        hal.console->printf("STORAGE: _flash_write line %d: %s\n", line, write_result ? "SUCCESS" : "FAILED");
+    // Calculate storage offset for this line
+    uint16_t offset = line * STORAGE_LINE_SIZE;
+
+    // Log writes in critical areas: line 0, DNA database (15232-16256), or failures
+    // DNA database: StorageCANDNA at offset 15232, size 1024 = lines 1904-2031
+    bool is_dna_area = (line >= 1904 && line <= 2031);
+
+    if (line == 0 || is_dna_area || !write_result) {
+        hal.console->printf("STORAGE: _flash_write line %d (offset %d): %s\n",
+                           line, offset, write_result ? "SUCCESS" : "FAILED");
         if (!write_result) {
             hal.console->printf("STORAGE: ERROR - AP_FlashStorage write failed for line %d!\n", line);
         }
