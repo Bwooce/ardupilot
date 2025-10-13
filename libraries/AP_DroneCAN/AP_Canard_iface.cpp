@@ -974,20 +974,56 @@ void CanardInterface::processRx() {
                     bool should_accept = shouldAcceptTransfer(&canard, &check_sig, data_type,
                                                              extractTransferType(masked_id), source_node);
                     if (should_accept && res < 0) {
-                        // Rate limit mismatch messages to reduce spam
-                        static uint32_t last_mismatch_log_ms = 0;
-                        static uint32_t mismatch_count = 0;
-                        uint32_t now_ms = AP_HAL::millis();
-                        mismatch_count++;
-                        
-                        if (now_ms - last_mismatch_log_ms > 5000) {  // Log at most every 5 seconds
-                            ESP_LOGI("CAN_RX", "MISMATCH: %lu occurrences (last: dtype=%d node=%d res=%d)",
-                                     (unsigned long)mismatch_count, data_type, source_node, res);
-                            // Log one example frame for debugging
-                            ESP_LOGI("CAN_RX", "  Example: ID=0x%08X, len=%d",
-                                     (unsigned)(rx_frame.id & 0x1FFFFFFF), rx_frame.data_len);
-                            last_mismatch_log_ms = now_ms;
-                            mismatch_count = 0;
+                        // Enhanced diagnostic for BAD_CRC errors (res=-17)
+                        if (res == -CANARD_ERROR_RX_BAD_CRC) {
+                            static uint32_t crc_error_count = 0;
+                            static uint32_t last_crc_log_ms = 0;
+                            uint32_t now_ms = AP_HAL::millis();
+                            crc_error_count++;
+
+                            if (now_ms - last_crc_log_ms > 2000) {  // Log every 2 seconds for CRC issues
+                                // Extract transfer ID from frame
+                                uint8_t transfer_id = (rx_frame.data_len > 0) ?
+                                    (rx_frame.data[rx_frame.data_len - 1] & 0x1F) : 0xFF;
+                                bool is_multiframe = (rx_frame.data_len > 0) &&
+                                    ((rx_frame.data[rx_frame.data_len - 1] & 0x80) == 0);
+
+                                ESP_LOGE("CAN_RX", "BAD_CRC: %lu errors - dtype=%d node=%d xfer_id=%d %s",
+                                         (unsigned long)crc_error_count, data_type, source_node,
+                                         transfer_id, is_multiframe ? "MULTI" : "SINGLE");
+                                ESP_LOGE("CAN_RX", "  Frame: ID=0x%08X len=%d tail=0x%02X",
+                                         (unsigned)(rx_frame.id & 0x1FFFFFFF), rx_frame.data_len,
+                                         rx_frame.data_len > 0 ? rx_frame.data[rx_frame.data_len - 1] : 0);
+
+                                // Show first 8 bytes of payload
+                                if (rx_frame.data_len > 0) {
+                                    char hex[25] = {0};
+                                    int len = rx_frame.data_len < 8 ? rx_frame.data_len : 8;
+                                    for (int i = 0; i < len; i++) {
+                                        snprintf(hex + (i*3), 4, "%02X ", rx_frame.data[i]);
+                                    }
+                                    ESP_LOGE("CAN_RX", "  Data: %s", hex);
+                                }
+
+                                last_crc_log_ms = now_ms;
+                                crc_error_count = 0;
+                            }
+                        } else {
+                            // Other mismatch errors - rate limit spam
+                            static uint32_t last_mismatch_log_ms = 0;
+                            static uint32_t mismatch_count = 0;
+                            uint32_t now_ms = AP_HAL::millis();
+                            mismatch_count++;
+
+                            if (now_ms - last_mismatch_log_ms > 5000) {  // Log at most every 5 seconds
+                                ESP_LOGI("CAN_RX", "MISMATCH: %lu occurrences (last: dtype=%d node=%d res=%d)",
+                                         (unsigned long)mismatch_count, data_type, source_node, res);
+                                // Log one example frame for debugging
+                                ESP_LOGI("CAN_RX", "  Example: ID=0x%08X, len=%d",
+                                         (unsigned)(rx_frame.id & 0x1FFFFFFF), rx_frame.data_len);
+                                last_mismatch_log_ms = now_ms;
+                                mismatch_count = 0;
+                            }
                         }
                     }
                 }
