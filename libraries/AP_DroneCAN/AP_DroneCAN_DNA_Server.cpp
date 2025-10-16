@@ -383,9 +383,9 @@ void AP_DroneCAN_DNA_Server::send_node_status_mavlink(uint8_t node_id, const uav
     for (uint8_t i=0; i<gcs().num_gcs(); i++) {
         GCS_MAVLINK *c = gcs().chan(i);
         if (c != nullptr && !c->is_private() && c->is_active()) {
-            MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
-            uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &mavlink_msg);
-            comm_send_buffer((mavlink_channel_t)i, (uint8_t*)buf, len);
+            uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+            uint16_t len = mavlink_msg_to_send_buffer(buf, &mavlink_msg);
+            comm_send_buffer((mavlink_channel_t)i, buf, len);
         }
     }
 #endif
@@ -483,9 +483,9 @@ void AP_DroneCAN_DNA_Server::send_node_info_mavlink(uint8_t node_id, const uavca
     for (uint8_t i=0; i<gcs().num_gcs(); i++) {
         GCS_MAVLINK *c = gcs().chan(i);
         if (c != nullptr && !c->is_private() && c->is_active()) {
-            MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
-            uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &mavlink_msg);
-            comm_send_buffer((mavlink_channel_t)i, (uint8_t*)buf, len);
+            uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+            uint16_t len = mavlink_msg_to_send_buffer(buf, &mavlink_msg);
+            comm_send_buffer((mavlink_channel_t)i, buf, len);
         }
     }
 
