@@ -101,6 +101,8 @@ public:
     
     uint8_t get_driver_index() const { return _driver_index; }
 
+    AP_DroneCAN_DNA_Server& get_dna_server() { return _dna_server; }
+
     // define string with length structure
     struct string { uint8_t len; uint8_t data[128]; };
 
@@ -135,6 +137,13 @@ public:
     bool get_parameter_on_node(uint8_t node_id, const char *name, ParamGetSetFloatCb *cb);
     bool get_parameter_on_node(uint8_t node_id, const char *name, ParamGetSetIntCb *cb);
     bool get_parameter_on_node(uint8_t node_id, const char *name, ParamGetSetStringCb *cb);
+
+    // get parameter by index for enumeration
+    // returns true on success, false on failure
+    // failures occur when waiting on node to respond to previous get or set request
+    bool get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetFloatCb *cb);
+    bool get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetIntCb *cb);
+    bool get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetStringCb *cb);
 
     // Save parameters
     bool save_parameters_on_node(uint8_t node_id, ParamSaveCb *cb);

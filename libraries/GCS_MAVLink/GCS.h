@@ -503,12 +503,32 @@ public:
     // queue of pending PARAM_EXT requests for DroneCAN nodes
     static ObjectBuffer<pending_param_ext_request> param_ext_requests;
 
+    // parameter enumeration state for PARAM_EXT_REQUEST_LIST
+    struct param_enumeration_state {
+        bool active;                // enumeration in progress
+        mavlink_channel_t chan;     // requesting channel
+        uint8_t can_driver_index;   // CAN driver index
+        uint8_t node_id;            // node being enumerated
+        uint16_t current_index;     // current parameter index
+        uint32_t start_time_ms;     // when enumeration started
+        uint16_t param_count;       // total parameters discovered
+        uint8_t tried_types;        // bitmask of callback types tried for current_index (bit 0=int, 1=float, 2=string)
+    };
+    static struct param_enumeration_state param_enum_state;
+
     // PARAM_EXT send functions (must be public for static callbacks)
     // node_id is used to set correct source component ID (25 + node_id - 1)
     void send_param_ext_value(const char *param_name, const char *param_value,
                               uint8_t param_type, uint8_t node_id);
+    void send_param_ext_value_indexed(const char *param_name, const char *param_value,
+                                      uint8_t param_type, uint8_t node_id, uint16_t param_index);
     void send_param_ext_ack(const char *param_name, const char *param_value,
                             uint8_t param_type, uint8_t param_result, uint8_t node_id);
+
+    // start parameter enumeration for a DroneCAN node
+    void start_param_enumeration(mavlink_channel_t mavlink_chan, uint8_t can_driver_index, uint8_t node_id);
+    // continue parameter enumeration (called from loop)
+    void continue_param_enumeration();
 #endif // HAL_ENABLE_DRONECAN_DRIVERS
 
 protected:
