@@ -58,24 +58,58 @@ Implement MAVLink PARAM_EXT protocol (messages 320-324) to enable GCS tools like
 
 These files are identical between master and esp32-build-refactor, so cherry-picking will be clean.
 
-**Parameter Naming Convention:**
-- Format: `CANn.Nxxx.PARAM_NAME` where n=CAN interface (1-9), xxx=node ID (001-127, zero-padded 3 digits)
-- Examples: `CAN1.N001.ESC_INDEX`, `CAN1.N042.MOTOR_KV`, `CAN2.N127.PARAM_NAME`
-- This encodes the routing information in the parameter name for stateless MAVLink protocol
-- Supports full DroneCAN node ID range (1-127) and up to 9 CAN interfaces
+**Component ID Mapping (1:1 with DroneCAN Node IDs):**
+- **Formula**: `Component ID = 25 + (node_id - 1)` using MAVLink USER range (25-99)
+- **Range**: Supports DroneCAN nodes 1-75 (maps to components 25-99)
+- **Examples**: Node 1 → Component 25, Node 42 → Component 66, Node 75 → Component 99
+- **Rationale**:
+  - USER range (25-99) is designated for "privately managed MAVLink networks" per MAVLink spec
+  - ArduPilot precedent: `SIM_Ship.cpp:207` uses `MAV_COMP_ID_USER10` for simulated peripherals
+  - Standards-compliant solution avoiding component ID collisions
+- **References**:
+  - Analysis: `/home/bruce/ardupilot/docs/PARAM_EXT_component_id_analysis.md`
+  - Design document: `/home/bruce/ardupilot/docs/PARAM_EXT_design.md`
+  - MAVLink spec: https://mavlink.io/en/messages/common.html#MAV_COMPONENT
+
+**MAVLink Messages and Commands:**
+
+*PARAM_EXT Messages (320-324):*
+- PARAM_EXT_REQUEST_READ, PARAM_EXT_REQUEST_LIST, PARAM_EXT_VALUE, PARAM_EXT_SET, PARAM_EXT_ACK
+- Existing MAVLink messages from common message set
+
+*UAVCAN/DroneCAN Messages (310-311):*
+- **UAVCAN_NODE_STATUS (310)** - Periodic node health/status reporting
+- **UAVCAN_NODE_INFO (311)** - Node details (name, HW/SW version, UID)
+- Enables GCS to discover and monitor DroneCAN nodes
+
+*UAVCAN/DroneCAN Commands:*
+- **MAV_CMD_PREFLIGHT_UAVCAN (243)** - Start actuator enumeration for ESCs/servos
+- **MAV_CMD_UAVCAN_GET_NODE_INFO (5200)** - Request node info for all online nodes
+
+Note: UAVCAN messages are on esp32-build-refactor branch, not yet on param-ext-dronecan-upstream
 
 **Implementation Components:**
-1. PARAM_EXT message handlers (5 new handlers mirroring existing PARAM handlers)
-2. DroneCAN parameter request queue (async operations)
-3. Parameter name parser (extract CAN interface, node ID, param name)
-4. Protocol bridge (PARAM_EXT → AP_DroneCAN function calls)
-5. Async callback handlers (DroneCAN response → PARAM_EXT_VALUE/ACK)
+1. PARAM_EXT message handlers (5 new handlers: REQUEST_READ, REQUEST_LIST, VALUE, SET, ACK)
+2. Component ID to node ID mapping (reverse formula: `node_id = component_id - 24`)
+3. DroneCAN parameter request queue (async operations with callback handlers)
+4. Parameter enumeration state machine (index-based discovery with EMPTY response detection)
+5. Protocol bridge (PARAM_EXT messages → AP_DroneCAN get/set parameter functions)
+6. Async callback handlers (DroneCAN response → PARAM_EXT_VALUE/ACK replies)
+
+**Implementation Status:**
+- Parameter enumeration ported to param-ext-dronecan-upstream branch (Oct 2025)
+- Compilation successful on all platforms
+- Buffer implementation: Uses `uint8_t buf[MAVLINK_MAX_PACKET_LEN]` (matches ArduPilot convention, MAVLINK_ALIGNED_BUF macro doesn't exist in ArduPilot's MAVLink)
+- Enumeration callbacks use static Functor pattern with `(nullptr, function_ptr)` construction
+- Tried_types bitmask (3-bit) tracks callback retry attempts for index-based enumeration
 
 **Testing:**
 - Test on esp32-build-refactor with actual ESP32 hardware and DroneCAN nodes
 - Verify with mavcan-cli tool
 - Test parameter get, set, and save operations
+- Test parameter enumeration (REQUEST_LIST with empty param_id)
 - Verify timeout handling and error cases
+- Verify EMPTY response detection (end of parameter list)
 
 **Upstreaming:**
 - Cherry-pick only PARAM_EXT commits to param-ext-dronecan-upstream branch
