@@ -365,6 +365,140 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     node_seen.set(transfer.source_node_id);
 }
 
+void AP_DroneCAN_DNA_Server::send_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg)
+{
+#if HAL_GCS_ENABLED
+    // Pack the message with the node ID as the component ID (per MAVLink UAVCAN spec)
+    mavlink_message_t mavlink_msg;
+    mavlink_msg_uavcan_node_status_pack(
+        mavlink_system.sysid,
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
+        &mavlink_msg,
+        AP_HAL::micros64(),
+        msg.uptime_sec,
+        msg.health,
+        msg.mode,
+        msg.sub_mode,
+        msg.vendor_specific_status_code
+    );
+
+    // Send to all active MAVLink channels
+    for (uint8_t i=0; i<gcs().num_gcs(); i++) {
+        GCS_MAVLINK *c = gcs().chan(i);
+        if (c != nullptr && !c->is_private() && c->is_active()) {
+            uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+            uint16_t len = mavlink_msg_to_send_buffer(buf, &mavlink_msg);
+            comm_send_buffer((mavlink_channel_t)i, buf, len);
+        }
+    }
+#endif
+}
+
+void AP_DroneCAN_DNA_Server::report_node_health_change(uint8_t node_id, uint8_t health, uint8_t mode, bool recovered)
+{
+#if AP_HAVE_GCS_SEND_TEXT
+    const char* health_str;
+    MAV_SEVERITY severity;
+
+    // Map DroneCAN health states to MAVLink severity and text
+    switch (health) {
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK:
+            health_str = "OK";
+            severity = MAV_SEVERITY_INFO;
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_WARNING:
+            health_str = "WARNING";
+            severity = MAV_SEVERITY_WARNING;
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_ERROR:
+            health_str = "ERROR";
+            severity = MAV_SEVERITY_ERROR;
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_CRITICAL:
+            health_str = "CRITICAL";
+            severity = MAV_SEVERITY_CRITICAL;
+            break;
+        default:
+            health_str = "UNKNOWN";
+            severity = MAV_SEVERITY_WARNING;
+            break;
+    }
+
+    const char* mode_str;
+    switch (mode) {
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL:
+            mode_str = "OPERATIONAL";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_INITIALIZATION:
+            mode_str = "INITIALIZING";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_MAINTENANCE:
+            mode_str = "MAINTENANCE";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_SOFTWARE_UPDATE:
+            mode_str = "UPDATING";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_OFFLINE:
+            mode_str = "OFFLINE";
+            break;
+        default:
+            mode_str = "UNKNOWN";
+            break;
+    }
+
+    if (recovered) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN Node %d: %s (%s) - RECOVERED",
+                      node_id, health_str, mode_str);
+    } else {
+        GCS_SEND_TEXT(severity, "DroneCAN Node %d: %s (%s)",
+                      node_id, health_str, mode_str);
+    }
+#endif
+}
+
+void AP_DroneCAN_DNA_Server::send_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg)
+{
+#if HAL_GCS_ENABLED
+    // Prepare node name with null termination
+    char node_name[81];
+    size_t name_len = MIN(msg.name.len, sizeof(node_name) - 1);
+    memcpy(node_name, msg.name.data, name_len);
+    node_name[name_len] = '\0';
+
+    // Pack the message with the node ID as the component ID (per MAVLink UAVCAN spec)
+    mavlink_message_t mavlink_msg;
+    mavlink_msg_uavcan_node_info_pack(
+        mavlink_system.sysid,
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
+        &mavlink_msg,
+        AP_HAL::micros64(),
+        msg.status.uptime_sec,
+        node_name,
+        msg.hardware_version.major,
+        msg.hardware_version.minor,
+        msg.hardware_version.unique_id,
+        msg.software_version.major,
+        msg.software_version.minor,
+        msg.software_version.vcs_commit
+    );
+
+    // Send to all active MAVLink channels
+    for (uint8_t i=0; i<gcs().num_gcs(); i++) {
+        GCS_MAVLINK *c = gcs().chan(i);
+        if (c != nullptr && !c->is_private() && c->is_active()) {
+            uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+            uint16_t len = mavlink_msg_to_send_buffer(buf, &mavlink_msg);
+            comm_send_buffer((mavlink_channel_t)i, buf, len);
+        }
+    }
+
+    // Also send a text message for human-readable notification
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN Node %d: %s v%d.%d online",
+                  node_id, node_name,
+                  msg.software_version.major, msg.software_version.minor);
+#endif
+}
+
 /* Node Info message handler
 Handle responses from GetNodeInfo Request. We verify the node info
 against our records. Marks Verification mask if already recorded,
@@ -490,6 +624,36 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     }
 
     allocation_pub.broadcast(rsp, false); // never publish allocation message with CAN FD
+}
+
+// Request node info for all seen nodes (for MAV_CMD_UAVCAN_GET_NODE_INFO)
+void AP_DroneCAN_DNA_Server::request_all_node_info()
+{
+    uint8_t node_count = node_seen.count() - (node_seen.get(self_node_id) ? 1 : 0);
+    hal.console->printf("MAVLink: Requesting node info for %d seen nodes\n", node_count);
+
+    // NOTE: The Client class can only track ONE outstanding request at a time
+    // (it has a single server_node_id and transfer_id member). If we send multiple
+    // requests in rapid succession, only the LAST request's response will be accepted.
+    //
+    // Solution: Mark all nodes as unverified and trigger immediate verification.
+    // The verify_nodes() function will send ONE request per 5-second cycle.
+    // This ensures responses are properly tracked and UAVCAN_NODE_INFO messages
+    // are sent to the GCS as each response arrives.
+
+    // Mark all seen nodes as unverified to ensure fresh requests are sent
+    for (uint8_t i = 1; i <= MAX_NODE_ID; i++) {
+        if (node_seen.get(i) && i != self_node_id) {
+            node_verified.clear(i);
+        }
+    }
+
+    // Force immediate verification cycle by resetting the timer
+    // This will cause verify_nodes() to run on the next main loop iteration
+    last_verification_request = 0;
+
+    hal.console->printf("MAVLink: Triggered verification for %d nodes - info will arrive over ~%d seconds\n",
+                       node_count, node_count * 5);
 }
 
 //report the server state, along with failure message if any
