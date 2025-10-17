@@ -3488,6 +3488,33 @@ void GCS_MAVLINK::send_vfr_hud()
  */
 MAV_RESULT GCS_MAVLINK::handle_preflight_reboot(const mavlink_command_int_t &packet, const mavlink_message_t &msg)
 {
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    // Check if this is targeted at a DroneCAN node (component ID 1-127)
+    if (packet.target_component >= 1 && packet.target_component <= 127) {
+        // Per MAVLink UAVCAN spec: component_id = node_id (1:1 mapping)
+        uint8_t node_id = packet.target_component;
+
+        if (is_equal(packet.param1, 1.0f)) {
+            // param1 = 1: Reboot node
+            // Find which CAN interface has this node
+            for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
+                AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(i);
+                if (ap_dronecan != nullptr &&
+                    ap_dronecan->get_dna_server().is_node_seen(node_id)) {
+                    ap_dronecan->send_reboot_request(node_id);
+                    send_text(MAV_SEVERITY_INFO, "DroneCAN: Rebooting node %u", node_id);
+                    return MAV_RESULT_ACCEPTED;
+                }
+            }
+            // Node not found on any interface
+            return MAV_RESULT_FAILED;
+        }
+        // Other param1 values for DroneCAN nodes not supported yet
+        return MAV_RESULT_UNSUPPORTED;
+    }
+#endif  // HAL_ENABLE_DRONECAN_DRIVERS
+
+    // Not targeted at DroneCAN node - handle as autopilot reboot
     if (is_equal(packet.param1, 42.0f) &&
         is_equal(packet.param2, 24.0f) &&
         is_equal(packet.param3, 71.0f)) {
@@ -5742,13 +5769,55 @@ MAV_RESULT GCS_MAVLINK::handle_command_int_packet(const mavlink_command_int_t &p
     case MAV_CMD_PREFLIGHT_CALIBRATION:
         return handle_command_preflight_calibration(packet, msg);
 
-    case MAV_CMD_PREFLIGHT_STORAGE:
+    case MAV_CMD_PREFLIGHT_STORAGE: {
+#if HAL_ENABLE_DRONECAN_DRIVERS
+        // Check if this is targeted at a DroneCAN node (component ID 1-127)
+        if (packet.target_component >= 1 && packet.target_component <= 127) {
+            // Per MAVLink UAVCAN spec: component_id = node_id (1:1 mapping)
+            uint8_t node_id = packet.target_component;
+
+            if (is_equal(packet.param1, 1.0f)) {
+                // param1 = 1: Save parameters
+                // Find which CAN interface has this node
+                for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
+                    AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(i);
+                    if (ap_dronecan != nullptr &&
+                        ap_dronecan->get_dna_server().is_node_seen(node_id)) {
+                        // Create callback for parameter save response
+                        static AP_DroneCAN::ParamSaveCb save_cb(nullptr, [](void* obj, AP_DroneCAN* dronecan, const uint8_t node_id, bool success) {
+                            // Save callback - send result to GCS
+                            if (success) {
+                                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN: Parameters saved on node %u", node_id);
+                            } else {
+                                GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "DroneCAN: Failed to save parameters on node %u", node_id);
+                            }
+                            return true;
+                        });
+
+                        if (ap_dronecan->save_parameters_on_node(node_id, &save_cb)) {
+                            send_text(MAV_SEVERITY_INFO, "DroneCAN: Saving parameters on node %u", node_id);
+                            return MAV_RESULT_ACCEPTED;
+                        } else {
+                            return MAV_RESULT_TEMPORARILY_REJECTED; // Busy, try again
+                        }
+                    }
+                }
+                // Node not found on any interface
+                return MAV_RESULT_FAILED;
+            }
+            // Other param1 values for DroneCAN nodes not supported yet
+            return MAV_RESULT_UNSUPPORTED;
+        }
+#endif  // HAL_ENABLE_DRONECAN_DRIVERS
+
+        // Not targeted at DroneCAN node - handle as autopilot command
         if (is_equal(packet.param1, 2.0f)) {
             AP_Param::erase_all();
             send_text(MAV_SEVERITY_WARNING, "All parameters reset, reboot board");
             return MAV_RESULT_ACCEPTED;
         }
         return MAV_RESULT_DENIED;
+    }
 
     case MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN:
         return handle_preflight_reboot(packet, msg);

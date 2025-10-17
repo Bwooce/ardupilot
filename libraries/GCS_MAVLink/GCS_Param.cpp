@@ -469,4 +469,300 @@ void GCS_MAVLINK::handle_common_param_message(const mavlink_message_t &msg)
     }
 }
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
+
+void GCS_MAVLINK::handle_common_param_ext_message(const mavlink_message_t &msg)
+{
+    switch (msg.msgid) {
+    case MAVLINK_MSG_ID_PARAM_EXT_REQUEST_LIST:
+        handle_param_ext_request_list(msg);
+        break;
+    case MAVLINK_MSG_ID_PARAM_EXT_REQUEST_READ:
+        handle_param_ext_request_read(msg);
+        break;
+    case MAVLINK_MSG_ID_PARAM_EXT_SET:
+        handle_param_ext_set(msg);
+        break;
+    }
+}
+
+void GCS_MAVLINK::handle_param_ext_request_list(const mavlink_message_t &msg)
+{
+    mavlink_param_ext_request_list_t packet;
+    mavlink_msg_param_ext_request_list_decode(&msg, &packet);
+
+    // Check if component ID is valid DroneCAN node ID (1-127)
+    // Per MAVLink UAVCAN spec: component_id must equal node_id (1:1 mapping)
+    if (packet.target_component < 1 || packet.target_component > 127) {
+        // Not a valid DroneCAN node ID
+        return;
+    }
+
+    // Use component ID directly as node ID (1:1 per MAVLink UAVCAN spec)
+    uint8_t node_id = packet.target_component;
+
+    // Find which CAN interface has this node
+    AP_DroneCAN *ap_dronecan = nullptr;
+    uint8_t can_driver_index = 0;
+
+    for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
+        AP_DroneCAN *candidate = AP_DroneCAN::get_dronecan(i);
+        if (candidate != nullptr &&
+            candidate->get_dna_server().is_node_seen(node_id)) {
+            ap_dronecan = candidate;
+            can_driver_index = i;
+            break;  // Use first interface that has this node
+        }
+    }
+
+    if (ap_dronecan == nullptr) {
+        // Node not found on any interface - cannot enumerate
+        return;
+    }
+
+    // Start parameter enumeration for this node
+    start_param_enumeration(chan, can_driver_index, node_id);
+}
+
+void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
+{
+    mavlink_param_ext_request_read_t packet;
+    mavlink_msg_param_ext_request_read_decode(&msg, &packet);
+
+    // Check if component ID is valid DroneCAN node ID (1-127)
+    // Per MAVLink UAVCAN spec: component_id must equal node_id (1:1 mapping)
+    if (packet.target_component < 1 || packet.target_component > 127) {
+        // Not a valid DroneCAN node ID
+        return;
+    }
+
+    // Use component ID directly as node ID (1:1 per MAVLink UAVCAN spec)
+    uint8_t node_id = packet.target_component;
+
+    // Find which CAN interface has this node
+    AP_DroneCAN *ap_dronecan = nullptr;
+    uint8_t can_driver_index = 0;
+
+    for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
+        AP_DroneCAN *candidate = AP_DroneCAN::get_dronecan(i);
+        if (candidate != nullptr &&
+            candidate->get_dna_server().is_node_seen(node_id)) {
+            ap_dronecan = candidate;
+            can_driver_index = i;
+            break;  // Use first interface that has this node
+        }
+    }
+
+    if (ap_dronecan == nullptr) {
+        // Node not found on any interface
+        send_param_ext_ack(packet.param_id, "",
+                          MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED, node_id);
+        return;
+    }
+
+    // Extract parameter name
+    char param_name[17];
+    memcpy(param_name, packet.param_id, 16);
+    param_name[16] = '\0';
+
+    // Create pending request
+    pending_param_ext_request req;
+    req.chan = chan;
+    req.can_driver_index = can_driver_index;
+    req.node_id = node_id;
+    strncpy(req.param_name, param_name, sizeof(req.param_name) - 1);
+    req.param_name[sizeof(req.param_name) - 1] = '\0';
+    req.is_set = false;
+    req.request_time_ms = AP_HAL::millis();
+
+    // Try to initiate DroneCAN parameter get (try float first, most common)
+    static AP_DroneCAN::ParamGetSetFloatCb float_cb(nullptr, dronecan_param_get_set_float_cb);
+    if (ap_dronecan->get_parameter_on_node(node_id, param_name, &float_cb)) {
+        param_ext_requests.push(req);
+        return;
+    }
+
+    // Try integer
+    static AP_DroneCAN::ParamGetSetIntCb int_cb(nullptr, dronecan_param_get_set_int_cb);
+    if (ap_dronecan->get_parameter_on_node(node_id, param_name, &int_cb)) {
+        param_ext_requests.push(req);
+        return;
+    }
+
+    // Try string
+    static AP_DroneCAN::ParamGetSetStringCb string_cb(nullptr, dronecan_param_get_set_string_cb);
+    if (ap_dronecan->get_parameter_on_node(node_id, param_name, &string_cb)) {
+        param_ext_requests.push(req);
+        return;
+    }
+
+    // All attempts failed - probably busy
+    send_param_ext_ack(packet.param_id, "",
+                      MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED, node_id);
+}
+
+void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
+{
+    mavlink_param_ext_set_t packet;
+    mavlink_msg_param_ext_set_decode(&msg, &packet);
+
+    // Check if component ID is valid DroneCAN node ID (1-127)
+    // Per MAVLink UAVCAN spec: component_id must equal node_id (1:1 mapping)
+    if (packet.target_component < 1 || packet.target_component > 127) {
+        // Not a valid DroneCAN node ID
+        return;
+    }
+
+    // Use component ID directly as node ID (1:1 per MAVLink UAVCAN spec)
+    uint8_t node_id = packet.target_component;
+
+    // Find which CAN interface has this node
+    AP_DroneCAN *ap_dronecan = nullptr;
+    uint8_t can_driver_index = 0;
+
+    for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
+        AP_DroneCAN *candidate = AP_DroneCAN::get_dronecan(i);
+        if (candidate != nullptr &&
+            candidate->get_dna_server().is_node_seen(node_id)) {
+            ap_dronecan = candidate;
+            can_driver_index = i;
+            break;  // Use first interface that has this node
+        }
+    }
+
+    // Extract parameter name
+    char param_name[17];
+    memcpy(param_name, packet.param_id, 16);
+    param_name[16] = '\0';
+
+    // Extract parameter value (ensure null termination)
+    char param_value[129];
+    memcpy(param_value, packet.param_value, 128);
+    param_value[128] = '\0';
+
+    if (ap_dronecan == nullptr) {
+        // Node not found on any interface
+        send_param_ext_ack(packet.param_id, param_value, packet.param_type, PARAM_ACK_FAILED, node_id);
+        return;
+    }
+
+    // Create pending request
+    pending_param_ext_request req;
+    req.chan = chan;
+    req.can_driver_index = can_driver_index;
+    req.node_id = node_id;
+    strncpy(req.param_name, param_name, sizeof(req.param_name) - 1);
+    req.param_name[sizeof(req.param_name) - 1] = '\0';
+    strncpy(req.param_value, param_value, sizeof(req.param_value) - 1);
+    req.param_value[sizeof(req.param_value) - 1] = '\0';
+    req.param_type = packet.param_type;
+    req.is_set = true;
+    req.request_time_ms = AP_HAL::millis();
+
+    // Parse value and call appropriate DroneCAN set function
+    bool success = false;
+
+    switch (packet.param_type) {
+    case MAV_PARAM_EXT_TYPE_REAL32: {
+        float value = atof(param_value);
+        static AP_DroneCAN::ParamGetSetFloatCb float_cb(nullptr, dronecan_param_get_set_float_cb);
+        success = ap_dronecan->set_parameter_on_node(node_id, param_name, value, &float_cb);
+        break;
+    }
+    case MAV_PARAM_EXT_TYPE_INT32: {
+        int32_t value = atol(param_value);
+        static AP_DroneCAN::ParamGetSetIntCb int_cb(nullptr, dronecan_param_get_set_int_cb);
+        success = ap_dronecan->set_parameter_on_node(node_id, param_name, value, &int_cb);
+        break;
+    }
+    case MAV_PARAM_EXT_TYPE_CUSTOM: {
+        AP_DroneCAN::string value;
+        value.len = strlen(param_value);
+        if (value.len > sizeof(value.data)) {
+            value.len = sizeof(value.data);
+        }
+        memcpy(value.data, param_value, value.len);
+        static AP_DroneCAN::ParamGetSetStringCb string_cb(nullptr, dronecan_param_get_set_string_cb);
+        success = ap_dronecan->set_parameter_on_node(node_id, param_name, value, &string_cb);
+        break;
+    }
+    default:
+        // Unsupported parameter type
+        send_param_ext_ack(packet.param_id, param_value, packet.param_type, PARAM_ACK_VALUE_UNSUPPORTED, node_id);
+        return;
+    }
+
+    if (success) {
+        // Queue the request
+        if (!param_ext_requests.push(req)) {
+            // Queue full
+            send_param_ext_ack(packet.param_id, param_value, packet.param_type, PARAM_ACK_FAILED, node_id);
+        }
+    } else {
+        // DroneCAN call failed - probably busy
+        send_param_ext_ack(packet.param_id, param_value, packet.param_type, PARAM_ACK_FAILED, node_id);
+    }
+}
+
+void GCS_MAVLINK::send_param_ext_value(const char *param_name, const char *param_value,
+                                        uint8_t param_type, uint8_t node_id)
+{
+    mavlink_message_t msg;
+    mavlink_msg_param_ext_value_pack(
+        mavlink_system.sysid,
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
+        &msg,
+        param_name,
+        param_value,
+        param_type,
+        0,  // param_count - not used for DroneCAN parameters
+        0   // param_index - not used for DroneCAN parameters
+    );
+
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+    comm_send_buffer(chan, buf, len);
+}
+
+void GCS_MAVLINK::send_param_ext_ack(const char *param_name, const char *param_value,
+                                      uint8_t param_type, uint8_t param_result, uint8_t node_id)
+{
+    mavlink_message_t msg;
+    mavlink_msg_param_ext_ack_pack(
+        mavlink_system.sysid,
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
+        &msg,
+        param_name,
+        param_value,
+        param_type,
+        param_result
+    );
+
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+    comm_send_buffer(chan, buf, len);
+}
+
+void GCS_MAVLINK::send_param_ext_value_indexed(const char *param_name, const char *param_value,
+                                                uint8_t param_type, uint8_t node_id, uint16_t param_index)
+{
+    mavlink_message_t msg;
+    mavlink_msg_param_ext_value_pack(
+        mavlink_system.sysid,
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
+        &msg,
+        param_name,
+        param_value,
+        param_type,
+        0,  // param_count - set to 0 as we don't know total until enumeration completes
+        param_index
+    );
+
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+    comm_send_buffer(chan, buf, len);
+}
+
+#endif // HAL_ENABLE_DRONECAN_DRIVERS
+
 #endif  // HAL_GCS_ENABLED
