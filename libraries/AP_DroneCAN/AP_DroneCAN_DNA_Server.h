@@ -158,6 +158,9 @@ public:
     void handleNodeStatus(const CanardRxTransfer& transfer, const uavcan_protocol_NodeStatus& msg);
     void handleNodeInfo(const CanardRxTransfer& transfer, const uavcan_protocol_GetNodeInfoResponse& rsp);
 
+    // return true if the given node ID has been seen (received NodeStatus)
+    bool is_node_seen(uint8_t node_id) { return node_seen.get(node_id); }
+
     //Run through the list of seen node ids for verification
     void verify_nodes();
 };

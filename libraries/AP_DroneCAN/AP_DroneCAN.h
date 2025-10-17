@@ -101,6 +101,9 @@ public:
     
     uint8_t get_driver_index() const { return _driver_index; }
 
+    // accessor for DNA server (used by MAVLink PARAM_EXT)
+    AP_DroneCAN_DNA_Server& get_dna_server() { return _dna_server; }
+
     // define string with length structure
     struct string { uint8_t len; uint8_t data[128]; };
 
