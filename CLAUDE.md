@@ -58,18 +58,16 @@ Implement MAVLink PARAM_EXT protocol (messages 320-324) to enable GCS tools like
 
 These files are identical between master and esp32-build-refactor, so cherry-picking will be clean.
 
-**Component ID Mapping (1:1 with DroneCAN Node IDs):**
-- **Formula**: `Component ID = 25 + (node_id - 1)` using MAVLink USER range (25-99)
-- **Range**: Supports DroneCAN nodes 1-75 (maps to components 25-99)
-- **Examples**: Node 1 → Component 25, Node 42 → Component 66, Node 75 → Component 99
-- **Rationale**:
-  - USER range (25-99) is designated for "privately managed MAVLink networks" per MAVLink spec
-  - ArduPilot precedent: `SIM_Ship.cpp:207` uses `MAV_COMP_ID_USER10` for simulated peripherals
-  - Standards-compliant solution avoiding component ID collisions
+**Component ID Mapping (1:1 with DroneCAN Node IDs per MAVLink UAVCAN Spec):**
+- **Requirement**: Component ID MUST equal Node ID (1:1 mapping)
+- **Official Spec**: "Each unit that is capable of communicating via MAVLink and UAVCAN must use the same number for its MAVLink Component ID and the UAVCAN Node ID"
+- **Range**: Supports all DroneCAN nodes 1-127
+- **Examples**: Node 1 → Component 1, Node 42 → Component 42, Node 127 → Component 127
+- **Component ID Conflicts**: Some node IDs conflict with MAVLink system components (e.g., camera=100-105, servo=140-153), but this is acceptable per spec. You intentionally assign conflicting node IDs only when bridging that specific component type.
 - **References**:
-  - Analysis: `/home/bruce/ardupilot/docs/PARAM_EXT_component_id_analysis.md`
-  - Design document: `/home/bruce/ardupilot/docs/PARAM_EXT_design.md`
-  - MAVLink spec: https://mavlink.io/en/messages/common.html#MAV_COMPONENT
+  - **Official MAVLink UAVCAN spec**: https://mavlink.io/en/guide/uavcan_interaction.html
+  - Implementation: `libraries/GCS_MAVLink/GCS_Param.cpp` (PARAM_EXT handlers)
+  - Implementation: `libraries/AP_DroneCAN/AP_DroneCAN_DNA_Server.cpp` (UAVCAN messages 310/311)
 
 **MAVLink Messages and Commands:**
 
@@ -90,7 +88,7 @@ Note: UAVCAN messages are on esp32-build-refactor branch, not yet on param-ext-d
 
 **Implementation Components:**
 1. PARAM_EXT message handlers (5 new handlers: REQUEST_READ, REQUEST_LIST, VALUE, SET, ACK)
-2. Component ID to node ID mapping (reverse formula: `node_id = component_id - 24`)
+2. Component ID to node ID mapping (1:1 per MAVLink UAVCAN spec: `node_id = component_id`)
 3. DroneCAN parameter request queue (async operations with callback handlers)
 4. Parameter enumeration state machine (index-based discovery with EMPTY response detection)
 5. Protocol bridge (PARAM_EXT messages → AP_DroneCAN get/set parameter functions)

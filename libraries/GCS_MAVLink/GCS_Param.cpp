@@ -878,14 +878,15 @@ void GCS_MAVLINK::handle_param_ext_request_list(const mavlink_message_t &msg)
     mavlink_param_ext_request_list_t packet;
     mavlink_msg_param_ext_request_list_decode(&msg, &packet);
 
-    // Check if component ID is in USER range for DroneCAN nodes
-    if (packet.target_component < 25 || packet.target_component > 99) {
-        // Not a DroneCAN node request
+    // Check if component ID is valid DroneCAN node ID (1-127)
+    // Per MAVLink UAVCAN spec: component_id must equal node_id (1:1 mapping)
+    if (packet.target_component < 1 || packet.target_component > 127) {
+        // Not a valid DroneCAN node ID
         return;
     }
 
-    // Extract node ID from component ID
-    uint8_t node_id = packet.target_component - 24;  // Component 25 → node 1
+    // Use component ID directly as node ID (1:1 per MAVLink UAVCAN spec)
+    uint8_t node_id = packet.target_component;
 
     // Find which CAN interface has this node
     AP_DroneCAN *ap_dronecan = nullptr;
@@ -915,14 +916,15 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
     mavlink_param_ext_request_read_t packet;
     mavlink_msg_param_ext_request_read_decode(&msg, &packet);
 
-    // Check if component ID is in USER range for DroneCAN nodes
-    if (packet.target_component < 25 || packet.target_component > 99) {
-        // Not a DroneCAN node request
+    // Check if component ID is valid DroneCAN node ID (1-127)
+    // Per MAVLink UAVCAN spec: component_id must equal node_id (1:1 mapping)
+    if (packet.target_component < 1 || packet.target_component > 127) {
+        // Not a valid DroneCAN node ID
         return;
     }
 
-    // Extract node ID from component ID
-    uint8_t node_id = packet.target_component - 24;  // Component 25 → node 1
+    // Use component ID directly as node ID (1:1 per MAVLink UAVCAN spec)
+    uint8_t node_id = packet.target_component;
 
     // Find which CAN interface has this node
     AP_DroneCAN *ap_dronecan = nullptr;
@@ -991,14 +993,15 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
     mavlink_param_ext_set_t packet;
     mavlink_msg_param_ext_set_decode(&msg, &packet);
 
-    // Check if component ID is in USER range for DroneCAN nodes
-    if (packet.target_component < 25 || packet.target_component > 99) {
-        // Not a DroneCAN node request
+    // Check if component ID is valid DroneCAN node ID (1-127)
+    // Per MAVLink UAVCAN spec: component_id must equal node_id (1:1 mapping)
+    if (packet.target_component < 1 || packet.target_component > 127) {
+        // Not a valid DroneCAN node ID
         return;
     }
 
-    // Extract node ID from component ID
-    uint8_t node_id = packet.target_component - 24;  // Component 25 → node 1
+    // Use component ID directly as node ID (1:1 per MAVLink UAVCAN spec)
+    uint8_t node_id = packet.target_component;
 
     // Find which CAN interface has this node
     AP_DroneCAN *ap_dronecan = nullptr;
@@ -1094,7 +1097,7 @@ void GCS_MAVLINK::send_param_ext_value(const char *param_name, const char *param
     mavlink_message_t msg;
     mavlink_msg_param_ext_value_pack(
         mavlink_system.sysid,
-        25 + (node_id - 1),  // Source component = node's component ID
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
         &msg,
         param_name,
         param_value,
@@ -1114,7 +1117,7 @@ void GCS_MAVLINK::send_param_ext_ack(const char *param_name, const char *param_v
     mavlink_message_t msg;
     mavlink_msg_param_ext_ack_pack(
         mavlink_system.sysid,
-        25 + (node_id - 1),  // Source component = node's component ID
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
         &msg,
         param_name,
         param_value,
@@ -1133,7 +1136,7 @@ void GCS_MAVLINK::send_param_ext_value_indexed(const char *param_name, const cha
     mavlink_message_t msg;
     mavlink_msg_param_ext_value_pack(
         mavlink_system.sysid,
-        25 + (node_id - 1),  // Source component = node's component ID
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
         &msg,
         param_name,
         param_value,
