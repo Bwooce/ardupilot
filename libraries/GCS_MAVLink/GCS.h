@@ -499,6 +499,50 @@ public:
     uint16_t get_stream_slowdown_ms() const { return stream_slowdown_ms; }
 
     MAV_RESULT set_message_interval(uint32_t msg_id, int32_t interval_us);
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    // PARAM_EXT support for DroneCAN parameter access via USER range (25-99)
+    // Component ID = 25 + (node_id - 1), supports nodes 1-75
+    struct pending_param_ext_request {
+        mavlink_channel_t chan;
+        uint8_t can_driver_index;  // 0-based index (0-8 for CAN1-CAN9)
+        uint8_t node_id;           // DroneCAN node ID (1-127)
+        char param_name[17];       // DroneCAN param name (max 16 chars + null)
+        uint8_t param_type;        // MAV_PARAM_EXT_TYPE
+        char param_value[128];     // Extended parameter value buffer
+        bool is_set;               // true=set, false=get
+        uint32_t request_time_ms;  // For timeout handling
+    };
+
+    // queue of pending PARAM_EXT requests for DroneCAN nodes
+    static ObjectBuffer<pending_param_ext_request> param_ext_requests;
+
+    // parameter enumeration state for PARAM_EXT_REQUEST_LIST
+    struct param_enumeration_state {
+        bool active;                // enumeration in progress
+        mavlink_channel_t chan;     // requesting channel
+        uint8_t can_driver_index;   // CAN driver index
+        uint8_t node_id;            // node being enumerated
+        uint16_t current_index;     // current parameter index
+        uint32_t start_time_ms;     // when enumeration started
+        uint16_t param_count;       // total parameters discovered
+        uint8_t tried_types;        // bitmask of callback types tried for current_index (bit 0=int, 1=float, 2=string)
+    };
+    static struct param_enumeration_state param_enum_state;
+
+    // PARAM_EXT send functions (must be public for static callbacks)
+    // node_id is used to set correct source component ID (25 + node_id - 1)
+    void send_param_ext_value(const char *param_name, const char *param_value,
+                              uint8_t param_type, uint8_t node_id);
+    void send_param_ext_value_indexed(const char *param_name, const char *param_value,
+                                      uint8_t param_type, uint8_t node_id, uint16_t param_index);
+    void send_param_ext_ack(const char *param_name, const char *param_value,
+                            uint8_t param_type, uint8_t param_result, uint8_t node_id);
+
+    // start parameter enumeration for a DroneCAN node
+    void start_param_enumeration(mavlink_channel_t mavlink_chan, uint8_t can_driver_index, uint8_t node_id);
+    // continue parameter enumeration (called from loop)
+    void continue_param_enumeration();
+#endif // HAL_ENABLE_DRONECAN_DRIVERS
 
 protected:
 
@@ -1003,6 +1047,13 @@ private:
     void send_param_error(const mavlink_message_t &msg, const mavlink_param_set_t &param_set, MAV_PARAM_ERROR error);
     void send_param_error(const pending_param_reply &msg, MAV_PARAM_ERROR error);
     uint8_t send_parameter_async_replies();
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    // PARAM_EXT message handlers
+    void handle_param_ext_request_read(const mavlink_message_t &msg);
+    void handle_param_ext_request_list(const mavlink_message_t &msg);
+    void handle_param_ext_set(const mavlink_message_t &msg);
+    void handle_common_param_ext_message(const mavlink_message_t &msg);
+#endif // HAL_ENABLE_DRONECAN_DRIVERS
 
     void send_distance_sensor(const class AP_RangeFinder_Backend *sensor, const uint8_t instance) const;
 
