@@ -92,7 +92,7 @@ int apfs_fprintf(APFS_FILE *stream, const char *fmt, ...)
     va_start(va, fmt);
     len = vasprintf(&buf, fmt, va);
     va_end(va);
-    if (len > 0) {
+    if (len > 0 && buf) {
         len = AP::FS().write(stream->fd, buf, len);
         free(buf);
     }

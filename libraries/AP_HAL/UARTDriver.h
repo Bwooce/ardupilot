@@ -48,6 +48,48 @@ public:
     size_t write(uint8_t c) override;
     size_t write(const uint8_t *buffer, size_t size) override;
     size_t write(const char *str) override;
+    
+    /*
+      atomic packet write - prevents interleaving with other writes
+      default implementation falls back to regular write()
+     */
+    virtual size_t write_packet(const uint8_t *buffer, size_t size) {
+        return write(buffer, size);
+    }
+    
+    /*
+      read with expected packet size - waits for complete packets when possible
+      default implementation falls back to regular read()
+     */
+    virtual ssize_t read_packet(uint8_t *buffer, uint16_t count, uint16_t expected_size = 0) {
+        (void)expected_size;  // unused in default implementation
+        return read(buffer, count);
+    }
+    
+    /*
+      begin atomic packet read session - locks until end_packet_read()
+      returns true if expected_size bytes are available immediately
+      timeout_ms: maximum time to wait for complete packet (0 = no timeout)
+     */
+    virtual bool begin_packet_read(uint16_t expected_size, uint32_t timeout_ms = 1000) {
+        (void)expected_size;  // unused in default implementation
+        (void)timeout_ms;     // unused in default implementation
+        return true;  // Always allow in default implementation
+    }
+    
+    /*
+      end atomic packet read session - releases packet read lock
+     */
+    virtual void end_packet_read() {
+        // No-op in default implementation
+    }
+    
+    /*
+      check if currently in packet read session
+     */
+    virtual bool in_packet_read_session() const {
+        return false;  // Default implementation
+    }
 
     /*
       single and multi-byte read methods

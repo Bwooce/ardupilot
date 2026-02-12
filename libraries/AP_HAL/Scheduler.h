@@ -93,6 +93,13 @@ public:
      */
     virtual void restore_interrupts(void *) {}
 
+    /*
+      Pat the watchdog timer for the current thread.
+      This should be called periodically by long-running threads.
+      Default implementation does nothing for platforms without watchdog.
+     */
+    virtual void watchdog_pat() {}
+
     // called by subclasses when they need to delay for some time
     virtual void call_delay_cb();
     uint16_t _min_delay_cb_ms;
