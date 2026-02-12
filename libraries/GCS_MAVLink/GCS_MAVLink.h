@@ -49,6 +49,20 @@ typedef uint32_t mavlink_channel_mask_t;
 
 #include "include/mavlink/v2.0/mavlink_types.h"
 
+// ESP32 workaround: MAVLink uses char buffers for message construction when
+// MAVLINK_ALIGNED_FIELDS is 0, but these need proper alignment for float/int access
+// We'll handle this per-message for now until MAVLink library is updated
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+// Define aligned buffer macro for ESP32 to ensure proper alignment
+// Use char type to match MAVLink's expectations
+#define MAVLINK_ALIGNED_BUF(name, size) \
+    char name[size] __attribute__((aligned(4))) = {0}
+#else
+// For other platforms, no special alignment needed
+#define MAVLINK_ALIGNED_BUF(name, size) char name[size] = {0}
+#endif
+
 /// MAVLink streams used for each telemetry port
 extern AP_HAL::UARTDriver	*mavlink_comm_port[MAVLINK_COMM_NUM_BUFFERS];
 extern bool gcs_alternative_active[MAVLINK_COMM_NUM_BUFFERS];
@@ -84,6 +98,18 @@ uint16_t comm_get_txspace(mavlink_channel_t chan);
 #endif  // clang
 #include "include/mavlink/v2.0/all/mavlink.h"
 #pragma GCC diagnostic pop
+
+// ESP32 fix: Override message IDs with explicit casts after MAVLink headers
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include "include/esp32_msgid_fix.h"
+#endif
+
+// Verify ESP32 MAVLink override was applied
+#ifdef ESP32_MAVLINK_OVERRIDE_APPLIED
+#if MAVLINK_ALIGNED_FIELDS != 0
+#pragma message("ESP32: MAVLink override FAILED - still using unsafe packing!")
+#endif
+#endif
 
 // lock and unlock a channel, for multi-threaded mavlink send
 void comm_send_lock(mavlink_channel_t chan, uint16_t size);

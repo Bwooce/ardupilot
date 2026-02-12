@@ -500,6 +500,49 @@ public:
 
     MAV_RESULT set_message_interval(uint32_t msg_id, int32_t interval_us);
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    // PARAM_EXT support for DroneCAN parameter access via USER range (25-99)
+    // Component ID = 25 + (node_id - 1), supports nodes 1-75
+    struct pending_param_ext_request {
+        mavlink_channel_t chan;
+        uint8_t can_driver_index;  // 0-based index (0-8 for CAN1-CAN9)
+        uint8_t node_id;           // DroneCAN node ID (1-127)
+        char param_name[17];       // DroneCAN param name (max 16 chars + null)
+        uint8_t param_type;        // MAV_PARAM_EXT_TYPE
+        char param_value[128];     // Extended parameter value buffer
+        bool is_set;               // true=set, false=get
+        uint32_t request_time_ms;  // For timeout handling
+    };
+
+    // queue of pending PARAM_EXT requests for DroneCAN nodes
+    static ObjectBuffer<pending_param_ext_request> param_ext_requests;
+
+    // parameter enumeration state for PARAM_EXT_REQUEST_LIST
+    struct param_enumeration_state {
+        bool active;                // enumeration in progress
+        mavlink_channel_t chan;     // requesting channel
+        uint8_t can_driver_index;   // CAN driver index
+        uint8_t node_id;            // node being enumerated
+        uint16_t current_index;     // current parameter index
+        uint32_t start_time_ms;     // when enumeration started
+        uint16_t param_count;       // total parameters discovered
+        uint8_t tried_types;        // bitmask of callback types tried for current_index (bit 0=int, 1=float, 2=string)
+    };
+    static struct param_enumeration_state param_enum_state;
+
+    // PARAM_EXT send functions (must be public for static callbacks)
+    // node_id is used to set correct source component ID (25 + node_id - 1)
+    void send_param_ext_value(const char *param_name, const char *param_value,
+                              uint8_t param_type, uint8_t node_id);
+    void send_param_ext_ack(const char *param_name, const char *param_value,
+                            uint8_t param_type, uint8_t param_result, uint8_t node_id);
+
+    // start parameter enumeration for a DroneCAN node
+    void start_param_enumeration(mavlink_channel_t chan, uint8_t can_driver_index, uint8_t node_id);
+    // continue parameter enumeration (called from loop)
+    void continue_param_enumeration();
+#endif // HAL_ENABLE_DRONECAN_DRIVERS
+
 protected:
 
     bool mavlink_coordinate_frame_to_location_alt_frame(MAV_FRAME coordinate_frame,
@@ -805,6 +848,8 @@ protected:
 private:
 
     // define the two objects used for parsing incoming messages:
+    // These structures must match the wire format exactly - no padding allowed
+    // Use MAVLINK_ALIGNED_FIELDS macro if alignment is needed
     mavlink_message_t _channel_buffer;
     mavlink_status_t _channel_status;
 
@@ -1003,6 +1048,94 @@ private:
     void send_param_error(const mavlink_message_t &msg, const mavlink_param_set_t &param_set, MAV_PARAM_ERROR error);
     void send_param_error(const pending_param_reply &msg, MAV_PARAM_ERROR error);
     uint8_t send_parameter_async_replies();
+
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    // PARAM_EXT message handlers
+    void handle_param_ext_request_read(const mavlink_message_t &msg);
+    void handle_param_ext_request_list(const mavlink_message_t &msg);
+    void handle_param_ext_set(const mavlink_message_t &msg);
+    void handle_common_param_ext_message(const mavlink_message_t &msg);
+#endif // HAL_ENABLE_DRONECAN_DRIVERS
+
+#if AP_MAVLINK_FTP_ENABLED
+    enum class FTP_OP : uint8_t {
+        None = 0,
+        TerminateSession = 1,
+        ResetSessions = 2,
+        ListDirectory = 3,
+        OpenFileRO = 4,
+        ReadFile = 5,
+        CreateFile = 6,
+        WriteFile = 7,
+        RemoveFile = 8,
+        CreateDirectory = 9,
+        RemoveDirectory = 10,
+        OpenFileWO = 11,
+        TruncateFile = 12,
+        Rename = 13,
+        CalcFileCRC32 = 14,
+        BurstReadFile = 15,
+        Ack = 128,
+        Nack = 129,
+    };
+
+    enum class FTP_ERROR : uint8_t {
+        None = 0,
+        Fail = 1,
+        FailErrno = 2,
+        InvalidDataSize = 3,
+        InvalidSession = 4,
+        NoSessionsAvailable = 5,
+        EndOfFile = 6,
+        UnknownCommand = 7,
+        FileExists = 8,
+        FileProtected = 9,
+        FileNotFound = 10,
+    };
+
+    struct pending_ftp {
+        uint32_t offset;
+        mavlink_channel_t chan;        
+        uint16_t seq_number;
+        FTP_OP opcode;
+        FTP_OP req_opcode;
+        bool  burst_complete;
+        uint8_t size;
+        uint8_t session;
+        uint8_t sysid;
+        uint8_t compid;
+        uint8_t data[239];
+    };
+
+    enum class FTP_FILE_MODE {
+        Read,
+        Write,
+        OTA_Write,    // ESP32 firmware update routing (ArduPilot-internal, not MAVLink)
+    };
+
+    struct ftp_state {
+        ObjectBuffer<pending_ftp> *requests;
+
+        // session specific info, currently only support a single session over all links
+        int fd = -1;
+        FTP_FILE_MODE mode; // work around AP_Filesystem not supporting file modes
+        int16_t current_session;
+        uint32_t last_send_ms;
+        uint8_t need_banner_send_mask;
+    };
+    static struct ftp_state ftp;
+
+    static void ftp_error(struct pending_ftp &response, FTP_ERROR error); // FTP helper method for packing a NAK
+    static bool ftp_check_name_len(const struct pending_ftp &request);
+    static int gen_dir_entry(char *dest, size_t space, const char * path, const struct dirent * entry); // FTP helper for emitting a dir response
+    static void ftp_list_dir(struct pending_ftp &request, struct pending_ftp &response);
+
+    bool ftp_init(void);
+    void handle_file_transfer_protocol(const mavlink_message_t &msg);
+    bool send_ftp_reply(const pending_ftp &reply);
+    void ftp_worker(void);
+    void ftp_push_replies(pending_ftp &reply);
+#endif  // AP_MAVLINK_FTP_ENABLED
 
     void send_distance_sensor(const class AP_RangeFinder_Backend *sensor, const uint8_t instance) const;
 

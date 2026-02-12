@@ -27,6 +27,11 @@
 #include <AP_AdvancedFailsafe/AP_AdvancedFailsafe.h>
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_HAL/AP_HAL.h>
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include "esp_debug_helpers.h"
+#include "esp_log.h"
+#endif
 #include <AP_Arming/AP_Arming.h>
 #include <AP_InternalError/AP_InternalError.h>
 #include <AP_Logger/AP_Logger.h>
@@ -48,6 +53,9 @@
 #include <AP_Mount/AP_Mount.h>
 #include <AP_Common/AP_FWVersion.h>
 #include <AP_VisualOdom/AP_VisualOdom.h>
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include <AP_HAL_ESP32/Util.h>
+#endif
 #include <AP_Baro/AP_Baro.h>
 #include <AP_EFI/AP_EFI.h>
 #include <AP_Proximity/AP_Proximity.h>
@@ -245,9 +253,18 @@ bool GCS_MAVLINK::init(uint8_t instance)
 
 void GCS_MAVLINK::send_meminfo(void)
 {
-    unsigned __brkval = 0;
     uint32_t memory = hal.util->available_memory();
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32-specific: Report heap used size instead of meaningless __brkval
+    ESP32::Util* esp32_util = ESP32::Util::from(hal.util);
+    uint16_t heap_used = MIN(esp32_util->get_heap_used_size(), 0xFFFFU);
+    mavlink_msg_meminfo_send(chan, heap_used, MIN(memory, 0xFFFFU), memory);
+#else
+    // Traditional platforms: Use __brkval for heap top
+    unsigned __brkval = 0;
     mavlink_msg_meminfo_send(chan, __brkval, MIN(memory, 0xFFFFU), memory);
+#endif
 }
 
 // report power supply status
@@ -257,10 +274,23 @@ void GCS_MAVLINK::send_power_status(void)
         // avoid unnecessary errors being reported to user
         return;
     }
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 workaround: use manual buffer to avoid MAVPACKED alignment issues
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MSG_ID_POWER_STATUS_LEN);
+    uint16_t vcc = hal.analogin->board_voltage() * 1000;
+    uint16_t vservo = hal.analogin->servorail_voltage() * 1000;
+    uint16_t flags = hal.analogin->power_status_flags();
+    _mav_put_uint16_t(buf, 0, vcc);
+    _mav_put_uint16_t(buf, 2, vservo);
+    _mav_put_uint16_t(buf, 4, flags);
+    _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_POWER_STATUS, buf, 
+                                   MAVLINK_MSG_ID_POWER_STATUS_MIN_LEN, MAVLINK_MSG_ID_POWER_STATUS_LEN, MAVLINK_MSG_ID_POWER_STATUS_CRC);
+#else
     mavlink_msg_power_status_send(chan,
                                   hal.analogin->board_voltage() * 1000,
                                   hal.analogin->servorail_voltage() * 1000,
                                   hal.analogin->power_status_flags());
+#endif
 }
 
 #if AP_SCHEDULER_ENABLED
@@ -622,6 +652,24 @@ void GCS_MAVLINK::send_ahrs2()
     // we want one or both of these, use | to avoid short-circuiting:
     if (uint8_t(ahrs.get_secondary_attitude(euler)) |
         uint8_t(ahrs.get_secondary_position(loc))) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // ESP32 workaround: use manual buffer to avoid MAVPACKED alignment issues
+        MAVLINK_ALIGNED_BUF(buf, MAVLINK_MSG_ID_AHRS2_LEN);
+        float roll = euler.x;
+        float pitch = euler.y;
+        float yaw = euler.z;
+        float altitude = loc.alt*1.0e-2f;
+        int32_t lat = loc.lat;
+        int32_t lng = loc.lng;
+        _mav_put_float(buf, 0, roll);
+        _mav_put_float(buf, 4, pitch);
+        _mav_put_float(buf, 8, yaw);
+        _mav_put_float(buf, 12, altitude);
+        _mav_put_int32_t(buf, 16, lat);
+        _mav_put_int32_t(buf, 20, lng);
+        _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_AHRS2, buf, 
+                                       MAVLINK_MSG_ID_AHRS2_MIN_LEN, MAVLINK_MSG_ID_AHRS2_LEN, MAVLINK_MSG_ID_AHRS2_CRC);
+#else
         mavlink_msg_ahrs2_send(chan,
                                euler.x,
                                euler.y,
@@ -629,6 +677,7 @@ void GCS_MAVLINK::send_ahrs2()
                                loc.alt*1.0e-2f,
                                loc.lat,
                                loc.lng);
+#endif
     }
 }
 #endif  // AP_AHRS_ENABLED
@@ -1446,15 +1495,21 @@ bool GCS_MAVLINK_InProgress::send_ack(MAV_RESULT result)
         return false;
     }
 
-    mavlink_msg_command_ack_send(
-        chan,
+    mavlink_message_t ack_msg;
+    mavlink_msg_command_ack_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &ack_msg,
         mav_cmd,
         result,
-        0,
-        0,
+        0,  // progress
+        0,  // result_param2
         requesting_sysid,
         requesting_compid
-        );
+    );
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
 
     return true;
 }
@@ -1565,6 +1620,17 @@ void GCS_MAVLINK_InProgress::check_tasks()
 
 void GCS_MAVLINK::update_send()
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Per-channel counters (not static, so each channel has its own)
+    static uint32_t update_count[MAVLINK_COMM_NUM_BUFFERS] = {};
+    static uint32_t last_debug_ms[MAVLINK_COMM_NUM_BUFFERS] = {};
+    static uint32_t messages_sent[MAVLINK_COMM_NUM_BUFFERS] = {};
+    static uint32_t out_of_time_count[MAVLINK_COMM_NUM_BUFFERS] = {};
+    static uint32_t deferred_sent[MAVLINK_COMM_NUM_BUFFERS] = {};
+    static uint32_t bucket_sent[MAVLINK_COMM_NUM_BUFFERS] = {};
+    update_count[chan]++;
+#endif
+
 #if HAL_LOGGING_ENABLED
     if (!hal.scheduler->in_delay_callback()) {
         // AP_Logger will not send log data if we are armed.
@@ -1586,12 +1652,22 @@ void GCS_MAVLINK::update_send()
     // check for any in-progress tasks; check_tasks does its own rate-limiting
     GCS_MAVLINK_InProgress::check_tasks();
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    // Continue any active PARAM_EXT enumeration for DroneCAN nodes
+    // This must be called unconditionally (not tied to stream rates) because
+    // PARAM_EXT enumeration is initiated by explicit GCS requests
+    continue_param_enumeration();
+#endif
+
     const uint32_t start = AP_HAL::millis();
     const uint16_t start16 = start & 0xFFFF;
     while (AP_HAL::millis() - start < 5) { // spend a max of 5ms sending messages.  This should never trigger - out_of_time() should become true
         if (gcs().out_of_time()) {
 #if GCS_DEBUG_SEND_MESSAGE_TIMINGS
             try_send_message_stats.out_of_time++;
+#endif
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            out_of_time_count[chan]++;
 #endif
             break;
         }
@@ -1607,6 +1683,10 @@ void GCS_MAVLINK::update_send()
                 if (!do_try_send_message(deferred_message[next].id)) {
                     break;
                 }
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+                deferred_sent[chan]++;
+                messages_sent[chan]++;
+#endif
                 // we try to keep output on a regular clock to avoid
                 // user support questions:
                 const uint16_t interval_ms = deferred_message[next].interval_ms;
@@ -1637,6 +1717,9 @@ void GCS_MAVLINK::update_send()
                 break;
             }
             pushed_ap_message_ids.clear(next);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            messages_sent[chan]++;
+#endif
 #if GCS_DEBUG_SEND_MESSAGE_TIMINGS
             const uint32_t stop = AP_HAL::micros();
             const uint32_t delta = stop - retry_deferred_body_start;
@@ -1654,6 +1737,10 @@ void GCS_MAVLINK::update_send()
                 break;
             }
             bucket_message_ids_to_send.clear(next);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            bucket_sent[chan]++;
+            messages_sent[chan]++;
+#endif
             if (bucket_message_ids_to_send.count() == 0) {
                 // we sent everything in the bucket.  Reschedule it.
                 // we try to keep output on a regular clock to avoid
@@ -1692,6 +1779,69 @@ void GCS_MAVLINK::update_send()
     // between the last pass through here
     send_packet_count += uint8_t(_channel_status.current_tx_seq - last_tx_seq);
     last_tx_seq = _channel_status.current_tx_seq;
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Track MAVLink sending performance with actual per-interval stats
+    uint32_t now_ms = AP_HAL::millis();
+    uint32_t interval_ms = now_ms - last_debug_ms[chan];
+    if (interval_ms >= 5000) {  // Report every 5 seconds
+        // Variables only used in commented debug code below
+        // uint32_t tx_space = txspace();
+        // uint16_t pending = pushed_ap_message_ids.count() + bucket_message_ids_to_send.count();
+        
+        // Show actual counts for this interval
+        // Variables only used in commented debug code below
+        // float interval_sec = interval_ms * 0.001f;
+        // float msg_rate = messages_sent[chan] / interval_sec;
+
+        // Calculate oldest message age in queue - commented out with debug output
+        /*
+        uint32_t oldest_msg_age_ms = 0;
+        uint32_t overdue_count = 0;
+        for (uint8_t i=0; i<ARRAY_SIZE(deferred_message); i++) {
+            if (deferred_message[i].interval_ms > 0) {
+                uint16_t age = uint16_t(now_ms - deferred_message[i].last_sent_ms);
+                if (age > deferred_message[i].interval_ms) {
+                    overdue_count++;
+                    if (age > oldest_msg_age_ms) {
+                        oldest_msg_age_ms = age;
+                    }
+                }
+            }
+        }
+
+        // Add more diagnostic info
+        static uint32_t report_count[MAVLINK_COMM_NUM_BUFFERS] = {};
+        report_count[chan]++;
+        */
+        
+        // Debug stats disabled - too verbose for normal operation
+        // Uncomment for debugging MAVLink performance issues
+        /*
+        ESP_LOGI("MAVLINK", "Ch%d #%lu [%.3fs] upd=%lu: sent=%lu (%.1f/s) def=%lu buck=%lu timeout=%lu | tx=%lu pend=%u overdue=%lu oldest=%lums",
+                 chan, (unsigned long)report_count[chan], interval_sec,
+                 (unsigned long)update_count[chan], (unsigned long)messages_sent[chan], msg_rate,
+                 (unsigned long)deferred_sent[chan], (unsigned long)bucket_sent[chan],
+                 (unsigned long)out_of_time_count[chan], (unsigned long)tx_space, pending,
+                 (unsigned long)overdue_count, (unsigned long)oldest_msg_age_ms);
+
+        // Also show cumulative totals to verify counting
+        static uint32_t total_messages[MAVLINK_COMM_NUM_BUFFERS] = {};
+        total_messages[chan] += messages_sent[chan];
+        ESP_LOGI("MAVLINK", "  Ch%d totals: msgs=%lu updates=%lu (actual_ms=%lu)",
+                 chan, (unsigned long)total_messages[chan],
+                 (unsigned long)update_count[chan], (unsigned long)interval_ms);
+        */
+        
+        // Reset counters for next period
+        update_count[chan] = 0;
+        messages_sent[chan] = 0;
+        deferred_sent[chan] = 0;
+        bucket_sent[chan] = 0;
+        out_of_time_count[chan] = 0;
+        last_debug_ms[chan] = now_ms;
+    }
+#endif
 }
 
 void GCS_MAVLINK::remove_message_from_bucket(int8_t bucket, ap_message id)
@@ -2508,6 +2658,26 @@ void GCS_MAVLINK::send_ahrs()
 {
     const AP_AHRS &ahrs = AP::ahrs();
     const Vector3f &omega_I = ahrs.get_gyro_drift();
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 workaround: use manual buffer to avoid MAVPACKED alignment issues
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MSG_ID_AHRS_LEN);
+    float omega_x = omega_I.x;
+    float omega_y = omega_I.y;
+    float omega_z = omega_I.z;
+    float accel_weight = 0.0f;
+    float renorm_val = 0.0f;
+    float error_rp = ahrs.get_error_rp();
+    float error_yaw = ahrs.get_error_yaw();
+    _mav_put_float(buf, 0, omega_x);
+    _mav_put_float(buf, 4, omega_y);
+    _mav_put_float(buf, 8, omega_z);
+    _mav_put_float(buf, 12, accel_weight);
+    _mav_put_float(buf, 16, renorm_val);
+    _mav_put_float(buf, 20, error_rp);
+    _mav_put_float(buf, 24, error_yaw);
+    _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_AHRS, buf, MAVLINK_MSG_ID_AHRS_MIN_LEN, MAVLINK_MSG_ID_AHRS_LEN, MAVLINK_MSG_ID_AHRS_CRC);
+#else
     mavlink_msg_ahrs_send(
         chan,
         omega_I.x,
@@ -2517,6 +2687,7 @@ void GCS_MAVLINK::send_ahrs()
         0,
         ahrs.get_error_rp(),
         ahrs.get_error_yaw());
+#endif
 }
 #endif  // AP_AHRS_ENABLED
 
@@ -3072,6 +3243,26 @@ void GCS_MAVLINK::send_vibration() const
 
     Vector3f vibration = ins.get_vibration_levels();
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 workaround: use aligned buffer to avoid stack corruption
+    // Use char array to match MAVLink macro expectations
+    char buf[MAVLINK_MSG_ID_VIBRATION_LEN] __attribute__((aligned(16))) = {0};
+    uint64_t time_us = AP_HAL::micros64();
+    float vib_x = vibration.x;
+    float vib_y = vibration.y;
+    float vib_z = vibration.z;
+    uint32_t clip_0 = ins.get_accel_clip_count(0);
+    uint32_t clip_1 = ins.get_accel_clip_count(1);
+    uint32_t clip_2 = ins.get_accel_clip_count(2);
+    _mav_put_uint64_t(buf, 0, time_us);
+    _mav_put_float(buf, 8, vib_x);
+    _mav_put_float(buf, 12, vib_y);
+    _mav_put_float(buf, 16, vib_z);
+    _mav_put_uint32_t(buf, 20, clip_0);
+    _mav_put_uint32_t(buf, 24, clip_1);
+    _mav_put_uint32_t(buf, 28, clip_2);
+    _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_VIBRATION, buf, MAVLINK_MSG_ID_VIBRATION_MIN_LEN, MAVLINK_MSG_ID_VIBRATION_LEN, MAVLINK_MSG_ID_VIBRATION_CRC);
+#else
     mavlink_msg_vibration_send(
         chan,
         AP_HAL::micros64(),
@@ -3081,6 +3272,7 @@ void GCS_MAVLINK::send_vibration() const
         ins.get_accel_clip_count(0),
         ins.get_accel_clip_count(1),
         ins.get_accel_clip_count(2));
+#endif
 #endif
 }
 
@@ -3659,10 +3851,21 @@ MAV_RESULT GCS_MAVLINK::handle_preflight_reboot(const mavlink_command_int_t &pac
 #endif
 
     // send ack before we reboot
-    mavlink_msg_command_ack_send(chan, packet.command, MAV_RESULT_ACCEPTED,
-                                 0, 0,
-                                 msg.sysid,
-                                 msg.compid);
+    mavlink_message_t ack_msg;
+    mavlink_msg_command_ack_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &ack_msg,
+        packet.command,
+        MAV_RESULT_ACCEPTED,
+        0,  // progress
+        0,  // result_param2
+        msg.sysid,
+        msg.compid
+    );
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
 
     // when packet.param1 == 3 we reboot to hold in bootloader
     const bool hold_in_bootloader = is_equal(packet.param1, 3.0f);
@@ -4013,7 +4216,11 @@ void GCS_MAVLINK::handle_vision_position_estimate(const mavlink_message_t &msg)
     mavlink_vision_position_estimate_t m;
     mavlink_msg_vision_position_estimate_decode(&msg, &m);
 
-    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, m.covariance, m.reset_counter,
+    // Use local array to avoid packed member address issue
+    float covariance_local[21];
+    memcpy(covariance_local, m.covariance, sizeof(covariance_local));
+    
+    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, covariance_local, m.reset_counter,
                                                 PAYLOAD_SIZE(chan, VISION_POSITION_ESTIMATE));
 }
 
@@ -4022,7 +4229,11 @@ void GCS_MAVLINK::handle_global_vision_position_estimate(const mavlink_message_t
     mavlink_global_vision_position_estimate_t m;
     mavlink_msg_global_vision_position_estimate_decode(&msg, &m);
 
-    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, m.covariance, m.reset_counter,
+    // Use local array to avoid packed member address issue
+    float covariance_local[21];
+    memcpy(covariance_local, m.covariance, sizeof(covariance_local));
+
+    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, covariance_local, m.reset_counter,
                                                 PAYLOAD_SIZE(chan, GLOBAL_VISION_POSITION_ESTIMATE));
 }
 
@@ -4031,8 +4242,12 @@ void GCS_MAVLINK::handle_vicon_position_estimate(const mavlink_message_t &msg)
     mavlink_vicon_position_estimate_t m;
     mavlink_msg_vicon_position_estimate_decode(&msg, &m);
 
+    // Use local array to avoid packed member address issue
+    float covariance_local[21];
+    memcpy(covariance_local, m.covariance, sizeof(covariance_local));
+
     // vicon position estimate does not include reset counter
-    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, m.covariance, 0,
+    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, covariance_local, 0,
                                                 PAYLOAD_SIZE(chan, VICON_POSITION_ESTIMATE));
 }
 
@@ -4340,7 +4555,91 @@ void GCS_MAVLINK::handle_heartbeat(const mavlink_message_t &msg)
  */
 void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32: Access msgid directly - bitfield is 24 bits
+    // Note: msg.msgid is a 24-bit bitfield, which can cause alignment issues on ESP32
+    uint32_t msgid = msg.msgid;
+    
+    // Validate incoming MAVLink message for corruption
+    if (msgid > 300000) { // Check for obviously invalid message IDs
+        static bool first_rx_corruption = true;
+        
+        // Use both ESP-IDF logging AND hal.console to ensure visibility
+        ESP_LOGE("MAVLINK_RX", "=== CORRUPTED INCOMING MAVLink MESSAGE ===");
+        ESP_LOGE("MAVLINK_RX", "Channel: %d, Message ID: %lu, sysid: %d, compid: %d", 
+                 chan, (unsigned long)msgid, msg.sysid, msg.compid);
+        ESP_LOGE("MAVLINK_RX", "Payload length: %d", msg.len);
+        
+        hal.console->printf("\n=== ESP32: CORRUPTED INCOMING MAVLink MESSAGE ===\n");
+        hal.console->printf("Channel: %d, Message ID: %lu, sysid: %d, compid: %d\n", 
+                           chan, (unsigned long)msgid, msg.sysid, msg.compid);
+        hal.console->printf("Payload length: %d\n", msg.len);
+        
+        if (first_rx_corruption) {
+            ESP_LOGE("MAVLINK_RX", "Call stack trace (first RX corruption only):");
+            hal.console->printf("Call stack trace (first RX corruption only):\n");
+            first_rx_corruption = false;
+            esp_backtrace_print(20);
+        }
+        
+        // Don't process corrupted messages - just return
+        return;
+    }
+    
+    // Debug: Log message IDs for received messages
+    static uint32_t rx_msg_count = 0;
+    static uint32_t last_param_msg_time = 0;
+    rx_msg_count++;
+
+    // Always log parameter messages with timing
+    if (msgid == MAVLINK_MSG_ID_PARAM_SET ||
+        msgid == MAVLINK_MSG_ID_PARAM_REQUEST_READ ||
+        msgid == MAVLINK_MSG_ID_PARAM_REQUEST_LIST) {
+        uint32_t now = AP_HAL::millis();
+        uint32_t dt = now - last_param_msg_time;
+        last_param_msg_time = now;
+        hal.console->printf("ESP32 RX PARAM MSG: msgid=%lu at t=%lu (dt=%lu ms)\n",
+                           (unsigned long)msgid, (unsigned long)now, (unsigned long)dt);
+    }
+
+    // Removed verbose RX logging - not useful without UART channel info
+    // Only keep summary reporting for debugging if needed
+    #if 0
+    static uint32_t last_rx_report = 0;
+    // Log first 20 messages or PARAM messages
+    if (rx_msg_count <= 20 ||
+        msgid == MAVLINK_MSG_ID_PARAM_SET ||
+        msgid == MAVLINK_MSG_ID_PARAM_REQUEST_READ ||
+        msgid == MAVLINK_MSG_ID_PARAM_REQUEST_LIST) {
+        // Use console output for persistent logging after ArduPilot init
+        const char* msg_name = "UNKNOWN";
+        switch(msgid) {
+            case 0: msg_name = "HEARTBEAT"; break;
+            case 21: msg_name = "PARAM_REQUEST_READ"; break;
+            case 23: msg_name = "PARAM_SET"; break;
+            case 20: msg_name = "PARAM_REQUEST_LIST"; break;
+            case 66: msg_name = "REQUEST_DATA_STREAM"; break;
+            case 11: msg_name = "SET_MODE"; break;
+            case 76: msg_name = "COMMAND_LONG"; break;
+        }
+        hal.console->printf("ESP32 RX[%lu]: msgid=%lu (%s), sysid=%d, compid=%d\n",
+                           (unsigned long)rx_msg_count, (unsigned long)msgid,
+                           msg_name, msg.sysid, msg.compid);
+    }
+
+    // Print summary every 100 messages
+    uint32_t now = AP_HAL::millis();
+    if (rx_msg_count % 100 == 0 && (now - last_rx_report) > 1000) {
+        hal.console->printf("ESP32 RX: Received %lu total messages (last 1s)\n",
+                           (unsigned long)rx_msg_count);
+        last_rx_report = now;
+    }
+    #endif
+    
+    switch (msgid) {
+#else
     switch (msg.msgid) {
+#endif
 
     case MAVLINK_MSG_ID_HEARTBEAT: {
         handle_heartbeat(msg);
@@ -4357,10 +4656,50 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
         break;
 
     case MAVLINK_MSG_ID_PARAM_REQUEST_LIST:
-    case MAVLINK_MSG_ID_PARAM_SET:
-    case MAVLINK_MSG_ID_PARAM_REQUEST_READ:
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        hal.console->printf("ESP32: Received PARAM_REQUEST_LIST from sys=%d comp=%d\n", 
+                           msg.sysid, msg.compid);
+#endif
         handle_common_param_message(msg);
         break;
+        
+    case MAVLINK_MSG_ID_PARAM_SET:
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        {
+            mavlink_param_set_t packet;
+            mavlink_msg_param_set_decode(&msg, &packet);
+            char param_name[17];
+            strncpy(param_name, packet.param_id, 16);
+            param_name[16] = '\0';
+            hal.console->printf("ESP32: Received PARAM_SET for '%s' = %.4f from sys=%d comp=%d\n", 
+                               param_name, packet.param_value, msg.sysid, msg.compid);
+        }
+#endif
+        handle_common_param_message(msg);
+        break;
+        
+    case MAVLINK_MSG_ID_PARAM_REQUEST_READ:
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        {
+            mavlink_param_request_read_t packet;
+            mavlink_msg_param_request_read_decode(&msg, &packet);
+            char param_name[17];
+            strncpy(param_name, packet.param_id, 16);
+            param_name[16] = '\0';
+            hal.console->printf("ESP32: Received PARAM_REQUEST_READ for '%s' from sys=%d comp=%d\n", 
+                               param_name, msg.sysid, msg.compid);
+        }
+#endif
+        handle_common_param_message(msg);
+        break;
+
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    case MAVLINK_MSG_ID_PARAM_EXT_REQUEST_LIST:
+    case MAVLINK_MSG_ID_PARAM_EXT_REQUEST_READ:
+    case MAVLINK_MSG_ID_PARAM_EXT_SET:
+        handle_common_param_ext_message(msg);
+        break;
+#endif
 
 #if AP_MAVLINK_SET_GPS_GLOBAL_ORIGIN_MESSAGE_ENABLED
     case MAVLINK_MSG_ID_SET_GPS_GLOBAL_ORIGIN:
@@ -5385,10 +5724,22 @@ void GCS_MAVLINK::handle_command_long(const mavlink_message_t &msg)
     mavlink_command_long_t packet;
     mavlink_msg_command_long_decode(&msg, &packet);
 
+    // ESP32 Debug: Log all incoming MAVLink commands for reliability debugging
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(ESP32_DEBUG_CMD_LONG)
+    static uint32_t cmd_long_count = 0;
+    cmd_long_count++;
+    hal.console->printf("ESP32: CMD_LONG #%lu: cmd=%u from sys=%u comp=%u (p1=%.2f p2=%.2f)\n", 
+                       (unsigned long)cmd_long_count, packet.command, msg.sysid, msg.compid, 
+                       packet.param1, packet.param2);
+#endif
+
 #if AP_SCRIPTING_ENABLED
     AP_Scripting *scripting = AP_Scripting::get_singleton();
     if (scripting != nullptr && scripting->is_handling_command(packet.command)) {
         // Scripting has registered to receive this command, do not procces it internaly
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(ESP32_DEBUG_CMD_LONG)
+        hal.console->printf("ESP32: CMD_LONG #%lu handled by scripting\n", (unsigned long)cmd_long_count);
+#endif
         return;
     }
 #endif
@@ -5397,11 +5748,26 @@ void GCS_MAVLINK::handle_command_long(const mavlink_message_t &msg)
 
     const MAV_RESULT result = try_command_long_as_command_int(packet, msg);
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(ESP32_DEBUG_CMD_LONG)
+    hal.console->printf("ESP32: CMD_LONG #%lu result=%u\n", (unsigned long)cmd_long_count, result);
+#endif
+
     // send ACK or NAK
-    mavlink_msg_command_ack_send(chan, packet.command, result,
-                                 0, 0,
-                                 msg.sysid,
-                                 msg.compid);
+    mavlink_message_t ack_msg;
+    mavlink_msg_command_ack_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &ack_msg,
+        packet.command,
+        result,
+        0,  // progress
+        0,  // result_param2
+        msg.sysid,
+        msg.compid
+    );
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
 
 #if HAL_LOGGING_ENABLED
     // log the packet:
@@ -5421,15 +5787,21 @@ void GCS_MAVLINK::handle_command_long(const mavlink_message_t &msg)
     mavlink_msg_command_long_decode(&msg, &packet);
 
     // send ACK or NAK
-    mavlink_msg_command_ack_send(
-        chan,
+    mavlink_message_t ack_msg;
+    mavlink_msg_command_ack_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &ack_msg,
         packet.command,
         MAV_RESULT_COMMAND_INT_ONLY,
-        0,
-        0,
+        0,  // progress
+        0,  // result_param2
         msg.sysid,
         msg.compid
-   );
+    );
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
 
 }
 #endif  // AP_MAVLINK_COMMAND_LONG_ENABLED
@@ -5804,6 +6176,64 @@ MAV_RESULT GCS_MAVLINK::handle_command_int_packet(const mavlink_command_int_t &p
     case MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN:
         return handle_preflight_reboot(packet, msg);
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    case MAV_CMD_UAVCAN_GET_NODE_INFO: {
+        // Request node info for all seen UAVCAN/DroneCAN nodes
+        // Per MAVLink spec: Command 5200
+        hal.console->printf("MAVLink: Received MAV_CMD_UAVCAN_GET_NODE_INFO\n");
+
+        bool found_nodes = false;
+        for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
+            AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(i);
+            if (ap_dronecan != nullptr) {
+                ap_dronecan->get_dna_server().request_all_node_info();
+                found_nodes = true;
+            }
+        }
+
+        if (found_nodes) {
+            hal.console->printf("MAVLink: MAV_CMD_UAVCAN_GET_NODE_INFO processed\n");
+            return MAV_RESULT_ACCEPTED;
+        } else {
+            hal.console->printf("MAVLink: No DroneCAN interfaces found\n");
+            return MAV_RESULT_UNSUPPORTED;
+        }
+    }
+
+    case MAV_CMD_PREFLIGHT_UAVCAN: {
+        // Trigger UAVCAN/DroneCAN actuator enumeration
+        // Per MAVLink spec: Command 243
+        // param1: 1=begin enumeration, 0=cancel
+        if (is_equal(packet.param1, 0.0f)) {
+            // Cancel enumeration - not implemented yet
+            return MAV_RESULT_UNSUPPORTED;
+        } else if (is_equal(packet.param1, 1.0f)) {
+            // Begin enumeration
+            hal.console->printf("MAVLink: Received MAV_CMD_PREFLIGHT_UAVCAN (begin enumeration)\n");
+
+            bool found_interfaces = false;
+            for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
+                AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(i);
+                if (ap_dronecan != nullptr) {
+                    ap_dronecan->begin_actuator_enumeration();
+                    found_interfaces = true;
+                }
+            }
+
+            if (found_interfaces) {
+                send_text(MAV_SEVERITY_INFO, "DroneCAN: Actuator enumeration started");
+                hal.console->printf("MAVLink: MAV_CMD_PREFLIGHT_UAVCAN processed\n");
+                return MAV_RESULT_ACCEPTED;
+            } else {
+                hal.console->printf("MAVLink: No DroneCAN interfaces found\n");
+                return MAV_RESULT_UNSUPPORTED;
+            }
+        } else {
+            return MAV_RESULT_DENIED;
+        }
+    }
+#endif  // HAL_ENABLE_DRONECAN_DRIVERS
+
     case MAV_CMD_DO_SET_SAFETY_SWITCH_STATE:
         return handle_do_set_safety_switch_state(packet, msg);
 
@@ -5887,13 +6317,36 @@ void GCS_MAVLINK::handle_command_int(const mavlink_message_t &msg)
 
     hal.util->persistent_data.last_mavlink_cmd = packet.command;
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Debug logging for command tracking on ESP32
+    static uint32_t cmd_count = 0;
+    cmd_count++;
+    hal.console->printf("ESP32: CMD_INT #%lu: cmd=%u from sys=%u comp=%u\n", 
+                        (unsigned long)cmd_count, packet.command, msg.sysid, msg.compid);
+#endif
+
     const MAV_RESULT result = handle_command_int_packet(packet, msg);
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    hal.console->printf("ESP32: CMD_INT #%lu result=%u\n", (unsigned long)cmd_count, result);
+#endif
+
     // send ACK or NAK
-    mavlink_msg_command_ack_send(chan, packet.command, result,
-                                 0, 0,
-                                 msg.sysid,
-                                 msg.compid);
+    mavlink_message_t ack_msg;
+    mavlink_msg_command_ack_pack(
+        mavlink_system.sysid,
+        mavlink_system.compid,
+        &ack_msg,
+        packet.command,
+        result,
+        0,  // progress
+        0,  // result_param2
+        msg.sysid,
+        msg.compid
+    );
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
 
 #if HAL_LOGGING_ENABLED
     AP::logger().Write_Command(packet, msg.sysid, msg.compid, result);
@@ -6062,6 +6515,8 @@ void GCS_MAVLINK::send_attitude() const
 #if AP_AHRS_ENABLED
     const AP_AHRS &ahrs = AP::ahrs();
     const Vector3f omega = ahrs.get_gyro();
+
+    
     mavlink_msg_attitude_send(
         chan,
         AP_HAL::millis(),
@@ -6125,6 +6580,8 @@ void GCS_MAVLINK::send_global_position_int()
         vel.zero();
     }
 
+    uint16_t heading = ahrs.yaw_sensor;
+
     mavlink_msg_global_position_int_send(
         chan,
         AP_HAL::millis(),
@@ -6135,7 +6592,7 @@ void GCS_MAVLINK::send_global_position_int()
         vel.x * 100,                     // X speed cm/s (+ve North)
         vel.y * 100,                     // Y speed cm/s (+ve East)
         vel.z * 100,                     // Z speed cm/s (+ve Down)
-        ahrs.yaw_sensor);                // compass heading in 1/100 degree
+        heading);                         // compass heading in 1/100 degree
 #endif  // AP_AHRS_ENABLED
 }
 
@@ -6415,6 +6872,10 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
     case MSG_NEXT_PARAM:
         CHECK_PAYLOAD_SIZE(PARAM_VALUE);
         queued_param_send();
+#if HAL_ENABLE_DRONECAN_DRIVERS
+        // Continue any active parameter enumeration for DroneCAN nodes
+        continue_param_enumeration();
+#endif
         break;
 
     case MSG_HEARTBEAT:
