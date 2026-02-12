@@ -36,6 +36,8 @@
 #include <AP_Common/ExpandingString.h>
 
 #include "esp_mac.h"
+// Note: Custom MAC support temporarily disabled due to build issues with esp_efuse.h
+// Will be re-enabled once ESP-IDF include paths are fixed
 
 extern const AP_HAL::HAL& hal;
 
@@ -47,8 +49,17 @@ using namespace ESP32;
 */
 uint32_t Util::available_memory(void)
 {
-    return heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+    return heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+}
 
+/**
+   ESP32-specific memory information for MEMINFO
+*/
+uint32_t Util::get_heap_used_size(void) const
+{
+    uint32_t total_heap = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
+    uint32_t free_heap = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+    return total_heap - free_heap;
 }
 
 /*
@@ -171,10 +182,32 @@ bool Util::get_system_id(char buf[50])
     char board_name[] = HAL_ESP32_BOARD_NAME" ";
 
     uint8_t base_mac_addr[6] = {0};
-    esp_err_t ret = esp_efuse_mac_get_custom(base_mac_addr);
-    if (ret != ESP_OK) {
-        ret = esp_efuse_mac_get_default(base_mac_addr);
+
+// Custom MAC support temporarily disabled - requires esp_efuse.h
+// TODO: Fix ESP-IDF include paths and re-enable custom MAC support
+#if 0 && defined(ESP_EFUSE_USER_DATA_MAC_CUSTOM) && defined(HAL_ESP32_USE_CUSTOM_MAC)
+    // Check if custom MAC exists before trying to read it (avoids error message)
+    // Custom MACs are sometimes used for copy protection/licensing
+    uint8_t custom_mac[6] = {0};
+    size_t size_bits = esp_efuse_get_field_size(ESP_EFUSE_USER_DATA_MAC_CUSTOM);
+    if (size_bits == 48) {  // Valid MAC is 48 bits (6 bytes)
+        esp_efuse_read_field_blob(ESP_EFUSE_USER_DATA_MAC_CUSTOM, custom_mac, size_bits);
+        // Check if MAC is not all zeros (empty)
+        if (custom_mac[0] != 0 || memcmp(custom_mac, &custom_mac[1], 5) != 0) {
+            // Custom MAC exists and is non-zero, use it for copy protection
+            memcpy(base_mac_addr, custom_mac, 6);
+        } else {
+            // Custom MAC is empty, fall back to default
+            esp_efuse_mac_get_default(base_mac_addr);
+        }
+    } else {
+        // Invalid size, use default MAC
+        esp_efuse_mac_get_default(base_mac_addr);
     }
+#else
+    // Not using custom MAC or not available, use default factory MAC
+    esp_efuse_mac_get_default(base_mac_addr);
+#endif
 
     char board_mac[20] = "                   ";
     snprintf(board_mac,20, "%x %x %x %x %x %x",
@@ -194,10 +227,32 @@ bool Util::get_system_id(char buf[50])
 bool Util::get_system_id_unformatted(uint8_t buf[], uint8_t &len)
 {
     uint8_t base_mac_addr[6] = {0};
-    esp_err_t ret = esp_efuse_mac_get_custom(base_mac_addr);
-    if (ret != ESP_OK) {
-        ret = esp_efuse_mac_get_default(base_mac_addr);
+
+// Custom MAC support temporarily disabled - requires esp_efuse.h
+// TODO: Fix ESP-IDF include paths and re-enable custom MAC support
+#if 0 && defined(ESP_EFUSE_USER_DATA_MAC_CUSTOM) && defined(HAL_ESP32_USE_CUSTOM_MAC)
+    // Check if custom MAC exists before trying to read it (avoids error message)
+    // Custom MACs are sometimes used for copy protection/licensing
+    uint8_t custom_mac[6] = {0};
+    size_t size_bits = esp_efuse_get_field_size(ESP_EFUSE_USER_DATA_MAC_CUSTOM);
+    if (size_bits == 48) {  // Valid MAC is 48 bits (6 bytes)
+        esp_efuse_read_field_blob(ESP_EFUSE_USER_DATA_MAC_CUSTOM, custom_mac, size_bits);
+        // Check if MAC is not all zeros (empty)
+        if (custom_mac[0] != 0 || memcmp(custom_mac, &custom_mac[1], 5) != 0) {
+            // Custom MAC exists and is non-zero, use it for copy protection
+            memcpy(base_mac_addr, custom_mac, 6);
+        } else {
+            // Custom MAC is empty, fall back to default
+            esp_efuse_mac_get_default(base_mac_addr);
+        }
+    } else {
+        // Invalid size, use default MAC
+        esp_efuse_mac_get_default(base_mac_addr);
     }
+#else
+    // Not using custom MAC or not available, use default factory MAC
+    esp_efuse_mac_get_default(base_mac_addr);
+#endif
 
     len = MIN(len, ARRAY_SIZE(base_mac_addr));
     memcpy(buf, (const void *)base_mac_addr, len);
@@ -208,11 +263,10 @@ bool Util::get_system_id_unformatted(uint8_t buf[], uint8_t &len)
 // return true if the reason for the reboot was a watchdog reset
 bool Util::was_watchdog_reset() const
 {
-    return false;
     esp_reset_reason_t reason = esp_reset_reason();
 
     return reason == ESP_RST_PANIC
-           || reason == ESP_RST_PANIC
+           || reason == ESP_RST_INT_WDT
            || reason == ESP_RST_TASK_WDT
            || reason == ESP_RST_WDT;
 }

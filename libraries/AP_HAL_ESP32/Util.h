@@ -29,6 +29,9 @@ public:
     }
 
     uint32_t available_memory() override;
+    
+    // ESP32-specific memory information
+    uint32_t get_heap_used_size(void) const;
 
     // Special Allocation Routines
     void *malloc_type(size_t size, AP_HAL::Util::Memory_Type mem_type) override;

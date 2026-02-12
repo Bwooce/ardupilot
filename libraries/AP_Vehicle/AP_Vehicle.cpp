@@ -305,6 +305,10 @@ extern AP_Vehicle& vehicle;
  */
 void AP_Vehicle::setup()
 {
+    hal.console->printf("\n========================================\n");
+    hal.console->printf("AP_Vehicle::setup() STARTING!\n");
+    hal.console->printf("========================================\n");
+    
     // load the default values of variables listed in var_info[]
     AP_Param::setup_sketch_defaults();
 
@@ -406,10 +410,16 @@ void AP_Vehicle::setup()
     stats.init();
 #endif
 
+    hal.console->printf("AP_Vehicle: BoardConfig.init() starting\n");
     BoardConfig.init();
+    hal.console->printf("AP_Vehicle: BoardConfig.init() completed\n");
 
 #if HAL_CANMANAGER_ENABLED
+    hal.console->printf("AP_Vehicle: HAL_CANMANAGER_ENABLED is true, calling can_mgr.init()\n");
     can_mgr.init();
+    hal.console->printf("AP_Vehicle: can_mgr.init() completed\n");
+#else
+    hal.console->printf("AP_Vehicle: HAL_CANMANAGER_ENABLED is false, skipping can_mgr.init()\n");
 #endif
 
 #if HAL_MSP_ENABLED
@@ -555,6 +565,7 @@ void AP_Vehicle::setup()
 
 void AP_Vehicle::loop()
 {
+    
 #if AP_SCHEDULER_ENABLED
     scheduler.loop();
     G_Dt = scheduler.get_loop_period_s();
@@ -764,7 +775,19 @@ void AP_Vehicle::send_watchdog_reset_statustext()
     }
     const AP_HAL::Util::PersistentData &pd = hal.util->last_persistent_data;
     (void)pd;  // in case !HAL_GCS_ENABLED
-    GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,
+    
+    // Check if this is a real watchdog issue with fault data
+    bool has_fault_data = pd.scheduler_task != 0 ||
+                         pd.semaphore_line != 0 ||
+                         pd.fault_line != 0 ||
+                         pd.fault_type != 0 ||
+                         pd.fault_addr != 0 ||
+                         pd.internal_errors != 0;
+    
+    // Even with zeros, a watchdog reset occurred. Use WARNING for clean reset, CRITICAL for fault data
+    MAV_SEVERITY severity = has_fault_data ? MAV_SEVERITY_CRITICAL : MAV_SEVERITY_WARNING;
+    
+    GCS_SEND_TEXT(severity,
                     "WDG: T%d SL%u FL%u FT%u FA%x FTP%u FLR%x FICSR%u MM%u MC%u IE%u IEC%u TN:%.4s",
                     pd.scheduler_task,
                     pd.semaphore_line,

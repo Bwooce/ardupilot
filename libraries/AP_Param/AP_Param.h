@@ -750,7 +750,7 @@ private:
     static bool                 scan(
                                     const struct Param_header *phdr,
                                     uint16_t *pofs);
-    static void                 eeprom_write_check(
+    static bool                 eeprom_write_check(
                                     const void *ptr,
                                     uint16_t ofs,
                                     uint8_t size);

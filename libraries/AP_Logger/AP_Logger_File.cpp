@@ -58,6 +58,12 @@ AP_Logger_File::AP_Logger_File(AP_Logger &front,
 
 void AP_Logger_File::ensure_log_directory_exists()
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS doesn't support real directories - paths are flat
+    // Just check if we can access the filesystem at all by trying to list files
+    // The "directory" is just a prefix in the flat namespace
+    return;
+#else
     int ret;
     struct stat st;
 
@@ -67,8 +73,16 @@ void AP_Logger_File::ensure_log_directory_exists()
         ret = AP::FS().mkdir(_log_directory);
     }
     if (ret == -1 && errno != EEXIST) {
-        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Failed to create log directory %s : %s", _log_directory, strerror(errno));
+        const char* storage_type = "Filesystem";
+        if (strncmp(_log_directory, "/APM", 4) == 0) {
+            storage_type = "SPIFFS";
+        } else if (strncmp(_log_directory, "/SDCARD", 7) == 0) {
+            storage_type = "SD Card";
+        }
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Failed to create %s log directory %s : %s",
+                      storage_type, _log_directory, strerror(errno));
     }
+#endif
 }
 
 void AP_Logger_File::Init()
@@ -211,7 +225,12 @@ bool AP_Logger_File::CardInserted(void) const
 // returns -1 on error
 int64_t AP_Logger_File::disk_space_avail()
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS uses flat filesystem
+    return AP::FS().disk_free("/APM");
+#else
     return AP::FS().disk_free(_log_directory);
+#endif
 }
 
 // returns the total amount of disk space (in use + available) in
@@ -219,7 +238,12 @@ int64_t AP_Logger_File::disk_space_avail()
 // returns -1 on error
 int64_t AP_Logger_File::disk_space()
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS uses flat filesystem
+    return AP::FS().disk_space("/APM");
+#else
     return AP::FS().disk_space(_log_directory);
+#endif
 }
 
 /*
@@ -264,7 +288,12 @@ uint16_t AP_Logger_File::find_oldest_log()
     // relying on the min_avail_space_percent feature we could end up
     // doing a *lot* of asprintf()s and stat()s
     EXPECT_DELAY_MS(3000);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS uses flat filesystem - open mount point directly
+    auto *d = AP::FS().opendir("/APM");
+#else
     auto *d = AP::FS().opendir(_log_directory);
+#endif
     if (d == nullptr) {
         // SD card may have died?  On linux someone may have rm-rf-d
         return 0;
@@ -326,7 +355,9 @@ void AP_Logger_File::Prep_MinSpace()
 
     uint16_t count = 0;
     do {
+        last_io_operation = "disk_space_avail";
         int64_t avail = disk_space_avail();
+        last_io_operation = "";
         if (avail == -1) {
             break;
         }
@@ -347,7 +378,9 @@ void AP_Logger_File::Prep_MinSpace()
             DEV_PRINTF("Removing (%s) for minimum-space requirements (%.0fMB < %.0fMB)\n",
                                 filename_to_remove, (double)avail*B_to_MB, (double)target_free*B_to_MB);
             EXPECT_DELAY_MS(2000);
+            last_io_operation = "unlink_minspace";
             if (AP::FS().unlink(filename_to_remove) == -1) {
+                last_io_operation = "";
                 _cached_oldest_log = 0;
                 DEV_PRINTF("Failed to remove %s: %s\n", filename_to_remove, strerror(errno));
                 free(filename_to_remove);
@@ -359,6 +392,7 @@ void AP_Logger_File::Prep_MinSpace()
                     break;
                 }
             } else {
+                last_io_operation = "";
                 free(filename_to_remove);
             }
         }
@@ -377,9 +411,17 @@ void AP_Logger_File::Prep_MinSpace()
 char *AP_Logger_File::_log_file_name(const uint16_t log_num) const
 {
     char *buf = nullptr;
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS treats paths as flat names - directories are simulated
+    // Use the full path including simulated directory structure
     if (asprintf(&buf, "%s/%08u.BIN", _log_directory, (unsigned)log_num) == -1) {
         return nullptr;
     }
+#else
+    if (asprintf(&buf, "%s/%08u.BIN", _log_directory, (unsigned)log_num) == -1) {
+        return nullptr;
+    }
+#endif
     return buf;
 }
 
@@ -390,9 +432,16 @@ char *AP_Logger_File::_log_file_name(const uint16_t log_num) const
 char *AP_Logger_File::_lastlog_file_name(void) const
 {
     char *buf = nullptr;
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS doesn't support directories - use flat naming
+    if (asprintf(&buf, "/APM/LASTLOG.TXT") == -1) {
+        return nullptr;
+    }
+#else
     if (asprintf(&buf, "%s/LASTLOG.TXT", _log_directory) == -1) {
         return nullptr;
     }
+#endif
     return buf;
 }
 
@@ -534,6 +583,12 @@ uint32_t AP_Logger_File::_get_log_size(const uint16_t log_num)
         return 0;
     }
     free(fname);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // SPIFFS can return invalid sizes, sanity check
+    if (st.st_size < 0 || st.st_size > 4194304) { // 4MB max
+        return 0; // Invalid size
+    }
+#endif
     return st.st_size;
 }
 
@@ -617,8 +672,11 @@ int16_t AP_Logger_File::get_log_data(const uint16_t list_entry, const uint16_t p
         if (_read_fd == -1) {
             _open_error_ms = AP_HAL::millis();
             int saved_errno = errno;
+#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
+            // Avoid printf on ESP32 to prevent stack overflow
             ::printf("Log read open fail for %s - %s\n",
                      fname, strerror(saved_errno));
+#endif
             DEV_PRINTF("Log read open fail for %s - %s\n",
                                 fname, strerror(saved_errno));
             free(fname);
@@ -668,6 +726,13 @@ void AP_Logger_File::get_log_info(const uint16_t list_entry, uint32_t &size, uin
 
     size = _get_log_size(log_num);
     time_utc = _get_log_time(log_num);
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Extra sanity check for ESP32 SPIFFS
+    if (size > 4194304) { // 4MB is unrealistic
+        size = 0;
+    }
+#endif
 }
 
 
@@ -676,7 +741,12 @@ void AP_Logger_File::get_log_info(const uint16_t list_entry, uint32_t &size, uin
  */
 uint16_t AP_Logger_File::get_num_logs()
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 SPIFFS uses flat filesystem - open mount point directly
+    auto *d = AP::FS().opendir("/APM");
+#else
     auto *d = AP::FS().opendir(_log_directory);
+#endif
     if (d == nullptr) {
         return 0;
     }
@@ -781,23 +851,48 @@ void AP_Logger_File::start_new_log(void)
     // to open the log...
     _open_error_ms = AP_HAL::millis();
 
+    last_io_operation = "stop_logging";
     stop_logging();
+    last_io_operation = "";
 
     start_new_log_reset_variables();
 
     if (_read_fd != -1) {
+        last_io_operation = "close_read_fd";
         AP::FS().close(_read_fd);
+        last_io_operation = "";
         _read_fd = -1;
     }
 
+    last_io_operation = "disk_space_check";
     if (disk_space_avail() < _free_space_min_avail && disk_space() > 0) {
+        last_io_operation = "";
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // On ESP32, try to free up space by deleting old logs
+        DEV_PRINTF("Low space - attempting to delete old logs\n");
+        last_io_operation = "prep_minspace";
+        Prep_MinSpace();
+        last_io_operation = "";
+        // Check again after cleanup
+        if (disk_space_avail() < _free_space_min_avail) {
+            DEV_PRINTF("Still out of space after cleanup\n");
+            return;
+        }
+#else
         DEV_PRINTF("Out of space for logging\n");
         return;
+#endif
     }
+    last_io_operation = "";
 
+    last_io_operation = "find_last_log";
     uint16_t log_num = find_last_log();
+    last_io_operation = "";
+
     // re-use empty logs if possible
+    last_io_operation = "get_log_size";
     if (_get_log_size(log_num) > 0 || log_num == 0) {
+        last_io_operation = "";
         log_num++;
     }
     if (log_num > _front.get_max_num_logs()) {
@@ -825,20 +920,87 @@ void AP_Logger_File::start_new_log(void)
 #endif
 
     // create the log directory if need be
+    last_io_operation = "ensure_log_dir";
     ensure_log_directory_exists();
+    last_io_operation = "";
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // SPIFFS can be very slow at file creation, allow more time
+    EXPECT_DELAY_MS(8000);
+#else
     EXPECT_DELAY_MS(3000);
+#endif
+
+    last_io_operation = "open_log_file";
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Reset heartbeat just before the potentially slow SPIFFS operation
+    _io_timer_heartbeat = AP_HAL::millis();
+#endif
+
     _write_fd = AP::FS().open(_write_filename, O_WRONLY|O_CREAT|O_TRUNC);
+    last_io_operation = "";
     _cached_oldest_log = 0;
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    if (_write_fd == -1) {
+        int saved_errno = errno;
+
+        // Filesystem might be fragmented or have issues - try cleanup
+        if (saved_errno == ENOSPC || saved_errno == EIO) {
+            const char* storage_type = "Filesystem";
+            if (_write_filename && strncmp(_write_filename, "/APM", 4) == 0) {
+                storage_type = "SPIFFS";
+            } else if (_write_filename && strncmp(_write_filename, "/SDCARD", 7) == 0) {
+                storage_type = "SD Card";
+            }
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "%s issue, attempting cleanup", storage_type);
+
+            // Try to delete the oldest log to make room
+            uint16_t oldest = find_oldest_log();
+            if (oldest > 0) {
+                char *oldest_file = _log_file_name(oldest);
+                if (oldest_file != nullptr) {
+                    ::unlink(oldest_file);
+                    free(oldest_file);
+                }
+            }
+
+            // Try opening again
+            _write_fd = AP::FS().open(_write_filename, O_WRONLY|O_CREAT|O_TRUNC);
+        }
+
+        errno = saved_errno; // Restore original errno
+    }
+#endif
 
     if (_write_fd == -1) {
         write_fd_semaphore.give();
         int saved_errno = errno;
         if (open_error_ms_was_zero) {
-            ::printf("Log open fail for %s - %s\n",
-                     _write_filename, strerror(saved_errno));
-            DEV_PRINTF("Log open fail for %s - %s\n",
-                                _write_filename, strerror(saved_errno));
+            // Determine storage type from path
+            const char* storage_type = "unknown";
+            if (_write_filename) {
+                if (strncmp(_write_filename, "/APM", 4) == 0) {
+                    storage_type = "SPIFFS";
+                } else if (strncmp(_write_filename, "/SDCARD", 7) == 0) {
+                    storage_type = "SD Card";
+                } else if (strncmp(_write_filename, "/logs", 5) == 0) {
+                    storage_type = "Flash";
+                }
+            }
+#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
+            // Avoid printf on ESP32 to prevent stack overflow
+            ::printf("%s Log open fail for %s - %s\n",
+                     storage_type, _write_filename, strerror(saved_errno));
+#endif
+            DEV_PRINTF("%s Log open fail for %s - %s\n",
+                                storage_type, _write_filename, strerror(saved_errno));
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            // Brief diagnostic for ESP32 with storage type
+            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "%s Log open failed: errno=%d",
+                         storage_type, saved_errno);
+#endif
         }
         return;
     }
@@ -850,9 +1012,11 @@ void AP_Logger_File::start_new_log(void)
 
     // now update lastlog.txt with the new log number
     last_log_is_marked_discard = _front._params.log_disarmed == AP_Logger::LogDisarmed::LOG_WHILE_DISARMED_DISCARD;
+    last_io_operation = "write_lastlog_file";
     if (!write_lastlog_file(log_num)) {
         _open_error_ms = AP_HAL::millis();
     }
+    last_io_operation = "";
 }
 
 /*
@@ -913,13 +1077,19 @@ void AP_Logger_File::io_timer(void)
     _io_timer_heartbeat = tnow;
 
     if (start_new_log_pending) {
+        last_io_operation = "start_new_log";
         start_new_log();
+        last_io_operation = "";
         start_new_log_pending = false;
+        // Feed watchdog after potentially long operation
+        hal.scheduler->delay(1);
     }
 
     if (erase.log_num != 0) {
         // continue erase
+        last_io_operation = "erase_next";
         erase_next();
+        last_io_operation = "";
         return;
     }
 
@@ -929,9 +1099,17 @@ void AP_Logger_File::io_timer(void)
 
     if (last_log_is_marked_discard && hal.util->get_soft_armed()) {
         // time to make the log permanent
+        last_io_operation = "find_last_log";
         const auto log_num = find_last_log();
+        last_io_operation = "";
+        // Feed watchdog after find_last_log
+        hal.scheduler->delay(1);
         last_log_is_marked_discard = false;
+        last_io_operation = "write_lastlog";
         write_lastlog_file(log_num);
+        last_io_operation = "";
+        // Feed watchdog after write_lastlog_file
+        hal.scheduler->delay(1);
     }
 
     uint32_t nbytes = _writebuf.available();
@@ -949,12 +1127,29 @@ void AP_Logger_File::io_timer(void)
     if (tnow - _free_space_last_check_time > _free_space_check_interval) {
         _free_space_last_check_time = tnow;
         last_io_operation = "disk_space_avail";
+        // Feed watchdog before potentially slow disk operation
+        hal.scheduler->delay(1);
         if (disk_space_avail() < _free_space_min_avail && disk_space() > 0) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            // On ESP32, try to free up space by deleting old logs
+            DEV_PRINTF("Low space during logging - attempting cleanup\n");
+            last_io_operation = "prep_minspace";
+            Prep_MinSpace();
+            last_io_operation = "";
+            // Check again after cleanup
+            if (disk_space_avail() < _free_space_min_avail) {
+                DEV_PRINTF("Still out of space after cleanup\n");
+                stop_logging();
+                _open_error_ms = AP_HAL::millis(); // prevent logging starting again for 5s
+                return;
+            }
+#else
             DEV_PRINTF("Out of space for logging\n");
             stop_logging();
             _open_error_ms = AP_HAL::millis(); // prevent logging starting again for 5s
             last_io_operation = "";
             return;
+#endif
         }
         last_io_operation = "";
     }
@@ -996,10 +1191,26 @@ void AP_Logger_File::io_timer(void)
     last_io_operation = "";
     if (nwritten <= 0) {
         if (errno == ENOSPC) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            // On ESP32, try to free up space by deleting old logs
+            DEV_PRINTF("ENOSPC - attempting to delete old logs\n");
+            last_io_operation = "prep_minspace";
+            Prep_MinSpace();
+            last_io_operation = "write";
+            // Try writing again after cleanup
+            nwritten = AP::FS().write(_write_fd, head, nbytes);
+            last_io_operation = "";
+            if (nwritten <= 0) {
+                DEV_PRINTF("Still out of space after cleanup\n");
+                stop_logging();
+                _open_error_ms = AP_HAL::millis(); // prevent logging starting again for 5s
+            }
+#else
             DEV_PRINTF("Out of space for logging\n");
             stop_logging();
             _open_error_ms = AP_HAL::millis(); // prevent logging starting again for 5s
             last_io_operation = "";
+#endif
         } else if ((tnow - _last_write_ms)/1000U > unsigned(_front._params.file_timeout)) {
             // if we can't write for LOG_FILE_TIMEOUT seconds we give up and close
             // the file. This allows us to cope with temporary write
@@ -1008,7 +1219,22 @@ void AP_Logger_File::io_timer(void)
             AP::FS().close(_write_fd);
             last_io_operation = "";
             _write_fd = -1;
-            printf("Failed to write to File: %s\n", strerror(errno));
+            // Determine storage type from path
+            const char* storage_type = "unknown";
+            if (_write_filename) {
+                if (strncmp(_write_filename, "/APM", 4) == 0) {
+                    storage_type = "SPIFFS";
+                } else if (strncmp(_write_filename, "/sdcard", 7) == 0 ||
+                          strncmp(_write_filename, "/mnt", 4) == 0) {
+                    storage_type = "SD Card";
+                } else if (strncmp(_write_filename, "/logs", 5) == 0) {
+                    storage_type = "Flash/SPIFFS";
+                }
+            }
+            printf("Failed to write to %s log file '%s': %s (fd=%d)\n",
+                   storage_type,
+                   _write_filename ? _write_filename : "unknown",
+                   strerror(errno), _write_fd);
         }
         _last_write_failed = true;
     } else {
@@ -1016,6 +1242,20 @@ void AP_Logger_File::io_timer(void)
         _last_write_ms = tnow;
         _write_offset += nwritten;
         _writebuf.advance(nwritten);
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // SPIFFS has a practical file size limit around 4MB
+        // Rotate to a new log file if we exceed 3.5MB to leave some margin
+        const uint32_t max_log_size = 3670016; // 3.5MB in bytes
+        if (_write_offset >= max_log_size) {
+            DEV_PRINTF("Log file size limit reached (%lu bytes), rotating\n", (unsigned long)_write_offset);
+            stop_logging();
+            // Immediately start a new log file to avoid write failures
+            _open_error_ms = 0; // Allow immediate new log creation
+            // Start new log right away instead of waiting for periodic check
+            start_new_log();
+        }
+#endif
 
         // we know nwritten > 0 so we won't sync if bytes_until_fsync == 0
         if ((uint32_t)nwritten == bytes_until_fsync) {
@@ -1095,17 +1335,21 @@ void AP_Logger_File::erase_next(void)
         return;
     }
 
+    last_io_operation = "unlink_log";
     AP::FS().unlink(fname);
+    last_io_operation = "";
     free(fname);
 
     erase.log_num++;
     if (erase.log_num <= _front.get_max_num_logs()) {
         return;
     }
-    
+
     fname = _lastlog_file_name();
     if (fname != nullptr) {
+        last_io_operation = "unlink_lastlog";
         AP::FS().unlink(fname);
+        last_io_operation = "";
         free(fname);
     }
 

@@ -31,6 +31,7 @@ static AP_Filesystem fs;
 static AP_Filesystem_FATFS fs_local;
 #elif AP_FILESYSTEM_ESP32_ENABLED
 #include "AP_Filesystem_ESP32.h"
+// Direct static instantiation - same as other backends
 static AP_Filesystem_ESP32 fs_local;
 #elif AP_FILESYSTEM_LITTLEFS_ENABLED
 #include "AP_Filesystem_FlashMemory_LittleFS.h"
@@ -66,6 +67,8 @@ static AP_Filesystem_Mission fs_mission;
 /*
   mapping from filesystem prefix to backend
  */
+// Debug function removed to prevent stack overflow
+
 const AP_Filesystem::Backend AP_Filesystem::backends[] = {
     { nullptr, fs_local },
 #if AP_FILESYSTEM_ROMFS_ENABLED
@@ -129,7 +132,10 @@ const AP_Filesystem::Backend &AP_Filesystem::backend_by_fd(int &fd) const
 
 int AP_Filesystem::open(const char *fname, int flags, bool allow_absolute_paths)
 {
+// Debug logging removed to prevent stack overflow
+// ESP32 backend verification removed to prevent stack overflow
     const Backend &backend = backend_by_path(fname);
+// Debug logging removed to prevent stack overflow
     int fd = backend.fs.open(fname, flags, allow_absolute_paths);
     if (fd < 0) {
         return -1;

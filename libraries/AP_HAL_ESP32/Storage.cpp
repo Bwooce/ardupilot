@@ -16,6 +16,14 @@
 #include <AP_HAL/AP_HAL.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
 #include "Storage.h"
+#include "esp_log.h"
+#include "esp_partition.h"
+#ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "driver/usb_serial_jtag.h"
+#include "hal/usb_serial_jtag_ll.h"
+#endif
+#include <string.h>
+#include <stdio.h>
 
 //#define STORAGEDEBUG 1
 
@@ -28,11 +36,20 @@ void Storage::_storage_open(void)
     if (_initialised) {
         return;
     }
-#ifdef STORAGEDEBUG
-    printf("%s:%d _storage_open \n", __PRETTY_FUNCTION__, __LINE__);
-#endif
+
     _dirty_mask.clearall();
     p = esp_partition_find_first((esp_partition_type_t)0x45, ESP_PARTITION_SUBTYPE_ANY, nullptr);
+
+    if (p == nullptr) {
+        ESP_LOGE("STORAGE", "ERROR - No storage partition found (type 0x45)!");
+        hal.console->printf("Storage: ERROR - No storage partition found (type 0x45)!\n");
+    } else {
+#ifdef STORAGEDEBUG
+        ESP_LOGI("STORAGE", "Found partition '%s' at 0x%08lx, size %lu bytes",
+                 p->label, (unsigned long)p->address, (unsigned long)p->size);
+#endif
+    }
+
     // load from storage backend
     _flash_load();
     _initialised = true;
@@ -66,6 +83,7 @@ void Storage::read_block(void *dst, uint16_t loc, size_t n)
 #endif
         return;
     }
+    // Delay storage init until first use to avoid early boot issues
     _storage_open();
     memcpy(dst, &_buffer[loc], n);
 }
@@ -117,10 +135,8 @@ void Storage::_timer_tick(void)
  */
 void Storage::_flash_load(void)
 {
-#ifdef STORAGEDEBUG
-    printf("%s:%d \n", __PRETTY_FUNCTION__, __LINE__);
-#endif
     if (!_flash.init()) {
+        ESP_LOGE("STORAGE", "AP_FlashStorage::init() FAILED!");
         AP_HAL::panic("unable to init flash storage");
     }
 }
@@ -133,7 +149,10 @@ void Storage::_flash_write(uint16_t line)
 #ifdef STORAGEDEBUG
     printf("%s:%d \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
-    if (_flash.write(line*STORAGE_LINE_SIZE, STORAGE_LINE_SIZE)) {
+
+    bool write_result = _flash.write(line*STORAGE_LINE_SIZE, STORAGE_LINE_SIZE);
+
+    if (write_result) {
         // mark the line clean
         _dirty_mask.clear(line);
     }
@@ -147,21 +166,25 @@ bool Storage::_flash_write_data(uint8_t sector, uint32_t offset, const uint8_t *
 #ifdef STORAGEDEBUG
     printf("%s:%d  \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
+
+    if (p == nullptr) {
+        return false;
+    }
+
     size_t address = sector * STORAGE_SECTOR_SIZE + offset;
-    bool ret = esp_partition_write(p, address, data, length) == ESP_OK;
+    esp_err_t err = esp_partition_write(p, address, data, length);
+    bool ret = (err == ESP_OK);
+
     if (!ret && _flash_erase_ok()) {
         // we are getting flash write errors while disarmed. Try
         // re-writing all of flash
         uint32_t now = AP_HAL::millis();
         if (now - _last_re_init_ms > 5000) {
             _last_re_init_ms = now;
-            bool ok = _flash.re_initialise();
-            DEV_PRINTF("Storage: failed at %u:%u for %u - re-init %u\n",
-                                (unsigned)sector, (unsigned)offset, (unsigned)length, (unsigned)ok);
-#ifdef STORAGEDEBUG
-            printf("Storage: failed at %u:%u for %u - re-init %u\n",
-                   (unsigned)sector, (unsigned)offset, (unsigned)length, (unsigned)ok);
-#endif
+            bool reinit_ok = _flash.re_initialise();
+            // We don't propagate the reinit result - original write already failed
+            // and we'll retry on the next write attempt
+            (void)reinit_ok;
         }
     }
     return ret;
@@ -176,8 +199,9 @@ bool Storage::_flash_read_data(uint8_t sector, uint32_t offset, uint8_t *data, u
 #ifdef STORAGEDEBUG
     printf("%s:%d  -> sec:%u off:%d len:%d addr:%d\n", __PRETTY_FUNCTION__, __LINE__,sector,offset,length,address);
 #endif
-    esp_partition_read(p, address, data, length);
-    return true;
+
+    esp_err_t err = esp_partition_read(p, address, data, length);
+    return (err == ESP_OK);
 }
 
 /*

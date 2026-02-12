@@ -23,7 +23,16 @@
 
 #define ESP32_SCHEDULER_MAX_TIMER_PROCS 10
 #define ESP32_SCHEDULER_MAX_IO_PROCS 10
-#define TWDT_TIMEOUT_MS 3000
+#define TWDT_TIMEOUT_MS 5000  // Increased from 3s to 5s for PSRAM/SPIFFS init
+
+// External C function for registering threads with watchdog
+#ifdef __cplusplus
+extern "C" {
+#endif
+void esp32_register_thread_with_watchdog(const char* name);
+#ifdef __cplusplus
+}
+#endif
 
 /* Scheduler implementation: */
 class ESP32::Scheduler : public AP_HAL::Scheduler
@@ -40,17 +49,33 @@ public:
     };
     void     delay(uint16_t ms) override;
     void     delay_microseconds(uint16_t us) override;
+    void     delay_microseconds_boost(uint16_t us) override;
+    void     boost_end(void) override;
     void     register_timer_process(AP_HAL::MemberProc) override;
     void     register_io_process(AP_HAL::MemberProc) override;
     void     register_timer_failsafe(AP_HAL::Proc, uint32_t period_us) override;
     void     reboot(bool hold_in_bootloader) override;
     bool     in_main_thread() const override;
+    void     watchdog_pat() override;  // Pat watchdog for current thread
+
+    // Expected delay support - prevents watchdog panics during long operations
+    void     expect_delay_ms(uint32_t ms) override;
+    bool     in_expected_delay(void) const override;
+
     // check and set the startup state
     void     set_system_initialized() override;
     bool     is_system_initialized() override;
 
+    // interrupt save/restore
+    void     *disable_interrupts_save(void) override;
+    void     restore_interrupts(void *state) override;
+
     void     print_stats(void) ;
     void     print_main_loop_rate(void);
+    void     report_reset_reason(void);
+
+    // Helper to register current task with watchdog and report any errors
+    static void register_task_with_watchdog(const char* task_name);
 
     uint16_t get_loop_rate_hz(void);
     AP_Int16 _active_loop_rate_hz;
@@ -85,16 +110,16 @@ public:
     static const int IO_PRIO      = 5;
     static const int STORAGE_PRIO = 4;
 
-    static const int TIMER_SS     = 1024*3;
-    static const int MAIN_SS      = 1024*5;
-    static const int RCIN_SS      = 1024*3;
-    static const int RCOUT_SS     = 1024*1.5;
-    static const int WIFI_SS1     = 1024*2.25;
-    static const int WIFI_SS2     = 1024*2.25;
-    static const int UART_SS      = 1024*2.25;
-    static const int DEVICE_SS    = 1024*4;     // DEVICEBUS/s
-    static const int IO_SS        = 1024*3.5;   // APM_IO
-    static const int STORAGE_SS   = 1024*2;     // APM_STORAGE
+    static const int TIMER_SS     = 1024*3.5;   // Increased from 3KB to 3.5KB for watchdog
+    static const int MAIN_SS      = 1024*8;     // Already 8KB
+    static const int RCIN_SS      = 1024*3.5;   // Increased from 3KB to 3.5KB for watchdog
+    static const int RCOUT_SS     = 1024*3;     // Increased from 1.5KB to 3KB for watchdog
+    static const int WIFI_SS1     = 1024*3;     // Increased from 2.25KB to 3KB for watchdog
+    static const int WIFI_SS2     = 1024*3;     // Increased from 2.25KB to 3KB for watchdog
+    static const int UART_SS      = 1024*3;     // Increased from 2.25KB to 3KB for watchdog
+    static const int DEVICE_SS    = 1024*4;     // Already 4KB
+    static const int IO_SS        = 1024*4;     // Increased from 3.5KB to 4KB for watchdog
+    static const int STORAGE_SS   = 1024*3;     // Increased from 2KB to 3KB for watchdog
 
 private:
     AP_HAL::HAL::Callbacks *callbacks;
@@ -140,4 +165,11 @@ private:
     bool _in_io_proc;
     void _run_io();
     Semaphore _io_sem;
+
+    // Expected delay tracking
+    uint32_t _expected_delay_start_ms;
+    uint32_t _expected_delay_duration_ms;
+
+    // Priority boost tracking
+    bool _priority_boosted;
 };

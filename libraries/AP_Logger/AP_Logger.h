@@ -446,7 +446,11 @@ protected:
                                bool is_critical);
 
 private:
+    #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    #define LOGGER_MAX_BACKENDS 3  // ESP32 may use PSRAM + File + MAVLink
+    #else
     #define LOGGER_MAX_BACKENDS 2
+    #endif
     uint8_t _next_backend;
     AP_Logger_Backend *backends[LOGGER_MAX_BACKENDS];
     const AP_Int32 *_log_bitmask;

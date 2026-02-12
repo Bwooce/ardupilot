@@ -26,7 +26,7 @@
 class ESP32::Semaphore : public AP_HAL::Semaphore
 {
 public:
-    Semaphore();
+    Semaphore(bool recursive = true);  // Default to recursive for backward compatibility
     bool give() override;
     bool take(uint32_t timeout_ms) override;
     bool take_nonblocking() override;
@@ -35,6 +35,7 @@ public:
     bool check_owner();
 protected:
     void*  handle;
+    bool _is_recursive;
 };
 
 class ESP32::BinarySemaphore : public AP_HAL::BinarySemaphore {

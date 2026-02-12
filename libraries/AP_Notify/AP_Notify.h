@@ -33,6 +33,7 @@
 #define DISPLAY_OFF     0
 #define DISPLAY_SSD1306 1
 #define DISPLAY_SH1106  2
+#define DISPLAY_HD44780 3
 #define DISPLAY_SITL 10
 
 class AP_Notify
@@ -102,6 +103,7 @@ public:
 #if HAL_WITH_IO_MCU && AP_IOMCU_PROFILED_SUPPORT_ENABLED
         Notify_LED_ProfiLED_IOMCU           = (1 << 19), // ProfiLED IOMCU
 #endif
+        Notify_LED_APA102                   = (1 << 20), // APA102
         Notify_LED_MAX
     };
 

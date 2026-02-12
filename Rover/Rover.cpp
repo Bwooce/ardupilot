@@ -561,4 +561,14 @@ bool Rover::get_wp_crosstrack_error_m(float &xtrack_error) const
 Rover rover;
 AP_Vehicle& vehicle = rover;
 
+// Temporarily disabled to debug startup issue
+// #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+// // Override the weak function to provide Rover's ESP32 params instance
+// namespace ESP32 {
+//     ESP32Params* esp32_params() {
+//         return rover.get_esp32_params();
+//     }
+// }
+// #endif
+
 AP_HAL_MAIN_CALLBACKS(&rover);

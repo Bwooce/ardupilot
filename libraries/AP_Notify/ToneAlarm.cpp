@@ -126,7 +126,7 @@ bool AP_ToneAlarm::init()
     // before they try to arm. We don't do this on Linux as Linux
     // flight controllers don't usually have removable storage
     struct stat st;
-    if (AP::FS().stat(HAL_BOARD_STORAGE_DIRECTORY, &st) != 0) {
+    if (AP::FS().stat(HAL_BOARD_LOG_DIRECTORY, &st) != 0) {
         play_tone(AP_NOTIFY_TONE_NO_SDCARD);
         return true;
     }
