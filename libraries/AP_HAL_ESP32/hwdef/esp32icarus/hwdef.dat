@@ -1,40 +1,276 @@
+# ArduPilot Hardware Definition for ESP32-Icarus Board  
+# Based on ESP32 Classic with MPU6000 IMU via SPI and WiFi capabilities
+#
+# ESP32-Icarus is a flight controller board featuring:
+# - ESP32 classic microcontroller (not ESP32-S3)
+# - MPU6000 6DOF IMU via SPI (gyro + accelerometer)
+# - WiFi connectivity for telemetry and configuration
+# - SD card storage via SDMMC (fast) or SPI (flexible)
+# - 6-channel RCOUT for motor/servo control
+# - 3 hardware UARTs for GPS, telemetry, and other peripherals
+# - External I2C bus for compass and other sensors
+# - Board auto-detection for IMU configuration
+# - Optimized pin layout for stable flight performance
+#
+# Pin Configuration Notes:
+# - ESP32 Classic has different constraints than ESP32-S3
+# - Some GPIO pins are input-only (34-39) and cannot drive outputs
+# - GPIO 6-11 are typically connected to SPI flash and should be avoided
+# - Strapping pins (0, 2, 5, 12, 15) may affect boot behavior
+
+MCU ESP32
+
+
+# Board identification
 define HAL_ESP32_BOARD_NAME "esp32-icarus"
 
+# Serial protocol defaults
+define DEFAULT_SERIAL1_PROTOCOL SerialProtocol_MAVLink2
+define DEFAULT_SERIAL2_PROTOCOL SerialProtocol_GPS
+
+# IMU Configuration - MPU6000 with Board Auto-Detection
+# Uses AP_FEATURE_BOARD_DETECT to automatically detect and configure the MPU6000
+# This allows the same firmware to work with different IMU sensor configurations
 define HAL_INS_DEFAULT AP_FEATURE_BOARD_DETECT
 define HAL_INS_MPU60x0_NAME "MPU6000"
+# 
+# Alternative manual IMU configuration (if auto-detection doesn't work):
+# define HAL_INS_DEFAULT HAL_INS_MPU6000_SPI
+# define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, "MPU6000", ROTATION_NONE)
+# 
+# Available IMU rotations if physical orientation differs:
+# ROTATION_NONE, ROTATION_ROLL_180, ROTATION_YAW_90, ROTATION_YAW_270
+# ROTATION_PITCH_180, ROTATION_ROLL_180_YAW_90, etc.
 
-define ALLOW_ARM_NO_COMPASS
+# Compass Configuration - Optional (allows arming without compass)
+# This is useful for indoor flight or when GPS/compass module is not connected
+define ALLOW_ARM_NO_COMPASS 1
+# To add external compass support:
+# define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+# define HAL_MAG_PROBE_LIST PROBE_MAG_I2C(HMC5843, 0, 0x1E)
+# Common compass addresses: HMC5843/5883=0x1E, QMC5883L=0x0D
 
+# WiFi Configuration
+# WiFi mode 1 = TCP (reliable connection, standard mavlink port 5760)
+# WiFi mode 2 = UDP (lower latency, requires UDPCL connection to 192.168.4.1:14550)
+define HAL_ESP32_WIFI 1
+# Default WiFi credentials (change for security):
+# define WIFI_SSID "ardupilot123"
+# define WIFI_PWD "ardupilot123"
+# 
+# WiFi Usage Tips:
+# - TCP mode: Connect ground station to 192.168.4.1:5760
+# - UDP mode: Use UDPCL connection type in Mission Planner
+# - Consider disabling USB serial for WiFi-only operation: SERIAL0_PROTOCOL=0
+# - WiFi can interfere with some I2C sensors - test thoroughly
+
+# MAVLink Configuration - Disable MAVLink on Serial0 (USB)
+# This optimizes for WiFi-based telemetry instead of USB serial
+define HAL_ESP32_NO_MAVLINK_0 1
+# To re-enable USB MAVLink, comment out the line above
+
+# Storage Configuration - SD Card Support
+# SDMMC mode uses dedicated pins for faster performance
 define HAL_ESP32_SDCARD 1
 define HAL_ESP32_SDMMC 1
+# Alternative: SPI SD card mode (more flexible pinout but slower)
+# Comment out SDMMC above and uncomment below for SPI mode:
+# define HAL_ESP32_SDSPI {.host=VSPI_HOST, .dma_ch=2, .mosi=GPIO_NUM_2, .miso=GPIO_NUM_15, .sclk=GPIO_NUM_26, .cs=GPIO_NUM_21}
+# 
+# Storage directories for different data types
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"          # Flight logs
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"    # Parameters and waypoints
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"    # Terrain data
+# 
+# Additional filesystem support
+# define HAVE_FILESYSTEM_SUPPORT 1
+# define HAL_OS_POSIX_IO 1
+# define LOGGER_MAVLINK_SUPPORT 1
 
-define HAL_ESP32_WIFI 1
+# ADC Configuration - Disabled for Stability
+# ADC is disabled to avoid potential conflicts with WiFi and reduce complexity
+define HAL_DISABLE_ADC_DRIVER 1
+define HAL_USE_ADC 0
+# 
+# To enable ADC for battery monitoring or other analog sensors:
+# define HAL_USE_ADC 1
+# define HAL_DISABLE_ADC_DRIVER 0
+# And add pin definitions:
+# define HAL_ESP32_ADC_PINS {ADC_CHANNEL_0, 11, 36}, {ADC_CHANNEL_3, 11, 39}
+# 
+# ESP32 Classic ADC Notes:
+# - ADC1 pins: GPIO 32-39 (can coexist with WiFi)
+# - ADC2 pins: GPIO 0, 2, 4, 12-15, 25-27 (cannot be used with WiFi)
+# - Input-only pins (34-39) are ideal for ADC as they have no pullup resistors
+# - Use pins 36, 39 for battery voltage monitoring (high impedance)
+# - Calibration may be needed for accurate voltage readings
 
-define HAL_ESP32_RCIN GPIO_NUM_36
+# Pin Configuration (from esp32icarus.h)
+# ESP32 Classic Pin Layout and Constraints:
+# 
+# Input-Only Pins (cannot drive outputs): GPIO 34, 35, 36, 37, 38, 39
+# Flash/PSRAM Pins (avoid): GPIO 6, 7, 8, 9, 10, 11
+# Strapping Pins (affect boot): GPIO 0, 2, 5, 12, 15
+# UART0 (USB/Serial): GPIO 1 (TX), GPIO 3 (RX)
+# 
+# Pin Usage Guidelines:
+# - Use input-only pins (34-39) for ADC and digital inputs only
+# - Reserve GPIO 1,3 for primary serial communication
+# - Be careful with strapping pins - they affect boot behavior
+# - GPIO 12 has internal pulldown - avoid for critical signals
+# - GPIO 2 has internal LED on many boards
 
-ESP32_RCOUT GPIO_NUM_9
-ESP32_RCOUT GPIO_NUM_10
-ESP32_RCOUT GPIO_NUM_27
-ESP32_RCOUT GPIO_NUM_13
-ESP32_RCOUT GPIO_NUM_22
-ESP32_RCOUT GPIO_NUM_21
-
-# SPI Buses
-#            Host      DMA Channel     MOSI        MISO        SCLK
-ESP32_SPIBUS VSPI_HOST 1               GPIO_NUM_23 GPIO_NUM_19 GPIO_NUM_18
-
-# SPI Devices
-#            Name                Bus   Device  ChipSel      Mode LoSpeed HiSpeed
-ESP32_SPIDEV MPU6000             0     1       GPIO_NUM_5   0    1*MHZ   6*MHZ
-
-# i2c Buses
-#             Port       SDA         SCL         SPEED    INTERNAL SOFT
-ESP32_I2CBUS  I2C_NUM_0  GPIO_NUM_26 GPIO_NUM_25 400*KHZ  false    false
-
-# Hardware UARTs
-#             PORT        RXPIN        TXPIN
-ESP32_SERIAL  UART_NUM_0  GPIO_NUM_3   GPIO_NUM_1
-ESP32_SERIAL  UART_NUM_1  GPIO_NUM_34  GPIO_NUM_32
-ESP32_SERIAL  UART_NUM_2  GPIO_NUM_35  GPIO_NUM_33
-
+# RMT (Remote Control) Input Configuration
+# Uses GPIO 36 (input-only pin) for RC receiver input
 define HAL_ESP32_RMT_RX_PIN_NUMBER 36
+# Alternative RCIN pins (input-only recommended):
+# GPIO 34, 35, 37, 38, 39
+
+# I2C Bus Configuration - External Sensor Bus
+# Configured as external bus for compass, barometer, and other I2C sensors
+I2C_ORDER I2C0
+I2C0_SDA_PIN 26       # I2C data line
+I2C0_SCL_PIN 25       # I2C clock line
+I2C0_SPEED 400000     # 400kHz speed (standard for most sensors)
+I2C0_INTERNAL 0       # External bus designation
+# 
+# Alternative I2C pin combinations:
+# SDA/SCL: 21/22 (default ESP32 I2C pins)
+# SDA/SCL: 16/17 (if UARTs not needed)
+# SDA/SCL: 18/19 (if SPI not needed)
+# 
+# For multiple I2C buses:
+# I2C_ORDER I2C0 I2C1
+# I2C1_SDA_PIN 21
+# I2C1_SCL_PIN 22
+# I2C1_INTERNAL 1
+
+# UART Configuration - Three Hardware UARTs
+# ESP32 Classic has 3 UART peripherals available for various uses
+UART_ORDER SERIAL0 SERIAL1 SERIAL2
+# UART0: Primary communication (USB/Debug)
+SERIAL0_TX_PIN 1      # Standard ESP32 UART0 TX (connected to USB-to-serial)
+SERIAL0_RX_PIN 3      # Standard ESP32 UART0 RX (connected to USB-to-serial)
+# UART1: GPS or telemetry (uses regular GPIO pins)
+SERIAL1_TX_PIN 32     # UART1 TX (GPIO 32 is ADC capable but safe for output)
+SERIAL1_RX_PIN 34     # UART1 RX (GPIO 34 is input-only, perfect for RX)
+# UART2: Additional telemetry or external device communication  
+SERIAL2_TX_PIN 33     # UART2 TX (GPIO 33 is safe for general use)
+SERIAL2_RX_PIN 35     # UART2 RX (GPIO 35 is input-only, perfect for RX)
+# 
+# Alternative UART pin assignments:
+# SERIAL1: TX=17, RX=16 (if I2C not needed on these pins)
+# SERIAL2: TX=19, RX=18 (if SPI not needed on these pins)
+# 
+# UART Usage Recommendations:
+# - SERIAL0: Ground station communication or debug
+# - SERIAL1: GPS module (most common)
+# - SERIAL2: Telemetry radio or companion computer
+
+# RCOUT Configuration - 6 Channel Motor/Servo Output
+# Pin assignment matches original static header exactly
+# These pins drive ESCs (Electronic Speed Controllers) and servos
+RCOUT1_PIN 16         # Motor/servo 1 (Safe alternative to GPIO 9 which is flash-connected)
+RCOUT2_PIN 4          # Motor/servo 2 (Safe alternative to GPIO 10 which is flash-connected)
+RCOUT3_PIN 27         # Motor/servo 3 (Safe general-purpose GPIO)
+RCOUT4_PIN 13         # Motor/servo 4 (Safe, has weak internal pullup)
+RCOUT5_PIN 22         # Motor/servo 5 (Safe general-purpose GPIO)
+RCOUT6_PIN 21         # Motor/servo 6 (Safe general-purpose GPIO)
+# 
+# IMPORTANT: GPIO 9 and 10 Flash Connection Warning
+# On some ESP32 boards, GPIO 9 and 10 are connected to the SPI flash chip
+# If your board experiences boot issues or instability, try these alternatives:
+# RCOUT1_PIN 16        # Alternative for GPIO 9
+# RCOUT2_PIN 4         # Alternative for GPIO 10
+# 
+# Other safe RCOUT pin alternatives:
+# GPIO 2, 4, 5, 12, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27, 32, 33
+# Avoid: GPIO 1,3 (UART0), GPIO 6-11 (flash), GPIO 34-39 (input-only)
+
+# RCIN Configuration - RC Receiver Input
+# Uses input-only GPIO 36 for reliable RC signal reception
+RCIN_PIN 36           # RC receiver input (PPM/SBUS)
+# Alternative RCIN pins (input-only pins preferred):
+# GPIO 34, 35, 37, 38, 39 (all input-only)
+# Or regular GPIO: 2, 4, 12, 13, 14, 15, 25, 26
+
+# SPI1 Bus Configuration - VSPI for MPU6000 IMU
+# Uses VSPI_HOST (SPI3) peripheral for sensor communication
+SPI1_SCK_PIN 18       # SPI clock (VSPI default)
+SPI1_MISO_PIN 19      # SPI data input (VSPI default)  
+SPI1_MOSI_PIN 23      # SPI data output (VSPI default)
+# 
+# Alternative SPI pin assignments (if above pins conflict):
+# HSPI pins: SCK=14, MISO=12, MOSI=13 (use if VSPI pins needed elsewhere)
+# Custom pins: Can use most GPIO pins for SPI with reduced performance
+
+# SPI Device Configuration - MPU6000 IMU
+MPU6000_CS_PIN 5      # MPU6000 chip select (CS) pin
+# 
+# Additional SPI devices can be added:
+# BMP280_CS_PIN 15     # Barometer chip select
+# FLASH_CS_PIN 16      # External flash chip select
+# 
+# SPI Device Performance Notes:
+# - Use shorter wire lengths for high-speed SPI (>1MHz)
+# - Add pull-up resistors on CS lines if experiencing reliability issues
+# - GPIO 5 is a strapping pin - ensure proper pullup for reliable CS operation
+# - Consider using non-strapping pins for CS if boot issues occur
+
+# Debugging and Development Options
+# Uncomment these for additional debug output (use with caution on ESP32):
+# define BUSDEBUG 1          # I2C/SPI bus debugging
+# define INSEDEBUG 1         # IMU/INS debugging
+# define SCHEDDEBUG 1        # Scheduler debugging
+# define STORAGEDEBUG 1      # Storage/SD card debugging
+# 
+# WARNING: Debug options increase memory usage and may cause stack overflows
+# Only enable during development and disable for flight operations
+
+# Alternative Configuration Examples:
+# 
+# For boards without SD card support:
+# define HAL_ESP32_SDCARD 0
+# define HAL_LOGGING_BACKENDS_DEFAULT 2  # Log over MAVLink instead
+# 
+# For minimal memory usage:
+# define AP_MOTORS_FRAME_DEFAULT_ENABLED 0
+# define AP_MOTORS_FRAME_QUAD_ENABLED 1
+# define AP_SCRIPTING_ENABLED 0
+# define AP_FILESYSTEM_ESP32_ENABLED 0
+# 
+# For external compass on I2C:
+# define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+# define HAL_MAG_PROBE_LIST PROBE_MAG_I2C(HMC5843, 0, 0x1E)
+# 
+# For barometer on I2C:
+# define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
+# define HAL_BARO_ALLOW_INIT_NO_BARO 1
+
+# PSRAM Configuration - ESP32 Classic External PSRAM Support
+# ESP32 Classic supports external PSRAM via SPI interface (up to 8MB)
+# Check your ESP32-Icarus board specifications to see if it includes PSRAM
+# Uncomment and configure if your board includes PSRAM:
+# PSRAM_SIZE 4MB              # Common sizes: 4MB, 8MB (verify with board documentation)
+# PSRAM_MALLOC_THRESHOLD 16384 # Minimum allocation size for PSRAM (16KB recommended)
+# PSRAM_RESERVE_INTERNAL 16384 # Reserve internal RAM for critical operations (16KB)
+#
+# ESP32 Classic PSRAM Benefits:
+# - Dramatically increases available memory (from ~300KB to 4-8MB)
+# - Enables advanced flight features: terrain following, complex missions
+# - Allows larger logging buffers and more detailed flight data
+# - Supports Lua scripting for custom flight behaviors
+# - Essential for computer vision applications or AI-based navigation
+#
+# ESP32 Classic PSRAM Performance:
+# - Slower than internal RAM but much faster than SD card or flash
+# - Ideal for large buffers, logging data, parameter storage
+# - ArduPilot intelligently uses PSRAM for non-time-critical allocations
+# - Critical flight control loops remain in fast internal RAM
+#
+# To determine if your ESP32-Icarus has PSRAM:
+# - Check board documentation or schematic
+# - Look for additional SOIC-8 package near ESP32 (ESP-PSRAM64H or similar)
+# - Many ESP32 WROOM-32 modules include PSRAM, WROOM-32D typically does not
+# - Development boards often specify \"4MB PSRAM\" or \"8MB PSRAM\" in their specs
+# - Use ESP-IDF menuconfig to detect PSRAM automatically

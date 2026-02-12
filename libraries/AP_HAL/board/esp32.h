@@ -1,5 +1,39 @@
 #pragma once
 
+// ESP32 needs _GNU_SOURCE for asprintf/vasprintf before any stdio.h includes
+// Use same value as WAF ap_config.h to avoid redefinition warning
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+
+// ESP32 has different struct alignment than other platforms
+// Force MAVLink to use safe byte-by-byte packing instead of direct struct access
+// This must be set BEFORE any MAVLink headers are included
+#ifdef MAVLINK_ALIGNED_FIELDS
+#undef MAVLINK_ALIGNED_FIELDS
+#endif
+#define MAVLINK_ALIGNED_FIELDS 0
+
+// ESP32: Force byte-wise field access for all MAVLink operations
+// The MAVLink generator determines packing needs based on standard alignment,
+// but ESP32 has different alignment requirements causing corruption in messages
+// like HIGH_LATENCY2. Setting MAVLINK_ALIGNED_FIELDS=0 forces safe byte-wise
+// access instead of direct struct field access, avoiding alignment issues.
+#define ESP32_MAVLINK_OVERRIDE_APPLIED 1
+
+// UHCI (UART-DMA) configuration - conditionally enable based on SOC capabilities
+#ifdef SOC_UHCI_SUPPORTED
+#if SOC_UHCI_SUPPORTED
+#define AP_HAL_ESP32_UHCI_SUPPORTED 1
+#else
+#define AP_HAL_ESP32_UHCI_SUPPORTED 0
+#endif
+#else
+#define AP_HAL_ESP32_UHCI_SUPPORTED 0
+#endif
+
+// Board-specific configuration now handled automatically by hwdef.h
+// Generated during build process by esp32_hwdef.py
 #include <hwdef.h>
 
 #ifndef HAL_BOARD_STATE_DIRECTORY
@@ -17,13 +51,17 @@
 #ifndef HAL_BOARD_STORAGE_DIRECTORY
 #define HAL_BOARD_STORAGE_DIRECTORY HAL_BOARD_STATE_DIRECTORY "/STORAGE"
 #endif
-
-
 #define HAL_BOARD_NAME "ESP32"
 #define HAL_CPU_CLASS HAL_CPU_CLASS_150
+#ifndef HAL_WITH_DRONECAN
 #define HAL_WITH_DRONECAN 0
+#endif
+#ifndef HAL_WITH_UAVCAN
 #define HAL_WITH_UAVCAN 0
+#endif
+#ifndef HAL_MAX_CAN_PROTOCOL_DRIVERS
 #define HAL_MAX_CAN_PROTOCOL_DRIVERS 0
+#endif
 #define HAL_HAVE_SAFETY_SWITCH 0
 #define HAL_HAVE_BOARD_VOLTAGE 0
 #define HAL_HAVE_SERVO_VOLTAGE 0
@@ -31,7 +69,9 @@
 #define HAL_WITH_IO_MCU 0
 
 #define O_CLOEXEC 0
+#ifndef HAL_STORAGE_SIZE
 #define HAL_STORAGE_SIZE (16384)
+#endif
 
 #ifndef HAL_PROGRAM_SIZE_LIMIT_KB
 #define HAL_PROGRAM_SIZE_LIMIT_KB 2048
@@ -52,43 +92,92 @@
 #define HAL_WITH_EKF_DOUBLE HAL_HAVE_HARDWARE_DOUBLE
 #endif
 
+#ifndef HAL_NUM_CAN_IFACES
 #define HAL_NUM_CAN_IFACES 0
+#endif
+#ifndef HAL_MEM_CLASS
 #define HAL_MEM_CLASS HAL_MEM_CLASS_192
-
+#endif 
 // disable uncommon stuff that we'd otherwise get 
 #define AP_EXTERNAL_AHRS_ENABLED 0
+#ifndef HAL_GENERATOR_ENABLED
 #define HAL_GENERATOR_ENABLED 0
+#endif
 
 #define __LITTLE_ENDIAN  1234
 #define __BYTE_ORDER     __LITTLE_ENDIAN
 
 // ArduPilot uses __RAMFUNC__ to place functions in fast instruction RAM
+#ifndef __RAMFUNC__
 #define __RAMFUNC__ IRAM_ATTR
+#endif
 
 
-// whenver u get ... error: "xxxxxxx" is not defined, evaluates to 0 [-Werror=undef]  just define it below as 0
+// whenever u get ... error: "xxxxxxx" is not defined, evaluates to 0 [-Werror=undef]  just define it below as 0
+// Only define if not already defined by ESP-IDF to avoid redefinition warnings
+#ifndef CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
 #define CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY 0
+#endif
+#ifndef XCHAL_ERRATUM_453
 #define XCHAL_ERRATUM_453 0
+#endif
 //#define CONFIG_FREERTOS_CORETIMER_0 0
-#define CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE 0
+// Stack overflow checking: Enable in debug mode, disable for performance
+#ifndef CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE
+#ifdef ESP32_DEBUG_MODE
+#if ESP32_DEBUG_MODE
+#define CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE 0  // Enable stack checking (NONE=0 means checking is ON)
+#else
+#define CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE 1  // Disable for performance
+#endif
+#else
+#define CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE 1  // Default: performance mode
+#endif
+#endif
+#ifndef CONFIG_FREERTOS_CHECK_STACKOVERFLOW_PTRVAL
 #define CONFIG_FREERTOS_CHECK_STACKOVERFLOW_PTRVAL 0
+#endif
+#ifndef CONFIG_FREERTOS_ENABLE_STATIC_TASK_CLEAN_UP
 #define CONFIG_FREERTOS_ENABLE_STATIC_TASK_CLEAN_UP 0
+#endif
+#ifndef CONFIG_FREERTOS_USE_TICKLESS_IDLE
 #define CONFIG_FREERTOS_USE_TICKLESS_IDLE 0
+#endif
+#ifndef CONFIG_SYSVIEW_ENABLE
 #define CONFIG_SYSVIEW_ENABLE 0
+#endif
+#ifndef CONFIG_SPI_FLASH_DANGEROUS_WRITE_ALLOWED
 #define CONFIG_SPI_FLASH_DANGEROUS_WRITE_ALLOWED 0
+#endif
+#ifndef CONFIG_SPI_FLASH_ENABLE_COUNTERS
 #define CONFIG_SPI_FLASH_ENABLE_COUNTERS 0
+#endif
+#ifndef CONFIG_LWIP_DHCP_RESTORE_LAST_IP
 #define CONFIG_LWIP_DHCP_RESTORE_LAST_IP 0
+#endif
+#ifndef CONFIG_LWIP_STATS
 #define CONFIG_LWIP_STATS 0
+#endif
+#ifndef CONFIG_LWIP_PPP_SUPPORT
 #define CONFIG_LWIP_PPP_SUPPORT 0
-#define CONFIG_LWIP_STATS 0
+#endif
 //#define CONFIG_ESP32_WIFI_CSI_ENABLED 0
 //#define CONFIG_ESP32_WIFI_NVS_ENABLED 0
+#ifndef CONFIG_NEWLIB_NANO_FORMAT
 #define CONFIG_NEWLIB_NANO_FORMAT 0
+#endif
+#ifndef CONFIG_LWIP_IP4_REASSEMBLY
 #define CONFIG_LWIP_IP4_REASSEMBLY 0
+#endif
+#ifndef CONFIG_LWIP_IP6_REASSEMBLY
 #define CONFIG_LWIP_IP6_REASSEMBLY 0
-#define CONFIG_LWIP_STATS 0
+#endif
+#ifndef LWIP_COMPAT_SOCKET_INET
 #define LWIP_COMPAT_SOCKET_INET 0
+#endif
+#ifndef LWIP_COMPAT_SOCKET_ADDR
 #define LWIP_COMPAT_SOCKET_ADDR 0
+#endif
 //#define CONFIG_ESP32_WIFI_TX_BA_WIN 0
 //#define CONFIG_ESP32_WIFI_RX_BA_WIN 0
 
@@ -110,12 +199,18 @@
 #define AP_OPTICALFLOW_ENABLED 0
 #define AP_RPM_ENABLED 0
 #define AP_AIRSPEED_AUTOCAL_ENABLE 0
+#ifndef HAL_MOUNT_ENABLED
 #define HAL_MOUNT_ENABLED 0
+#endif
 #define AP_CAMERA_ENABLED 0
 #define HAL_SOARING_ENABLED 0
 #define AP_TERRAIN_AVAILABLE 0
 #define HAL_ADSB_ENABLED 0
-#define HAL_BUTTON_ENABLED 0 
+#ifndef HAL_BUTTON_ENABLED
+#define HAL_BUTTON_ENABLED 0
+#endif
+#ifndef AP_GRIPPER_ENABLED
+#endif 
 #define AP_GRIPPER_ENABLED 0
 #define AP_LANDINGGEAR_ENABLED 0
 
@@ -128,11 +223,24 @@
 
 // other big things..
 #define HAL_QUADPLANE_ENABLED 0
+#ifndef HAL_GYROFFT_ENABLED
 #define HAL_GYROFFT_ENABLED 0
+#endif
 
 // remove once ESP32 isn't so chronically slow
 #define AP_SCHEDULER_OVERTIME_MARGIN_US 50000UL
 
 #ifndef AP_NOTIFY_BUZZER_ENABLED
 #define AP_NOTIFY_BUZZER_ENABLED 1
+#endif
+
+// ESP32 asprintf/vasprintf support - add at end to avoid include order issues
+#ifdef __cplusplus
+extern "C" {
+#endif
+// ESP-IDF provides asprintf/vasprintf but may need feature macros enabled
+#include <stdio.h>
+#include <stdarg.h>
+#ifdef __cplusplus
+}
 #endif
