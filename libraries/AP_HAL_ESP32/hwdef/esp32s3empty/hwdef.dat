@@ -1,63 +1,303 @@
+# ArduPilot Hardware Definition for ESP32-S3 Empty Board
+# Minimal template configuration with no sensors - suitable for custom builds
+#
+# This is a minimal "empty" configuration designed as a template for custom ESP32-S3 builds:
+# - No IMU, barometer, or compass sensors configured by default
+# - Minimal logging and storage to reduce memory usage
+# - WiFi enabled in UDP mode for telemetry
+# - 6-channel RCOUT for basic motor/servo control
+# - Optimized for low memory usage (only quad frame enabled)
+# - Comprehensive comments showing how to add sensors and peripherals
+# - Suitable for educational use, prototyping, or memory-constrained applications
+#
+# WARNING: This configuration has pin conflicts in the original static header:
+# - GPIO 14 is shared between I2C SCL and RCIN (resolved by using GPIO 16 for RCIN)
+# - Some configurations may need adjustment based on your hardware layout
+
+MCU ESP32S3
+
+# ESP-IDF RTC watchdog definitions (missing from some ESP-IDF versions)
+# These will not be needed in future ESP-IDF versions
+define RTC_WDT_STG_SEL_OFF 0
+define RTC_WDT_STG_SEL_INT 1
+define RTC_WDT_STG_SEL_RESET_CPU 2
+define RTC_WDT_STG_SEL_RESET_SYSTEM 3
+define RTC_WDT_STG_SEL_RESET_RTC 4
+
+# Board identification
+define CONFIG_HAL_BOARD_SUBTYPE 6008
 define HAL_ESP32_BOARD_NAME "esp32s3empty"
 
-define HAL_ESP32_RMT_RX_PIN_NUMBER GPIO_NUM_14
+# Sensor Configuration - All Disabled for Minimal Build
+# This template has no sensors configured to minimize memory usage and provide
+# a clean starting point for custom configurations
 
-// no sensors
+# IMU Configuration - No IMU by default
+# To add an IMU, uncomment and configure one of these options:
 define HAL_INS_DEFAULT HAL_INS_NONE
-define INS_MAX_INSTANCES 3  # only here for binary identicality
+# Example SPI IMU configuration:
+# define HAL_INS_DEFAULT HAL_INS_MPU9250_SPI
+# define HAL_INS_MPU9250_NAME "mpu9250" 
+# define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, HAL_INS_MPU9250_NAME, ROTATION_NONE)
+# Example I2C IMU configuration:
+# define HAL_INS_DEFAULT HAL_INS_ICM20XXX_I2C
+# define HAL_INS_ICM20XXX_I2C_BUS 0
+# define HAL_INS_ICM20XXX_I2C_ADDR 0x68
 
+# Barometer Configuration - Allow boot without barometer
 define HAL_BARO_ALLOW_INIT_NO_BARO 1
+# To add a barometer, uncomment one of these:
+# define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
+# define HAL_BARO_PROBE_LIST PROBE_BARO_SPI(BMP280, "bmp280")
 
+# Compass Configuration - Disabled by default
 define AP_COMPASS_ENABLE_DEFAULT 0
-define ALLOW_ARM_NO_COMPASS
+define ALLOW_ARM_NO_COMPASS 1
+# To add compass support, uncomment and configure:
+# define AP_COMPASS_ENABLE_DEFAULT 1
+# define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+# define HAL_MAG_PROBE_LIST PROBE_MAG_I2C(HMC5843, 0, 0x1E)
+
+# Airspeed Sensor - Disabled
 define AP_AIRSPEED_ENABLED 0
+define AP_AIRSPEED_ANALOG_ENABLED 0
+define AP_AIRSPEED_BACKEND_DEFAULT_ENABLED 0
 
-# no ADC
+# ADC Configuration - Disabled for minimal build
+# ADC is disabled to reduce memory usage and avoid WiFi conflicts (ADC2 cannot coexist with WiFi)
+define HAL_DISABLE_ADC_DRIVER 1
+define HAL_USE_ADC 0
+# To enable ADC, uncomment and configure (use ADC1 pins only with WiFi):
+# define HAL_USE_ADC 1
+# define HAL_DISABLE_ADC_DRIVER 0  
+# And add ADC pin definitions:
+# define HAL_ESP32_ADC_PINS {ADC_CHANNEL_0, 11, 1}, {ADC_CHANNEL_1, 11, 2}
 
-# 2 use udp, 1 use tcp...  for udp,client needs to connect as UDPCL in missionplanner etc to 192.168.4.1 port 14550
+# WiFi Configuration - UDP Mode
+# WiFi mode 2 = UDP (for UDP, connect as UDPCL in Mission Planner to 192.168.4.1:14550)
+# WiFi mode 1 = TCP (more reliable but slightly higher overhead)
 define HAL_ESP32_WIFI 2
-
-define WIFI_SSID "ardupilot123"
+define WIFI_SSID "ardupilot123" 
 define WIFI_PWD "ardupilot123"
+#
+# WiFi Usage Tips:
+# - UDP mode requires UDPCL connection in ground station
+# - TCP mode uses standard TCP connection
+# - Consider disabling USB serial if using WiFi primarily: SERIAL0_PROTOCOL=0
+# - WiFi prevents use of ADC2 pins (GPIO 11-20 on ESP32-S3)
 
-//RCOUT which pins are used?
-
-ESP32_RCOUT GPIO_NUM_11
-ESP32_RCOUT GPIO_NUM_10
-ESP32_RCOUT GPIO_NUM_9
-ESP32_RCOUT GPIO_NUM_8
-ESP32_RCOUT GPIO_NUM_7
-ESP32_RCOUT GPIO_NUM_6
-
-# SPI BUS setup, including gpio, dma, etc
-
-# SPI per-device setup, including speeds, etc.
-
-# I2C bus list
-#             Port       SDA         SCL         SPEED    INTERNAL SOFT
-ESP32_I2CBUS  I2C_NUM_0  GPIO_NUM_13 GPIO_NUM_14 400*KHZ  true     true
-
-# rcin on what pin?
-define HAL_ESP32_RCIN GPIO_NUM_14
-
-
-//HARDWARE UARTS
-#             PORT        RXPIN        TXPIN
-ESP32_SERIAL  UART_NUM_0  GPIO_NUM_44  GPIO_NUM_43
-ESP32_SERIAL  UART_NUM_1  GPIO_NUM_17  GPIO_NUM_18
-
-define HAL_LOGGING_FILESYSTEM_ENABLED 0
-define HAL_LOGGING_DATAFLASH_ENABLED 0
-define HAL_LOGGING_MAVLINK_ENABLED 0
-
-define HAL_LOGGING_BACKENDS_DEFAULT 0
-
+# RC Protocol - disabled
 define AP_RCPROTOCOL_ENABLED 0
 
-define AP_FILESYSTEM_ESP32_ENABLED 0
-define AP_SCRIPTING_ENABLED 0
-define HAL_USE_EMPTY_STORAGE 1
+# Storage and Logging Configuration - Minimal for Memory Savings
+# Logging is minimized to reduce memory usage in this template configuration
+define HAL_LOGGING_FILESYSTEM_ENABLED 0  # No filesystem logging
+define HAL_LOGGING_DATAFLASH_ENABLED 0   # No dataflash logging
+define HAL_LOGGING_MAVLINK_ENABLED 0     # No mavlink logging
+define HAL_LOGGING_BACKENDS_DEFAULT 1    # Basic logging backend
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
+# 
+# To enable full logging capabilities, uncomment:
+# define HAL_LOGGING_FILESYSTEM_ENABLED 1
+# define HAL_LOGGING_MAVLINK_ENABLED 1
+# define LOGGER_MAVLINK_SUPPORT 1
+# And add SD card support:
+# define HAL_ESP32_SDCARD 1
+# define HAL_ESP32_SDMMC 1  # or use SPI mode
+# define HAVE_FILESYSTEM_SUPPORT 1
+# define HAL_OS_POSIX_IO 1
 
-# disable all frames for sim on hw except quad to save DRAM .bss
-define AP_MOTORS_FRAME_DEFAULT_ENABLED 0
-define AP_MOTORS_FRAME_QUAD_ENABLED 1
+# Advanced Features - Disabled for Minimal Build
+# These features are disabled to minimize DRAM and flash usage
+define AP_FILESYSTEM_ESP32_ENABLED 0     # No ESP32 filesystem
+define AP_SCRIPTING_ENABLED 0           # No Lua scripting support
+define HAL_USE_EMPTY_STORAGE 1          # Use minimal storage implementation
+
+# RC Protocol Configuration - Disabled for minimal build
+# RC input processing is disabled to save memory
+define AP_RCPROTOCOL_ENABLED 0
+# To enable RC input, uncomment:
+# define AP_RCPROTOCOL_ENABLED 1
+
+# Motor Frame Optimization - Memory Saving
+# Only quadcopter frame enabled to save DRAM .bss section
+# This is a significant memory optimization for resource-constrained builds
+define AP_MOTORS_FRAME_DEFAULT_ENABLED 0  # Disable all frame types by default
+define AP_MOTORS_FRAME_QUAD_ENABLED 1     # Enable only quadcopter frame
+# To enable other frame types, add:
+# define AP_MOTORS_FRAME_HEXA_ENABLED 1
+# define AP_MOTORS_FRAME_OCTA_ENABLED 1
+# define AP_MOTORS_FRAME_TRI_ENABLED 1
+
+# RMT Configuration - Pin assignment avoiding conflicts
+# Original static header had GPIO 14 conflict (I2C SCL + RCIN)
+# Using GPIO 16 for RMT to avoid pin conflicts
+define HAL_ESP32_RMT_RX_PIN_NUMBER 16
+
+# ESP-IDF missing defines (temporary)
+define RTC_WDT_STG_SEL_OFF 0
+define RTC_WDT_STG_SEL_INT 1
+define RTC_WDT_STG_SEL_RESET_CPU 2
+define RTC_WDT_STG_SEL_RESET_SYSTEM 3
+define RTC_WDT_STG_SEL_RESET_RTC 4
+
+# I2C Bus Configuration - Single Bus with Software Implementation
+# Uses software I2C for maximum flexibility and compatibility
+# This configuration matches the original static header layout
+I2C_ORDER I2C0
+I2C0_SDA_PIN 13       # I2C data line
+I2C0_SCL_PIN 14       # I2C clock line  
+I2C0_SPEED 400000     # 400kHz I2C speed
+I2C0_INTERNAL 1       # Internal bus designation
+I2C0_SOFT 1           # Use software I2C implementation
+# 
+# Alternative I2C configurations:
+# For hardware I2C (more efficient but less flexible):
+# I2C0_SOFT 0
+# For additional I2C buses:
+# I2C_ORDER I2C0 I2C1
+# I2C1_SDA_PIN 16
+# I2C1_SCL_PIN 15
+
+# UART Configuration - Two Hardware UARTs
+# ESP32-S3 has multiple UART peripherals available for various uses
+UART_ORDER SERIAL0 SERIAL1
+# UART0: USB programming and debug interface (connected to USB-to-serial chip)
+SERIAL0_TX_PIN 43     # USB UART TX (typically connected to CH340, CP2102, etc.)
+SERIAL0_RX_PIN 44     # USB UART RX
+# UART1: General purpose serial (for GPS, telemetry, external devices) 
+SERIAL1_TX_PIN 18     # Hardware UART1 TX
+SERIAL1_RX_PIN 17     # Hardware UART1 RX
+# 
+# Alternative UART pin assignments:
+# SERIAL1_TX_PIN 4, SERIAL1_RX_PIN 5  (if GPIO 17/18 needed for other purposes)
+# Additional UARTs can be configured:
+# UART_ORDER SERIAL0 SERIAL1 SERIAL2
+# SERIAL2_TX_PIN 6, SERIAL2_RX_PIN 7
+
+# RCOUT Configuration - 6 Channel PWM Output
+# These pins drive ESCs and/or servos for motor/actuator control
+# Pin assignment matches original static header exactly
+RCOUT1_PIN 11         # Motor/servo output 1 (typically front-right motor)
+RCOUT2_PIN 10         # Motor/servo output 2 (typically front-left motor) 
+RCOUT3_PIN 9          # Motor/servo output 3 (typically rear-right motor)
+RCOUT4_PIN 8          # Motor/servo output 4 (typically rear-left motor)
+RCOUT5_PIN 7          # Motor/servo output 5 (additional channel)
+RCOUT6_PIN 6          # Motor/servo output 6 (additional channel)
+# 
+# Alternative RCOUT pin assignments (if above pins conflict with other uses):
+# Can use any GPIO capable of PWM: 1-6, 12-14, 21, 38-42, 45-48
+# Example alternatives:
+# RCOUT1_PIN 1, RCOUT2_PIN 2, RCOUT3_PIN 3, RCOUT4_PIN 4
+
+# RCIN Configuration - RC Receiver Input
+# IMPORTANT: Original static header had pin conflict (GPIO 14 used for both I2C SCL and RCIN)
+# This configuration resolves the conflict by using GPIO 16 for RCIN
+RCIN_PIN 16           # RC receiver input (PPM/SBUS)
+# 
+# If you need GPIO 16 for other purposes, alternative RCIN pins:
+# RCIN_PIN 12  # Alternative 1
+# RCIN_PIN 21  # Alternative 2
+# Note: Must match HAL_ESP32_RMT_RX_PIN_NUMBER above
+
+# SPI Configuration - No SPI Buses Configured (Template)
+# This minimal configuration has no SPI buses to save resources
+# To add SPI support for sensors, uncomment and configure:
+#
+# SPI Bus Configuration (choose pins that don't conflict with above assignments):
+# SPI1_SCK_PIN 35      # SPI clock
+# SPI1_MISO_PIN 37     # SPI data in
+# SPI1_MOSI_PIN 36     # SPI data out
+# 
+# SPI Device Configuration (add chip select pins for each device):
+# MPU9250_CS_PIN 34    # IMU chip select
+# BMP280_CS_PIN 33     # Barometer chip select
+# 
+# Example complete SPI sensor configuration:
+# define HAL_INS_DEFAULT HAL_INS_MPU9250_SPI
+# define HAL_INS_MPU9250_NAME "mpu9250"
+# define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, HAL_INS_MPU9250_NAME, ROTATION_NONE)
+# define HAL_BARO_PROBE_LIST PROBE_BARO_SPI(BMP280, "bmp280")
+
+# PSRAM Configuration - Uncomment if Your Board Has PSRAM
+# PSRAM significantly increases available RAM for complex applications
+# PSRAM_SIZE 8MB               # Common PSRAM sizes: 2MB, 4MB, 8MB, 16MB
+# PSRAM_MODE OPI               # Octal Parallel Interface (fastest)
+# PSRAM_MALLOC_THRESHOLD 16384 # Minimum allocation size for PSRAM
+# PSRAM_RESERVE_INTERNAL 16384 # Reserve internal RAM for critical operations
+# 
+# Alternative PSRAM modes:
+# PSRAM_MODE QPI              # Quad Parallel Interface (older boards)
+
+# ESP32-S3 Pin Usage Summary and Constraints:
+# 
+# Reserved/Special Pins (avoid using):
+# - GPIO 0: Boot mode (needs pull-up for normal boot)
+# - GPIO 19, 20: USB D-/D+ (if using native USB)
+# - GPIO 26-32: Flash/PSRAM interface (if used)
+# - GPIO 43, 44: UART0 (USB programming interface) 
+# 
+# ADC Capable Pins:
+# - ADC1: GPIO 1-10 (can coexist with WiFi)
+# - ADC2: GPIO 11-20 (cannot be used when WiFi is enabled)
+# 
+# High-Speed Capable Pins (for SPI, etc.):
+# - GPIO 0-21, 33-37 (suitable for high-frequency signals)
+# 
+# Strapping Pins (may affect boot behavior):
+# - GPIO 0: Boot mode selection
+# - GPIO 3: VDD_SPI voltage selection  
+# - GPIO 45: VDD_SPI voltage selection
+# - GPIO 46: ROM message printing
+# 
+# Pin Assignment Best Practices:
+# 1. Use ADC1 pins (1-10) for analog inputs when WiFi is enabled
+# 2. Reserve GPIO 43/44 for USB UART unless specifically needed
+# 3. Use GPIO 33-37 for high-speed SPI interfaces
+# 4. Avoid strapping pins for critical functions
+# 5. Test pin assignments thoroughly on actual hardware
+#
+# Memory Optimization Tips for ESP32-S3:
+# - This template minimizes features to reduce DRAM usage
+# - Enable only needed motor frame types
+# - Disable unused protocols and features
+# - Use PSRAM for larger applications
+# - Monitor stack usage with debug options (use carefully - may cause overflow)
+# 
+# Debug Options (use with caution - may cause stack overflows):
+# define BUSDEBUG 1         # I2C/SPI bus debugging
+# define SCHEDDEBUG 1       # Scheduler debugging
+# define STORAGEDEBUG 1     # Storage system debugging
+
+# PSRAM Configuration - ESP32-S3 External PSRAM Support
+# ESP32-S3 supports high-performance external PSRAM (up to 32MB)
+# Many ESP32-S3 development boards include 8MB PSRAM with OPI interface
+# Uncomment and configure if your ESP32-S3 board includes PSRAM:
+# PSRAM_SIZE 8MB               # Common sizes: 2MB, 4MB, 8MB, 16MB, 32MB
+# PSRAM_MODE OPI               # Octal Parallel Interface (fastest, most common)
+# PSRAM_MALLOC_THRESHOLD 16384 # Minimum allocation size for PSRAM (16KB)
+# PSRAM_RESERVE_INTERNAL 16384 # Reserve internal RAM for critical operations (16KB)
+#
+# Alternative PSRAM modes:
+# PSRAM_MODE QPI              # Quad Parallel Interface (older/cheaper PSRAM chips)
+#
+# PSRAM Benefits for ESP32-S3:
+# - Massive memory expansion (from ~400KB internal to 8MB+ total)
+# - Enables complex applications: computer vision, AI, large datasets
+# - High-performance OPI interface (much faster than ESP32 Classic PSRAM)
+# - Allows simultaneous use of multiple memory-intensive features
+# - Essential for advanced ArduPilot features like scripting + logging + WiFi
+#
+# PSRAM Performance (ESP32-S3):
+# - OPI PSRAM approaches internal RAM speeds for sequential access
+# - Excellent for large buffers, image processing, data logging
+# - DMA operations work efficiently with PSRAM
+# - Cache optimization makes PSRAM very effective for most use cases
+#
+# To check if your ESP32-S3 board has PSRAM:
+# - Look for additional chip packages near the ESP32-S3 
+# - Check board specifications (many dev boards advertise \"8MB PSRAM\")
+# - ESP32-S3 modules ending in \"N8R8\" typically have 8MB PSRAM
+# - Use ESP-IDF tools: \"idf.py menuconfig\" shows PSRAM options if detected
