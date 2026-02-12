@@ -15,6 +15,10 @@
 #include "AP_Torqeedo/AP_Torqeedo.h"
 #include <AP_WindVane/AP_WindVane.h>
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include <AP_HAL_ESP32/ESP32_Params.h>
+#endif
+
 #define AP_PARAM_VEHICLE_NAME rover
 
 // Global parameter class.
@@ -426,6 +430,11 @@ public:
 
     // FS GCS timeout trigger time
     AP_Float fs_gcs_timeout;
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32-specific parameters
+    ESP32::ESP32Params esp32_params;
+#endif
 
     class ModeCircle mode_circle;
 };

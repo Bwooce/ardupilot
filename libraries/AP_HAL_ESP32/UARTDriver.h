@@ -29,22 +29,11 @@
 namespace ESP32
 {
 
-struct UARTDesc {
-    uart_port_t port;
-    gpio_num_t rx;
-    gpio_num_t tx;
-};
-
 class UARTDriver : public AP_HAL::UARTDriver
 {
 public:
 
-    UARTDriver(uint8_t serial_num)
-        : AP_HAL::UARTDriver()
-    {
-        _initialized = false;
-        uart_num = serial_num;
-    }
+    UARTDriver(uint8_t serial_num);  // Moved to .cpp file
 
     virtual ~UARTDriver() = default;
 
@@ -73,22 +62,38 @@ public:
       less accurate.
       A return value of zero means the HAL does not support this API */
      
-    uint64_t receive_time_constraint_us(uint16_t nbytes) override; 
+    uint64_t receive_time_constraint_us(uint16_t nbytes) override;
+
+    // Console connection detection
+    bool is_console_connected();  // Check if console interface is connected to host 
 
     uint32_t get_baud_rate() const override { return _baudrate; }
+    
+    // Debug: Get buffer sizes for verification
+    uint16_t get_rx_buffer_size() const { return RX_BUF_SIZE; }
+    uint16_t get_tx_buffer_size() const { return TX_BUF_SIZE; }
+    
+    // write() now handles atomicity - no need for separate write_packet()
+    
 
 private:
     bool _initialized;
-    const size_t TX_BUF_SIZE = 1024;
-    const size_t RX_BUF_SIZE = 1024;
-    uint8_t _buffer[32];
+    size_t TX_BUF_SIZE = 1024;
+    size_t RX_BUF_SIZE = 1024;
+    // Staging buffer - large enough for complete MAVLink packets (267 bytes + margin)
+    // ESP32 DMA requires 4-byte alignment, cache operations require cache line alignment
+    // Using 16-byte alignment for safety with both DMA and cache
+    __attribute__((aligned(16))) uint8_t _buffer[280];
     ByteBuffer _readbuf{0};
     ByteBuffer _writebuf{0};
     Semaphore _write_mutex;
+    Semaphore _read_mutex;
     void read_data();
     void write_data();
+    void calculate_buffer_sizes(uint32_t baudrate, uint16_t &rxS, uint16_t &txS);
 
     uint8_t uart_num;
+    bool _is_usb_console;  // True if this UART uses USB Serial/JTAG console interface
 
     // timestamp for receiving data on the UART, avoiding a lock
     uint64_t _receive_timestamp[2];
@@ -96,6 +101,12 @@ private:
     uint32_t _baudrate;
 
     const tskTaskControlBlock* _uart_owner_thd;
+    
+    // Allow multiple threads to access UART for MAVLink processing
+    bool _allow_multithread_access;
+    
+    // Event-driven processing instead of polling
+    QueueHandle_t _uart_event_queue;
 
     void _receive_timestamp_update(void);
 

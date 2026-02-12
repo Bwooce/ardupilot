@@ -19,19 +19,115 @@
 
 #if AP_FILESYSTEM_ESP32_ENABLED
 
-#define FSDEBUG 0
+#define FSDEBUG 0  // Disable verbose filesystem debug to prevent logging overflow
 
 #include <utime.h>
+#include <errno.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include "esp_log.h"
+
+
+#ifdef HAL_ESP32_USE_SPIFFS
+#include "esp_spiffs.h"
+#endif
+
+// Removed unused TAG variable
 
 extern const AP_HAL::HAL& hal;
 
+// Constructor to verify object creation
+AP_Filesystem_ESP32::AP_Filesystem_ESP32()
+{
+    // Logging removed to prevent stack overflow
+}
+
+// Destructor
+AP_Filesystem_ESP32::~AP_Filesystem_ESP32()
+{
+    // Logging removed to prevent stack overflow
+}
+
 int AP_Filesystem_ESP32::open(const char *fname, int flags, bool allow_absolute_paths)
 {
+    // Minimal logging to avoid stack overflow
 #if FSDEBUG
-    printf("DO open %s \n", fname);
+    ESP_LOGI(TAG, "open %s flags=0x%x", fname, flags);
 #endif
+
+#if FSDEBUG
+    ESP_LOGI(TAG, "open %s flags=0x%x (O_CREAT=%d, O_TRUNC=%d, O_WRONLY=%d)",
+             fname, flags,
+             (flags & O_CREAT) ? 1 : 0,
+             (flags & O_TRUNC) ? 1 : 0,
+             (flags & O_WRONLY) ? 1 : 0);
+
+    // Check if file exists before trying to create
+    struct stat st;
+    if (stat(fname, &st) == 0) {
+        ESP_LOGI(TAG, "File %s exists, size=%ld", fname, st.st_size);
+    } else {
+        ESP_LOGI(TAG, "File %s does not exist, will create", fname);
+    }
+#endif
+
     // we automatically add O_CLOEXEC as we always want it for ArduPilot FS usage
-    return ::open(fname, flags | O_TRUNC | O_CLOEXEC, 0666);
+    // Note: Don't add O_TRUNC here - let the caller specify it if needed
+
+
+#ifdef HAL_ESP32_USE_SPIFFS
+    // SPIFFS doesn't support O_CLOEXEC, remove it if present
+    int spiffs_flags = flags & ~O_CLOEXEC;
+
+    int fd;
+    if (spiffs_flags & O_CREAT) {
+        // For file creation, MUST provide mode
+        fd = ::open(fname, spiffs_flags, 0666);
+    } else {
+        // For opening existing files, mode is not needed
+        fd = ::open(fname, spiffs_flags);
+    }
+#else
+    int fd = ::open(fname, flags | O_CLOEXEC, 0666);
+#endif
+
+
+#if FSDEBUG
+    if (fd < 0) {
+        int saved_errno = errno;
+        ESP_LOGE(TAG, "Open failed for %s: %s (errno=%d)", fname, strerror(saved_errno), saved_errno);
+
+        // Additional diagnostics for ENOSPC
+        if (saved_errno == ENOSPC || saved_errno == 28) {  // 28 is ENOSPC
+            ESP_LOGE(TAG, "ENOSPC error - checking filesystem state");
+
+            // Try to create a simple test file
+            int test_fd = ::open("/APM/test.tmp", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+            if (test_fd >= 0) {
+                ESP_LOGW(TAG, "Test file creation succeeded! Issue may be with specific filename");
+                ::close(test_fd);
+                ::unlink("/APM/test.tmp");
+            } else {
+                ESP_LOGE(TAG, "Test file creation also failed: %s", strerror(errno));
+            }
+
+            // Check how many files exist
+            DIR* d = ::opendir("/APM");
+            if (d != nullptr) {
+                int count = 0;
+                while (::readdir(d) != nullptr) {
+                    count++;
+                }
+                ::closedir(d);
+                ESP_LOGI(TAG, "Current file count in /APM: %d (max_files=50)", count);
+            }
+        }
+    } else {
+        ESP_LOGI(TAG, "Open success fd=%d for %s", fd, fname);
+    }
+#endif
+    return fd;
 }
 
 int AP_Filesystem_ESP32::close(int fd)
@@ -93,7 +189,7 @@ int AP_Filesystem_ESP32::unlink(const char *pathname)
 int AP_Filesystem_ESP32::rename(const char *oldpath, const char *newpath)
 {
 #if FSDEBUG
-    printf("DO rename %s \n", oldpath, newpath);
+    printf("DO rename %s -> %s\n", oldpath, newpath);
 #endif
     return ::rename(oldpath, newpath);
 }
@@ -154,10 +250,27 @@ uint32_t AP_Filesystem_ESP32::bytes_until_fsync(int fd)
 // return free disk space in bytes
 int64_t AP_Filesystem_ESP32::disk_free(const char *path)
 {
-
 #if FSDEBUG
-    printf("DO free disk %s \n", path);
+    ESP_LOGI(TAG, "disk_free for path: %s", path);
 #endif
+
+#ifdef HAL_ESP32_USE_SPIFFS
+    // For SPIFFS, use esp_spiffs_info to get free space
+    size_t total = 0, used = 0;
+    esp_err_t ret = esp_spiffs_info("logs", &total, &used);
+    if (ret != ESP_OK) {
+        // Try without partition label (for older ESP-IDF) - logging removed to prevent stack overflow
+        ret = esp_spiffs_info(NULL, &total, &used);
+        if (ret != ESP_OK) {
+            // Error logging removed to prevent stack overflow
+            return -1;
+        }
+    }
+    int64_t free_bytes = (int64_t)(total - used);
+    // Logging removed to prevent stack overflow during filesystem operations
+    return free_bytes;
+#else
+    // Original FATFS code for SD card
     FATFS *fs;
     DWORD fre_clust, fre_sect;
 
@@ -173,6 +286,7 @@ int64_t AP_Filesystem_ESP32::disk_free(const char *path)
     int64_t tmp_free_bytes = fre_sect * FF_SS_SDCARD;
 
     return tmp_free_bytes;
+#endif
 }
 
 // return total disk space in bytes
@@ -181,6 +295,21 @@ int64_t AP_Filesystem_ESP32::disk_space(const char *path)
 #if FSDEBUG
     printf("DO usage disk %s \n", path);
 #endif
+
+#ifdef HAL_ESP32_USE_SPIFFS
+    // For SPIFFS, use esp_spiffs_info to get total space
+    size_t total = 0, used = 0;
+    esp_err_t ret = esp_spiffs_info("logs", &total, &used);
+    if (ret != ESP_OK) {
+        // Try without partition label (for older ESP-IDF)
+        ret = esp_spiffs_info(NULL, &total, &used);
+        if (ret != ESP_OK) {
+            return -1;
+        }
+    }
+    return (int64_t)total;
+#else
+    // Original FATFS code for SD card
     FATFS *fs;
     DWORD fre_clust, tot_sect;
 
@@ -196,6 +325,7 @@ int64_t AP_Filesystem_ESP32::disk_space(const char *path)
     int64_t tmp_total_bytes = tot_sect * FF_SS_SDCARD;
 
     return tmp_total_bytes;
+#endif
 }
 
 /*

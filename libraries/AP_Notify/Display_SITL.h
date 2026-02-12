@@ -22,6 +22,7 @@ public:
     void set_pixel(uint16_t x, uint16_t y) override;
     void clear_pixel(uint16_t x, uint16_t y) override;
     void clear_screen() override;
+    DisplayType get_display_type() const override { return DISPLAY_TYPE_PIXEL; }
 
 protected:
 
