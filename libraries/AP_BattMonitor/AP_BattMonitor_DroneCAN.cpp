@@ -13,6 +13,10 @@
 #include <AP_DroneCAN/AP_DroneCAN.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include <esp_log.h>
+#endif
+
 #define LOG_TAG "BattMon"
 
 extern const AP_HAL::HAL& hal;
@@ -40,16 +44,28 @@ AP_BattMonitor_DroneCAN::AP_BattMonitor_DroneCAN(AP_BattMonitor &mon, AP_BattMon
 
     // starts with not healthy
     _state.healthy = false;
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGI("BATTERY", "DroneCAN battery backend created (type=%d)", type);
+#endif
 }
 
 bool AP_BattMonitor_DroneCAN::subscribe_msgs(AP_DroneCAN* ap_dronecan)
 {
     const auto driver_index = ap_dronecan->get_driver_index();
 
-    return (Canard::allocate_sub_arg_callback(ap_dronecan, &handle_battery_info_trampoline, driver_index) != nullptr)
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGI("BATTERY", "Subscribing to battery messages on CAN driver %d", driver_index);
+#endif
+
+    bool result = (Canard::allocate_sub_arg_callback(ap_dronecan, &handle_battery_info_trampoline, driver_index) != nullptr)
         && (Canard::allocate_sub_arg_callback(ap_dronecan, &handle_battery_info_aux_trampoline, driver_index) != nullptr)
-        && (Canard::allocate_sub_arg_callback(ap_dronecan, &handle_mppt_stream_trampoline, driver_index) != nullptr)
-    ;
+        && (Canard::allocate_sub_arg_callback(ap_dronecan, &handle_mppt_stream_trampoline, driver_index) != nullptr);
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGI("BATTERY", "Battery subscription %s", result ? "SUCCESS" : "FAILED");
+#endif
+
+    return result;
 }
 
 /*
@@ -59,6 +75,11 @@ bool AP_BattMonitor_DroneCAN::subscribe_msgs(AP_DroneCAN* ap_dronecan)
 bool AP_BattMonitor_DroneCAN::match_battery_id(uint8_t instance, uint8_t battery_id)
 {
     const auto serial_num = AP::battery().get_serial_number(instance);
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGD("BATTERY", "match_battery_id: instance=%d, battery_id=%d, serial_num=%d, match=%s",
+             instance, battery_id, serial_num,
+             (serial_num < 0 || serial_num == (int32_t)battery_id) ? "YES" : "NO");
+#endif
     return serial_num < 0 || serial_num == (int32_t)battery_id;
 }
 
@@ -88,12 +109,25 @@ AP_BattMonitor_DroneCAN* AP_BattMonitor_DroneCAN::get_dronecan_backend(AP_DroneC
     }
     // find empty uavcan driver
     for (uint8_t i = 0; i < batt._num_instances; i++) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        ESP_LOGD("BATTERY", "Checking instance %d: driver=%p, type=%d, match_id=%s",
+                 i, batt.drivers[i],
+                 batt.drivers[i] ? (int)batt.allocated_type(i) : -1,
+                 batt.drivers[i] ? (match_battery_id(i, battery_id) ? "YES" : "NO") : "N/A");
+#endif
         if (batt.drivers[i] != nullptr &&
             batt.allocated_type(i) == AP_BattMonitor::Type::UAVCAN_BatteryInfo &&
             match_battery_id(i, battery_id)) {
 
             AP_BattMonitor_DroneCAN* batmon = (AP_BattMonitor_DroneCAN*)batt.drivers[i];
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            ESP_LOGD("BATTERY", "Instance %d matched: _ap_dronecan=%p, _node_id=%d",
+                     i, batmon->_ap_dronecan, batmon->_node_id);
+#endif
             if(batmon->_ap_dronecan != nullptr || batmon->_node_id != 0) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+                ESP_LOGD("BATTERY", "Instance %d already allocated, skipping", i);
+#endif
                 continue;
             }
             batmon->_ap_dronecan = ap_dronecan;
@@ -108,11 +142,24 @@ AP_BattMonitor_DroneCAN* AP_BattMonitor_DroneCAN::get_dronecan_backend(AP_DroneC
             return batmon;
         }
     }
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Only warn if battery monitors have been initialized (instances > 0)
+    // During early boot, battery data may arrive before AP_BattMonitor::init() runs
+    if (batt._num_instances > 0) {
+        ESP_LOGW("BATTERY", "No available DroneCAN battery monitor instance for node %d battery_id=%d (instances=%d)",
+                 node_id, battery_id, batt._num_instances);
+        ESP_LOGW("BATTERY", "Check BATT_SERIAL_NUM parameter - must be -1 (accept all) or match battery_id=%d", battery_id);
+    }
+#endif
     return nullptr;
 }
 
 void AP_BattMonitor_DroneCAN::handle_battery_info(const uavcan_equipment_power_BatteryInfo &msg)
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGD("BATTERY", "Processing BatteryInfo battery_id=%d: V=%.2fV I=%.2fA T=%.1fC SOC=%d%% SOH=%d%%",
+             msg.battery_id, msg.voltage, msg.current, msg.temperature - 273.15f, msg.state_of_charge_pct, msg.state_of_health_pct);
+#endif
     update_interim_state(msg.voltage, msg.current, msg.temperature, msg.state_of_charge_pct, msg.state_of_health_pct); 
 
     WITH_SEMAPHORE(_sem_battmon);
@@ -221,8 +268,12 @@ void AP_BattMonitor_DroneCAN::handle_mppt_stream(const mppt_Stream &msg)
 
 void AP_BattMonitor_DroneCAN::handle_battery_info_trampoline(AP_DroneCAN *ap_dronecan, const CanardRxTransfer& transfer, const uavcan_equipment_power_BatteryInfo &msg)
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGD("BATTERY", "BatteryInfo from node %d battery_id=%d", transfer.source_node_id, msg.battery_id);
+#endif
     AP_BattMonitor_DroneCAN* driver = get_dronecan_backend(ap_dronecan, transfer.source_node_id, msg.battery_id);
     if (driver == nullptr) {
+        // get_dronecan_backend() already logged appropriate warning if needed
         return;
     }
     driver->handle_battery_info(msg);
