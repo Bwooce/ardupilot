@@ -1,0 +1,42 @@
+# Additional debug configuration for ESP32-S3 with stack protection
+# This file supplements sdkconfig.defaults when building with --debug
+
+# Enable compiler stack protection (GCC -fstack-protector-strong)
+CONFIG_COMPILER_STACK_CHECK_MODE_STRONG=y
+
+# Enable FreeRTOS stack overflow detection using canary bytes
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+
+# Enable hardware watchpoint for stack overflow detection
+CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
+
+# Enable heap poisoning to detect use-after-free and buffer overflows
+CONFIG_HEAP_POISONING_COMPREHENSIVE=y
+
+# Note: HEAP_CORRUPTION_DETECTION removed in ESP-IDF 5.x
+# Use heap poisoning instead for memory corruption detection
+
+# Note: FREERTOS_ASSERT options changed in ESP-IDF 5.x
+# Assertions are now controlled by CONFIG_FREERTOS_ASSERT_DISABLE
+
+# Enable memory debugging features
+CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=n
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+
+# Hardware stack guard (ESP32-S3 specific)
+CONFIG_ESP_SYSTEM_HW_STACK_GUARD=y
+
+# Task watchdog configuration (ESP-IDF 5.x syntax)
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
+
+# Additional runtime checks
+CONFIG_ESP_SYSTEM_CHECK_INT_LEVEL_4=y
+
+# More detailed panic handler output
+CONFIG_ESP_PANIC_HANDLER_IRAM=y
+
+# Enable undefined behavior sanitizer (if available in toolchain)
+# CONFIG_COMPILER_WARN_WRITE_STRINGS=y

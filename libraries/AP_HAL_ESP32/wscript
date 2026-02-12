@@ -1,0 +1,28 @@
+
+import os
+
+def build(bld):
+    bld.ap_library(
+        name = 'HAL_ESP32',
+        srcs = [
+            'AnalogIn.cpp',
+            'CANIface.cpp',
+            'DeviceBus.cpp',
+            'ESP32_PSRAM_Logger.cpp',
+            'ESP32_SPIFFS.cpp',
+            'GPIO.cpp',
+            'HAL_ESP32_Class.cpp',
+            'I2CDevice.cpp',
+            'RCInput.cpp',
+            'RCOutput.cpp',
+            'Scheduler.cpp',
+            'Semaphores.cpp',
+            'SPIDevice.cpp',
+            'Storage.cpp',
+            'system.cpp',
+            'UARTDriver.cpp',
+            'Util.cpp',
+            'WiFiDriver.cpp',
+            'WiFiUdpDriver.cpp',
+        ],
+    )
