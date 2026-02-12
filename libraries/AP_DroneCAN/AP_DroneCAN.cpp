@@ -1817,6 +1817,75 @@ bool AP_DroneCAN::get_parameter_on_node(uint8_t node_id, const char *name, Param
     return true;
 }
 
+/*
+  get float parameter by index for enumeration
+*/
+bool AP_DroneCAN::get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetFloatCb *cb)
+{
+    WITH_SEMAPHORE(_param_sem);
+
+    // fail if waiting for any previous get/set request
+    if (param_int_cb != nullptr ||
+        param_float_cb != nullptr ||
+        param_string_cb != nullptr) {
+        return false;
+    }
+    param_getset_req.index = index;
+    param_getset_req.name.len = 0;  // empty name for index-based request
+    param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY;
+    param_float_cb = cb;
+    param_request_sent = false;
+    param_request_sent_ms = AP_HAL::millis();
+    param_request_node_id = node_id;
+    return true;
+}
+
+/*
+  get integer parameter by index for enumeration
+*/
+bool AP_DroneCAN::get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetIntCb *cb)
+{
+    WITH_SEMAPHORE(_param_sem);
+
+    // fail if waiting for any previous get/set request
+    if (param_int_cb != nullptr ||
+        param_float_cb != nullptr ||
+        param_string_cb != nullptr) {
+        return false;
+    }
+    param_getset_req.index = index;
+    param_getset_req.name.len = 0;  // empty name for index-based request
+    param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY;
+    param_int_cb = cb;
+    param_request_sent = false;
+    param_request_sent_ms = AP_HAL::millis();
+    param_request_node_id = node_id;
+    return true;
+}
+
+/*
+  get string parameter by index for enumeration
+*/
+bool AP_DroneCAN::get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetStringCb *cb)
+{
+    WITH_SEMAPHORE(_param_sem);
+
+    // fail if waiting for any previous get/set request
+    if (param_int_cb != nullptr ||
+        param_float_cb != nullptr ||
+        param_string_cb != nullptr) {
+        return false;
+    }
+    param_getset_req.index = index;
+    param_getset_req.name.len = 0;  // empty name for index-based request
+    param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY;
+    param_string_cb = cb;
+    param_request_sent = false;
+    param_request_sent_ms = AP_HAL::millis();
+    param_request_node_id = node_id;
+    return true;
+}
+
 void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer, const uavcan_protocol_param_GetSetResponse& rsp)
 {
     WITH_SEMAPHORE(_param_sem);
@@ -1825,6 +1894,61 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
         !param_string_cb) {
         return;
     }
+
+    // Handle EMPTY response - signals end of parameter list during enumeration
+    if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY) {
+        if (rsp.name.len == 0) {
+            // Valid EMPTY response: index is beyond valid range, signals end of enumeration
+            // Call all active callbacks with empty name to signal end
+            if (param_int_cb) {
+                int32_t dummy = 0;
+                (*param_int_cb)(this, transfer.source_node_id, "", dummy);
+            }
+            if (param_float_cb) {
+                float dummy = 0;
+                (*param_float_cb)(this, transfer.source_node_id, "", dummy);
+            }
+            if (param_string_cb) {
+                string dummy;
+                dummy.len = 0;
+                (*param_string_cb)(this, transfer.source_node_id, "", dummy);
+            }
+        } else {
+            // Protocol violation: typed EMPTY value should not have a name
+            // This shouldn't happen per UAVCAN spec, but handle gracefully
+        }
+        // Clear callbacks and return
+        param_request_sent_ms = 0;
+        param_int_cb = nullptr;
+        param_float_cb = nullptr;
+        param_string_cb = nullptr;
+        return;
+    }
+
+    // Handle BOOLEAN type by converting to INTEGER (0 or 1)
+    if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
+        if (param_int_cb) {
+            int32_t val = rsp.value.boolean_value ? 1 : 0;
+            if ((*param_int_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val)) {
+                // we want the parameter to be set with val
+                param_getset_req.index = 0;
+                memcpy(param_getset_req.name.data, rsp.name.data, rsp.name.len);
+                param_getset_req.value.boolean_value = rsp.value.boolean_value;
+                param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE;
+                param_request_sent = false;
+                param_request_sent_ms = AP_HAL::millis();
+                param_request_node_id = transfer.source_node_id;
+                return;
+            }
+        }
+        // Clear callbacks if boolean was handled or no int callback
+        param_request_sent_ms = 0;
+        param_int_cb = nullptr;
+        param_float_cb = nullptr;
+        param_string_cb = nullptr;
+        return;
+    }
+
     if ((rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) && param_int_cb) {
         int32_t val = rsp.value.integer_value;
         if ((*param_int_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val)) {
@@ -1917,6 +2041,31 @@ void AP_DroneCAN::send_reboot_request(uint8_t node_id)
     uavcan_protocol_RestartNodeRequest request;
     request.magic_number = UAVCAN_PROTOCOL_RESTARTNODE_REQUEST_MAGIC_NUMBER;
     restart_node_client.request(node_id, request);
+}
+
+// Begin actuator enumeration on all active nodes
+// This triggers ESC/servo enumeration for MAV_CMD_PREFLIGHT_UAVCAN
+// Note: Do not call this from outside DroneCAN thread context,
+// THIS IS NOT A THREAD SAFE API!
+void AP_DroneCAN::begin_actuator_enumeration()
+{
+    uavcan_protocol_enumeration_BeginRequest request;
+
+    // Set timeout to infinite so enumeration continues until manually cancelled
+    request.timeout_sec = UAVCAN_PROTOCOL_ENUMERATION_BEGIN_REQUEST_TIMEOUT_INFINITE;
+
+    // Leave parameter_name empty for autodetection (recommended per UAVCAN spec)
+    request.parameter_name.len = 0;
+
+    // Send enumeration begin request to all active nodes
+    // Valid DroneCAN node IDs are 1-127 (0 is broadcast, not used for services)
+    for (uint8_t node_id = 1; node_id <= 127; node_id++) {
+        // Check if this node has been seen (is online)
+        if (_dna_server.is_node_seen(node_id)) {
+            // Send the enumeration begin service request to this node
+            enumeration_begin_client.request(node_id, request);
+        }
+    }
 }
 
 // check if a option is set and if it is then reset it to 0.

@@ -348,15 +348,74 @@ void GCS_MAVLINK::start_param_enumeration(mavlink_channel_t mavlink_chan, uint8_
 // Continue parameter enumeration (called from main loop)
 void GCS_MAVLINK::continue_param_enumeration()
 {
-    // NOTE: Parameter enumeration by index requires AP_DroneCAN::get_parameter_by_index_on_node()
-    // API which is not yet available in master. Enumeration support will be added in a follow-up PR.
-    // For now, parameter enumeration is not supported - only get/set by name works.
     if (!param_enum_state.active) {
         return;
     }
 
-    // Immediately deactivate enumeration as it's not yet supported
-    param_enum_state.active = false;
+    // Check for timeout (30 seconds)
+    const uint32_t timeout_ms = 30000;
+    if (AP_HAL::millis() - param_enum_state.start_time_ms > timeout_ms) {
+        hal.console->printf("GCS: Param enumeration timeout after %u params\n",
+                           param_enum_state.param_count);
+        param_enum_state.active = false;
+        return;
+    }
+
+    // Get the AP_DroneCAN instance for this node
+    AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(param_enum_state.can_driver_index);
+    if (ap_dronecan == nullptr) {
+        param_enum_state.active = false;
+        return;
+    }
+
+    // Try to request next parameter by index
+    // Use tried_types bitmask to track which callback types we've tried:
+    // bit 0 = float, bit 1 = int, bit 2 = string
+    // Try in order: float (most common), int, string
+
+    static AP_DroneCAN::ParamGetSetFloatCb enum_float_cb(nullptr, dronecan_param_enum_float_cb_wrapper);
+    static AP_DroneCAN::ParamGetSetIntCb enum_int_cb(nullptr, dronecan_param_enum_int_cb_wrapper);
+    static AP_DroneCAN::ParamGetSetStringCb enum_string_cb(nullptr, dronecan_param_enum_string_cb_wrapper);
+
+    bool request_sent = false;
+
+    // Try float first (bit 0)
+    if ((param_enum_state.tried_types & 0x01) == 0) {
+        if (ap_dronecan->get_parameter_by_index_on_node(param_enum_state.node_id,
+                                                         param_enum_state.current_index,
+                                                         &enum_float_cb)) {
+            param_enum_state.tried_types |= 0x01;  // Mark float as tried
+            request_sent = true;
+        }
+    }
+
+    // Try int if float hasn't been tried or failed (bit 1)
+    if (!request_sent && (param_enum_state.tried_types & 0x02) == 0) {
+        if (ap_dronecan->get_parameter_by_index_on_node(param_enum_state.node_id,
+                                                         param_enum_state.current_index,
+                                                         &enum_int_cb)) {
+            param_enum_state.tried_types |= 0x02;  // Mark int as tried
+            request_sent = true;
+        }
+    }
+
+    // Try string if others haven't been tried or failed (bit 2)
+    if (!request_sent && (param_enum_state.tried_types & 0x04) == 0) {
+        if (ap_dronecan->get_parameter_by_index_on_node(param_enum_state.node_id,
+                                                         param_enum_state.current_index,
+                                                         &enum_string_cb)) {
+            param_enum_state.tried_types |= 0x04;  // Mark string as tried
+            request_sent = true;
+        }
+    }
+
+    // If all types have been tried and all failed, the node is busy or has an error
+    if (!request_sent && param_enum_state.tried_types == 0x07) {
+        // All three callback types failed - abort enumeration
+        hal.console->printf("GCS: Param enumeration failed - node %d busy or error\n",
+                           param_enum_state.node_id);
+        param_enum_state.active = false;
+    }
 }
 #endif
 
