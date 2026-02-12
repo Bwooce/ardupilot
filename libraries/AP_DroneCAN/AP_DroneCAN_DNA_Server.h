@@ -18,9 +18,8 @@ class AP_DroneCAN_DNA_Server
 {
     StorageAccess storage;
 
-    struct NodeRecord {
-        uint8_t uid_hash[6];
-        uint8_t crc;
+    struct PACKED NodeRecord {
+        uint8_t uid[16];  // Full 16-byte unique ID (no hash, no CRC)
     };
 
     /*
@@ -57,10 +56,10 @@ class AP_DroneCAN_DNA_Server
         void init_server(uint8_t own_node_id, const uint8_t own_unique_id[], uint8_t own_unique_id_len);
 
         // handle processing the node info message. returns true if from a duplicate node
-        bool handle_node_info(uint8_t source_node_id, const uint8_t unique_id[]);
+        bool handle_node_info(uint8_t source_node_id, const uint8_t unique_id[], const Bitmask<128> *node_healthy);
 
         // handle the allocation message. returns the allocated node ID, or 0 if allocation failed
-        uint8_t handle_allocation(const uint8_t unique_id[]);
+        uint8_t handle_allocation(const uint8_t unique_id[], uint8_t uid_len, const Bitmask<128> *node_seen);
 
     private:
         // retrieve node ID that matches the given unique ID. returns 0 if not found
@@ -92,6 +91,7 @@ class AP_DroneCAN_DNA_Server
 
         StorageAccess *storage;
         HAL_Semaphore sem;
+        bool initialized;  // true after init() validates/resets database
     };
 
     static Database db;
@@ -153,6 +153,26 @@ public:
     //report the server state, along with failure message if any
     bool prearm_check(char* fail_msg, uint8_t fail_msg_len) const;
 
+    // Get node health statistics for LED display
+    uint8_t get_healthy_node_count() { return node_healthy.count(); }
+    uint8_t get_verified_node_count() { return node_verified.count(); }
+    uint8_t get_seen_node_count() { return node_seen.count(); }
+    bool has_healthy_nodes() { return node_healthy.count() > 0; }
+    bool all_nodes_healthy() { return node_healthy == node_verified && node_verified.count() > 0; }
+
+    // Check if a specific node has been seen (for parameter access via MAVLink)
+    bool is_node_seen(uint8_t node_id) { return node_seen.get(node_id); }
+
+    // Get node counts excluding local node (for display purposes)
+    uint8_t get_remote_healthy_count() {
+        uint8_t count = node_healthy.count();
+        return (node_healthy.get(self_node_id) && count > 0) ? count - 1 : count;
+    }
+    uint8_t get_remote_verified_count() {
+        uint8_t count = node_verified.count();
+        return (node_verified.get(self_node_id) && count > 0) ? count - 1 : count;
+    }
+
     // canard message handler callbacks
     void handle_allocation(const CanardRxTransfer& transfer, const uavcan_protocol_dynamic_node_id_Allocation& msg);
     void handleNodeStatus(const CanardRxTransfer& transfer, const uavcan_protocol_NodeStatus& msg);
@@ -160,6 +180,15 @@ public:
 
     //Run through the list of seen node ids for verification
     void verify_nodes();
+
+    // Request node info for all seen nodes (for MAV_CMD_UAVCAN_GET_NODE_INFO)
+    void request_all_node_info();
+
+private:
+    // MAVLink reporting functions
+    void send_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg);
+    void report_node_health_change(uint8_t node_id, uint8_t health, uint8_t mode, bool recovered);
+    void send_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg);
 };
 
 #endif

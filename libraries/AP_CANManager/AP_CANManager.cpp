@@ -37,6 +37,8 @@
 #elif CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
 #include <hal.h>
 #include <AP_HAL_ChibiOS/CANIface.h>
+#elif CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include <AP_HAL_ESP32/CANIface.h>
 #endif
 
 #include <AP_Common/ExpandingString.h>
@@ -258,16 +260,23 @@ void AP_CANManager::init()
 #else
 void AP_CANManager::init()
 {
+    hal.console->printf("CANManager::init() called, HAL_NUM_CAN_IFACES=%d\n", HAL_NUM_CAN_IFACES);
     WITH_SEMAPHORE(_sem);
     for (uint8_t i = 0; i < HAL_NUM_CAN_IFACES; i++) {
-        if ((AP_CAN::Protocol) _drv_param[i]._driver_type.get() == AP_CAN::Protocol::DroneCAN) {
+        uint8_t drv_type = _drv_param[i]._driver_type.get();
+        hal.console->printf("CANManager: Interface %d, driver_type=%d\n", i, drv_type);
+        
+        if ((AP_CAN::Protocol) drv_type == AP_CAN::Protocol::DroneCAN) {
+            hal.console->printf("CANManager: Creating DroneCAN driver for interface %d\n", i);
             _drivers[i] = _drv_param[i]._uavcan = NEW_NOTHROW AP_DroneCAN(i);
 
             if (_drivers[i] == nullptr) {
+                hal.console->printf("CANManager: FAILED to allocate DroneCAN driver %d\n", i);
                 AP_BoardConfig::allocation_error("uavcan %d", i + 1);
                 continue;
             }
 
+            hal.console->printf("CANManager: Loading params from EEPROM for DroneCAN %d\n", i);
             AP_Param::load_object_from_eeprom((AP_DroneCAN*)_drivers[i], AP_DroneCAN::var_info);
             _drivers[i]->init(i);
             _driver_type_cache[i] = (AP_CAN::Protocol) _drv_param[i]._driver_type.get();

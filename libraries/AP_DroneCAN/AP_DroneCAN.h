@@ -101,6 +101,9 @@ public:
     
     uint8_t get_driver_index() const { return _driver_index; }
 
+    // Get DNA server for LED status checks
+    AP_DroneCAN_DNA_Server& get_dna_server() { return _dna_server; }
+
     // define string with length structure
     struct string { uint8_t len; uint8_t data[128]; };
 
@@ -136,8 +139,18 @@ public:
     bool get_parameter_on_node(uint8_t node_id, const char *name, ParamGetSetIntCb *cb);
     bool get_parameter_on_node(uint8_t node_id, const char *name, ParamGetSetStringCb *cb);
 
+    // get parameter by index for enumeration
+    // returns true on success, false on failure
+    // failures occur when waiting on node to respond to previous get or set request
+    bool get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetFloatCb *cb);
+    bool get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetIntCb *cb);
+    bool get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetStringCb *cb);
+
     // Save parameters
     bool save_parameters_on_node(uint8_t node_id, ParamSaveCb *cb);
+
+    // Begin actuator enumeration on all nodes (for MAV_CMD_PREFLIGHT_UAVCAN)
+    void begin_actuator_enumeration();
 
     // options bitmask
     enum class Options : uint16_t {
@@ -370,6 +383,11 @@ private:
     void handle_restart_node_response(const CanardRxTransfer& transfer, const uavcan_protocol_RestartNodeResponse& msg) {}
     Canard::ObjCallback<AP_DroneCAN, uavcan_protocol_RestartNodeResponse> restart_node_res_cb{this, &AP_DroneCAN::handle_restart_node_response};
     Canard::Client<uavcan_protocol_RestartNodeResponse> restart_node_client{canard_iface, restart_node_res_cb};
+
+    // enumeration client (for MAV_CMD_PREFLIGHT_UAVCAN)
+    void handle_enumeration_begin_response(const CanardRxTransfer& transfer, const uavcan_protocol_enumeration_BeginResponse& msg);
+    Canard::ObjCallback<AP_DroneCAN, uavcan_protocol_enumeration_BeginResponse> enumeration_begin_res_cb{this, &AP_DroneCAN::handle_enumeration_begin_response};
+    Canard::Client<uavcan_protocol_enumeration_BeginResponse> enumeration_begin_client{canard_iface, enumeration_begin_res_cb};
 
     uavcan_protocol_param_ExecuteOpcodeRequest param_save_req;
     uavcan_protocol_param_GetSetRequest param_getset_req;
