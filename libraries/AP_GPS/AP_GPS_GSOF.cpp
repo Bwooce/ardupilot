@@ -38,7 +38,9 @@
 //    param set GPS1_TYPE 11 // GSOF
 //    param set SERIAL3_PROTOCOL 5 // GPS
 
+#ifndef AP_MATH_ALLOW_DOUBLE_FUNCTIONS
 #define AP_MATH_ALLOW_DOUBLE_FUNCTIONS 1
+#endif
 
 #include "AP_GPS.h"
 #include "AP_GPS_GSOF.h"

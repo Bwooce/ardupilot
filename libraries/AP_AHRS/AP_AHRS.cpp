@@ -448,6 +448,19 @@ void AP_AHRS::update_state(void)
     }
 
     state.velocity_NED_ok = _get_velocity_NED(state.velocity_NED);
+    
+    // Initialize gyro_estimate to prevent random values when no IMU present
+#if AP_INERTIALSENSOR_ENABLED
+    const AP_InertialSensor &ins = AP::ins();
+    if (ins.get_gyro_count() > 0 && ins.gyro_calibrated_ok_all()) {
+        state.gyro_estimate = ins.get_gyro();
+    } else {
+        state.gyro_estimate.zero();
+    }
+#else
+    // No IMU available - zero gyro values to prevent random float corruption
+    state.gyro_estimate.zero();
+#endif
 }
 
 // update run at loop rate

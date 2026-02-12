@@ -45,7 +45,7 @@ private:
     };
 
     // header at front of the file
-    struct header {
+    struct PACKED header {
         uint16_t magic = mission_magic;
         uint16_t data_type; // MAV_MISSION_TYPE_*
         uint16_t options; // optional features
