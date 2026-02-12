@@ -995,8 +995,36 @@ class esp32(Board):
     abstract = True
     toolchain = 'xtensa-esp32-elf'
 
+    def __init__(self):
+        super().__init__()
+        self.with_can = True
+
     def configure(self, cfg):
+        # Set up ESP-IDF environment before toolchain detection
+        import subprocess
+        local_idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
+        os.environ['IDF_PATH'] = local_idf_path
+
+        # Source ESP-IDF environment to set up all necessary variables
+        export_script = os.path.join(local_idf_path, 'export.sh')
+        if os.path.exists(export_script):
+            try:
+                # Run export.sh and capture environment changes
+                result = subprocess.run(['bash', '-c', f'source {export_script} && env'],
+                                      capture_output=True, text=True, check=True)
+                # Update current environment with ESP-IDF variables
+                for line in result.stdout.splitlines():
+                    if '=' in line and not line.startswith('_'):
+                        key, value = line.split('=', 1)
+                        if key.startswith(('IDF_', 'PATH', 'PYTHON')) or 'esp' in key.lower():
+                            os.environ[key] = value
+            except Exception as e:
+                print(f"Warning: Failed to source ESP-IDF environment: {e}")
+
+        # Now call parent configure with ESP-IDF environment available
         super(esp32, self).configure(cfg)
+
+        # Handle toolchain configuration like upstream
         if cfg.env.TOOLCHAIN:
             self.toolchain = cfg.env.TOOLCHAIN
         else:
@@ -1005,6 +1033,21 @@ class esp32(Board):
 
     def configure_env(self, cfg, env):
         env.BOARD_CLASS = "ESP32"
+
+        # run hwdef to get MCU
+        sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../libraries/AP_HAL_ESP32/hwdef/scripts'))
+        import esp32_hwdef
+        hwdef_dir = os.path.join(cfg.srcnode.abspath(), 'libraries/AP_HAL_ESP32/hwdef')
+        hwdef_dat = os.path.join(hwdef_dir, self.name, 'hwdef.dat')
+        eh = esp32_hwdef.ESP32HWDef(
+            outdir=cfg.bldnode.abspath(),
+            hwdef=[hwdef_dat],
+            quiet=True,
+        )
+        eh.run()
+        mcu = eh.mcu
+        cfg.env.MCU = mcu
+        self.toolchain = 'xtensa-%s-elf' % mcu
 
         def expand_path(p):
             print("USING EXPRESSIF IDF:"+str(env.idf))
@@ -1078,6 +1121,29 @@ class esp32(Board):
             env.DEFINES.update(
                 HAL_PARAM_DEFAULTS_PATH='"@ROMFS/defaults.parm"',
             )
+
+        # Use generated board headers instead of static ones
+        env.INCLUDES += [
+                cfg.bldnode.find_or_declare('boards').abspath(),
+            ]
+
+        # Include hwdef.h in compilation for ESP32 builds
+        hwdef_h = cfg.bldnode.find_or_declare('hwdef.h').abspath()
+        env.CFLAGS += ['-include', hwdef_h]
+        env.CXXFLAGS += ['-include', hwdef_h]
+
+        # Parse hwdef.dat for APA102 pins to set environment variables
+        hwdef_path = 'libraries/AP_HAL_ESP32/hwdef/%s/hwdef.dat' % self.get_name()
+        if os.path.exists(hwdef_path):
+            with open(hwdef_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('APA102_DATA_PIN='):
+                        pin_num = line.split('=')[1]
+                        env.APA102_DATA = pin_num
+                    elif line.startswith('APA102_CLOCK_PIN='):
+                        pin_num = line.split('=')[1]
+                        env.APA102_CLOCK = pin_num
 
         env.AP_PROGRAM_AS_STLIB = True
         #if cfg.options.enable_profile:

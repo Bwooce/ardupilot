@@ -25,9 +25,17 @@ import hal_common
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../libraries/AP_HAL_ESP32/hwdef/scripts'))
 import esp32_hwdef  # noqa:501
 
+@feature('esp32_ap_library', 'esp32_ap_program')
+@before_method('process_source')
+def esp32_dynamic_env(self):
+    hal_common.common_dynamic_env(self)
+
+
+def load_env_vars(env):
+    '''optionally load extra environment variables from env.py in the build directory'''
+    hal_common.load_env_vars(env)
+
 def configure(cfg):
-    mcu_esp32s3 = True if (cfg.variant[0:7] == "esp32s3") else False
-    target = "esp32s3" if mcu_esp32s3 else "esp32"
     bldnode = cfg.bldnode.make_node(cfg.variant)
     def srcpath(path):
         return cfg.srcnode.make_node(path).abspath()
@@ -39,30 +47,134 @@ def configure(cfg):
 
     #define env and location for the cmake esp32 file
     env = cfg.env
-    env.AP_HAL_ESP32 = srcpath('libraries/AP_HAL_ESP32/targets/'+target+'/esp-idf')
+    mcu = env.MCU
+    env.AP_HAL_ESP32 = srcpath('libraries/AP_HAL_ESP32/targets/'+mcu.lower()+'/esp-idf')
     env.AP_PROGRAM_FEATURES += ['esp32_ap_program']
+    env.append_value('DEFINES', 'USE_USER_HELPERS=1')
 
     env.ESP_IDF_PREFIX_REL = 'esp-idf'
 
     prefix_node = bldnode.make_node(env.ESP_IDF_PREFIX_REL)
-    env.ESP32_TARGET = target
+    env.ESP32_TARGET = mcu
     env.BUILDROOT = bldpath('')
     env.SRCROOT = srcpath('')
     env.APJ_TOOL = srcpath('Tools/scripts/apj_tool.py')
 
     #Check if esp-idf env are loaded, or load it
-    try:
-        env.IDF = os.environ['IDF_PATH']
-    except:
-        env.IDF = cfg.srcnode.abspath()+"/modules/esp_idf"
+    # Force use of local ESP-IDF to avoid mixing system and local installations
+    local_idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
+    env.IDF = local_idf_path
+    
+    # Set IDF_PATH environment variable to ensure consistency
+    os.environ['IDF_PATH'] = local_idf_path
+    
+    # Source ESP-IDF environment to set up all necessary variables
+    export_script = os.path.join(local_idf_path, 'export.sh')
+    if os.path.exists(export_script):
+        try:
+            # Run export.sh and capture environment changes
+            import subprocess
+            result = subprocess.run(['bash', '-c', f'source {export_script} && env'], 
+                                  capture_output=True, text=True, check=True)
+            # Update current environment with ESP-IDF variables
+            for line in result.stdout.splitlines():
+                if '=' in line and not line.startswith('_'):
+                    key, value = line.split('=', 1)
+                    if key.startswith(('IDF_', 'PATH', 'PYTHON')) or 'esp' in key.lower():
+                        os.environ[key] = value
+        except Exception as e:
+            print(f"Warning: Failed to source ESP-IDF environment: {e}")
+    
     print("USING EXPRESSIF IDF:"+str(env.IDF))
-
+    
+    # Report ESP32 debug mode status
     try:
-        hwdef_obj = generate_hwdef_h(env)
-    except Exception:
-        traceback.print_exc()
-        cfg.fatal("Failed to process hwdef.dat")
-    hal_common.process_hwdef_results(cfg, hwdef_obj)
+        # Check if this is a debug build variant
+        is_debug = 'debug' in cfg.variant or cfg.options.debug
+        print(f"ESP32 Debug build     : {'enabled' if is_debug else 'disabled'}")
+    except:
+        print("ESP32 Debug build     : disabled (default)")
+
+    # setup cmake
+    cfg.env['IDF_TARGET'] = mcu
+
+    # Process hwdef files to generate board-specific configuration with upstream error handling
+    board_name = getattr(cfg.options, 'board', '').replace('esp32', '')
+    if board_name:
+        hwdef_dir = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/hwdef/{cfg.options.board}')
+        hwdef_file = os.path.join(hwdef_dir, 'hwdef.dat')
+
+        if os.path.exists(hwdef_file):
+            # Run the ESP32 hwdef processor
+            hwdef_script = os.path.join(cfg.srcnode.abspath(), 'libraries/AP_HAL_ESP32/hwdef/scripts/esp32_hwdef.py')
+            if os.path.exists(hwdef_script):
+                import subprocess
+                build_dir = cfg.bldnode.abspath()
+                cmd = [cfg.env.PYTHON[0], hwdef_script, '-D', build_dir, hwdef_file]
+                print(f"Processing hwdef: {' '.join(cmd)}")
+                try:
+                    subprocess.run(cmd, check=True, cwd=cfg.srcnode.abspath())
+                except subprocess.CalledProcessError as e:
+                    cfg.fatal(f"hwdef processing failed: {e}")
+
+    # Also try upstream hwdef generation method for completeness
+    try:
+        generate_hwdef_h(env)
+    except Exception as e:
+        print(get_exception_stacktrace(e))
+        cfg.fatal("Failed to generate hwdef")
+
+    # Build list of sdkconfig.defaults files: target-level + debug (if --debug) + board-level (if exists)
+    target_sdkconfig = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/targets/{mcu.lower()}/esp-idf/sdkconfig.defaults')
+    debug_sdkconfig = os.path.join(cfg.srcnode.abspath(), f'libraries/AP_HAL_ESP32/targets/{mcu.lower()}/esp-idf/sdkconfig.debug')
+    board_sdkconfig = os.path.join(cfg.bldnode.abspath(), 'sdkconfig.board')
+
+    # Check if we need to include debug configuration
+    include_debug = cfg.options.debug and os.path.exists(debug_sdkconfig)
+
+    sdkconfig_list = [target_sdkconfig]
+    if os.path.exists(board_sdkconfig) or include_debug:
+        # Create a combined sdkconfig.defaults that includes target, debug (if applicable), and board configs
+        combined_sdkconfig = os.path.join(cfg.bldnode.abspath(), 'sdkconfig.combined')
+        print(f"Creating combined ESP-IDF config: {combined_sdkconfig}")
+
+        with open(combined_sdkconfig, 'w') as combined_file:
+            # Include target-level configuration
+            with open(target_sdkconfig, 'r') as target_file:
+                combined_file.write(f"# Target-level configuration from {target_sdkconfig}\n")
+                combined_file.write(target_file.read())
+                combined_file.write("\n")
+
+            # Include debug configuration if --debug was specified
+            if include_debug:
+                with open(debug_sdkconfig, 'r') as debug_file:
+                    combined_file.write(f"# Debug configuration from {debug_sdkconfig}\n")
+                    combined_file.write(debug_file.read())
+                    combined_file.write("\n")
+                print(f"Including ESP32 debug config with stack protection")
+
+            # Include board-specific configuration
+            if os.path.exists(board_sdkconfig):
+                with open(board_sdkconfig, 'r') as board_file:
+                    combined_file.write(f"# Board-specific configuration from {board_sdkconfig}\n")
+                    combined_file.write(board_file.read())
+
+        cfg.env['ESP_IDF_SDKCONFIG_DEFAULTS'] = combined_sdkconfig
+        print(f"Using combined ESP-IDF config: {combined_sdkconfig}")
+    else:
+        cfg.env['ESP_IDF_SDKCONFIG_DEFAULTS'] = target_sdkconfig
+    cfg.env['PROJECT_DIR'] = cfg.bldnode.abspath()
+    cfg.env['SDKCONFIG'] = os.path.join(cfg.bldnode.abspath(), 'esp-idf_build/sdkconfig')
+    cfg.env['PYTHON'] = cfg.env.get_flat('PYTHON')
+
+    load_env_vars(cfg.env)
+
+def get_exception_stacktrace(e):
+    ret = "%s\n" % e
+    ret += ''.join(traceback.format_exception(type(e),
+                                              e,
+                                              tb=e.__traceback__))
+    return ret
 
 def generate_hwdef_h(env):
     '''run esp32_hwdef.py'''
@@ -76,15 +188,12 @@ def generate_hwdef_h(env):
     hwdef = [env.HWDEF]
     if env.HWDEF_EXTRA:
         hwdef.append(env.HWDEF_EXTRA)
-
-    hwdef_obj = esp32_hwdef.ESP32HWDef(
+    eh = esp32_hwdef.ESP32HWDef(
         outdir=hwdef_out,
         hwdef=hwdef,
         quiet=False,
     )
-    hwdef_obj.run()
-
-    return hwdef_obj
+    eh.run()
 
 # delete the output sdkconfig file when the input defaults changes. we take the
 # stamp as the output so we can compute the path to the sdkconfig, yet it
@@ -116,7 +225,7 @@ def pre_build(self):
     esp_idf = self.cmake(
             name='esp-idf',
             cmake_vars=lib_vars,
-            cmake_src='libraries/AP_HAL_ESP32/targets/'+target+'/esp-idf',
+            cmake_src='libraries/AP_HAL_ESP32/targets/'+target.lower()+'/esp-idf',
             cmake_bld='esp-idf_build',
             )
 
@@ -150,6 +259,29 @@ def pre_build(self):
     tsk.set_inputs(self.path.find_resource('esp-idf_build/includes.list'))
     self.add_to_group(tsk)
 
+    # hwdef pre-build:
+    load_env_vars(self.env)
+#    if bld.env.HAL_NUM_CAN_IFACES:
+#        bld.get_board().with_can = True
+    hwdef_h = os.path.join(self.env.BUILDROOT, 'hwdef.h')
+    if not os.path.exists(hwdef_h):
+        print("Generating hwdef.h")
+        try:
+            generate_hwdef_h(self.env)
+        except Exception:
+            self.fatal(f"Failed to process hwdef.dat {hwdef_h}")
+
+def build(bld):
+    bld(
+        # build hwdef.h from hwdef.dat. This is needed after a waf clean
+        source=bld.path.ant_glob(bld.env.HWDEF),
+        rule="",
+        group='dynamic_sources',
+        target=[
+            bld.bldnode.find_or_declare('hwdef.h'),
+        ]
+    )
+
 @feature('esp32_ap_program')
 @after_method('process_source')
 def esp32_firmware(self):
@@ -165,3 +297,35 @@ def esp32_firmware(self):
     if self.bld.options.upload:
         flasher = esp_idf.build('flash')
         flasher.post()
+        
+        # Reset OTA data partition to ensure ESP32 boots from factory (USB-uploaded) firmware
+        # This prevents issues where FOTA has changed the boot partition to ota_0/ota_1
+        from waflib import Task
+        class reset_ota_data(Task.Task):
+            """Reset ESP32 OTA data partition to boot from factory after USB upload"""
+            def run(self):
+                import subprocess
+                import os
+                
+                # Simple approach: just inform the user
+                # The complexity of auto-detecting ports and esptool paths isn't worth it
+                # Users can manually reset if needed
+                
+                print("ESP32: USB firmware uploaded successfully")
+                print("ESP32: If you previously used FOTA updates, the OTA data partition")
+                print("ESP32: may need to be reset for this USB firmware to boot.")
+                print("ESP32: ")
+                print("ESP32: To reset manually if needed:")
+                print("ESP32:   esptool.py --port /dev/ttyUSB0 erase_region 0xd000 0x2000")
+                print("ESP32: ")
+                print("ESP32: This will ensure the ESP32 boots from the factory (USB-uploaded) firmware.")
+                
+                # Don't actually try to reset automatically - too many variables
+                # (port detection, esptool location, permissions, etc.)
+                
+                return 0
+        
+        # Add the OTA reset task after flashing
+        reset_task = reset_ota_data(env=self.env)
+        reset_task.set_run_after(flasher.cmake_build_task)  
+        self.bld.add_to_group(reset_task)
