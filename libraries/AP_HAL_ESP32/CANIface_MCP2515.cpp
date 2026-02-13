@@ -52,7 +52,7 @@ CANIface_MCP2515::~CANIface_MCP2515()
     }
 }
 
-bool CANIface_MCP2515::init(const uint32_t bitrate, const OperatingMode mode)
+bool CANIface_MCP2515::init(const uint32_t bitrate)
 {
     if (initialized) {
         return true;

@@ -37,7 +37,7 @@ CANIface::CANIface(uint8_t instance) :
     memset(tx_tracker, 0, sizeof(tx_tracker));
 }
 
-bool CANIface::init(const uint32_t bitrate, const OperatingMode mode)
+bool CANIface::init(const uint32_t bitrate)
 {
     // Log level is now controlled by ESP32_Params.cpp for consistency
     // Removed local override to avoid conflicts
@@ -1102,8 +1102,8 @@ void CANIface::check_bus_health()
                 // Brief delay to allow hardware to settle
                 hal.scheduler->delay_microseconds(1000);
                 
-                // Reinitialize with same configuration (use NormalMode as default)
-                if (init(saved_bitrate, NormalMode)) {
+                // Reinitialize with same configuration
+                if (init(saved_bitrate)) {
                     CAN_DEBUG_INFO("Full TWAI restart successful");
                     consecutive_bus_off_count = 0; // Reset counter on successful restart
                     last_full_restart_ms = now_ms;
@@ -1277,7 +1277,7 @@ void CANIface::attempt_driver_restart()
     
     // Reinitialize with saved configuration
     initialized = false;
-    bool reinit_ok = init(saved_bitrate, NormalMode);
+    bool reinit_ok = init(saved_bitrate);
 
     if (reinit_ok) {
         // Give TWAI driver time to fully stabilize before allowing tasks to resume

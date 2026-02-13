@@ -87,7 +87,7 @@ public:
     CANIface_MCP2515(uint8_t instance);
     ~CANIface_MCP2515();
 
-    bool init(const uint32_t bitrate, const OperatingMode mode) override;
+    bool init(const uint32_t bitrate) override;
     int16_t send(const AP_HAL::CANFrame &frame, uint64_t tx_deadline, AP_HAL::CANIface::CanIOFlags flags) override;
     int16_t receive(AP_HAL::CANFrame &frame, uint64_t &timestamp_us, AP_HAL::CANIface::CanIOFlags &flags) override;
     bool is_initialized() const override { return initialized; }

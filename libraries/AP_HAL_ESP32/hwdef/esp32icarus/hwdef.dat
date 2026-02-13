@@ -46,7 +46,7 @@ define HAL_INS_MPU60x0_NAME "MPU6000"
 # This is useful for indoor flight or when GPS/compass module is not connected
 define ALLOW_ARM_NO_COMPASS 1
 # To add external compass support:
-# define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+# define AP_COMPASS_PROBING_ENABLED 1
 # define HAL_MAG_PROBE_LIST PROBE_MAG_I2C(HMC5843, 0, 0x1E)
 # Common compass addresses: HMC5843/5883=0x1E, QMC5883L=0x0D
 
@@ -240,7 +240,7 @@ MPU6000_CS_PIN 5      # MPU6000 chip select (CS) pin
 # define AP_FILESYSTEM_ESP32_ENABLED 0
 # 
 # For external compass on I2C:
-# define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+# define AP_COMPASS_PROBING_ENABLED 1
 # define HAL_MAG_PROBE_LIST PROBE_MAG_I2C(HMC5843, 0, 0x1E)
 # 
 # For barometer on I2C:
