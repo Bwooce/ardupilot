@@ -120,7 +120,7 @@ bool WiFiDriver::start_listen()
         accept_socket = -1;
         return false;
     }
-    int opt;
+    int opt = 1;
     setsockopt(accept_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     struct sockaddr_in destAddr;
     destAddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -129,7 +129,7 @@ bool WiFiDriver::start_listen()
     int err = bind(accept_socket, (struct sockaddr *)&destAddr, sizeof(destAddr));
     if (err != 0) {
         close(accept_socket);
-        accept_socket = 0;
+        accept_socket = -1;
         return false;
     }
     err = listen(accept_socket, 5);

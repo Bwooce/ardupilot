@@ -121,7 +121,7 @@ bool WiFiUdpDriver::start_listen()
         accept_socket = -1;
         return false;
     }
-    int opt;
+    int opt = 1;
     setsockopt(accept_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     struct sockaddr_in destAddr;
     destAddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -130,7 +130,7 @@ bool WiFiUdpDriver::start_listen()
     int err = bind(accept_socket, (struct sockaddr *)&destAddr, sizeof(destAddr));
     if (err != 0) {
         close(accept_socket);
-        accept_socket = 0;
+        accept_socket = -1;
         return false;
     }
     //memset(&client_addr, 0, sizeof(client_addr));
@@ -148,12 +148,9 @@ bool WiFiUdpDriver::read_all()
     int count = recvfrom(accept_socket, _buffer, sizeof(_buffer) - 1, 0, (struct sockaddr *)&client_addr, &socklen);
     if (count > 0) {
         _readbuf.write(_buffer, count);
-        _read_mutex.give();
-    } else {
-        return false;
     }
     _read_mutex.give();
-    return true;
+    return count > 0;
 }
 
 bool WiFiUdpDriver::write_data()
