@@ -55,7 +55,7 @@ define AP_COMPASS_ENABLE_DEFAULT 0
 define ALLOW_ARM_NO_COMPASS 1
 # To add compass support, uncomment and configure:
 # define AP_COMPASS_ENABLE_DEFAULT 1
-# define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+# define AP_COMPASS_PROBING_ENABLED 1
 # define HAL_MAG_PROBE_LIST PROBE_MAG_I2C(HMC5843, 0, 0x1E)
 
 # Airspeed Sensor - Disabled

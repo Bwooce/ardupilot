@@ -148,7 +148,7 @@ I2C0_SPEED 400000
 I2C0_INTERNAL 1
 
 # External sensor probe configuration (for DroneCAN hub operation)
-define HAL_PROBE_EXTERNAL_I2C_COMPASSES 1
+define AP_COMPASS_PROBING_ENABLED 1
 
 # Alternative: Enable specific external sensors via I2C (uncomment to use):
 # For BMP280 barometer via I2C:

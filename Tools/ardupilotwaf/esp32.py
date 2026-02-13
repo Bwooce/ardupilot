@@ -28,12 +28,12 @@ import esp32_hwdef  # noqa:501
 @feature('esp32_ap_library', 'esp32_ap_program')
 @before_method('process_source')
 def esp32_dynamic_env(self):
-    hal_common.common_dynamic_env(self)
+    pass
 
 
 def load_env_vars(env):
     '''optionally load extra environment variables from env.py in the build directory'''
-    hal_common.load_env_vars(env)
+    pass
 
 def configure(cfg):
     bldnode = cfg.bldnode.make_node(cfg.variant)

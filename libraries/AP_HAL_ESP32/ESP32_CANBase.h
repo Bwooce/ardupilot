@@ -26,6 +26,21 @@
 namespace ESP32 {
 
 /**
+ * CAN filter configuration for ESP32 CAN implementations.
+ * This was removed from AP_HAL::CANIface upstream but is still
+ * needed for ESP32 hardware filter support.
+ */
+struct CanFilterConfig {
+    uint32_t id = 0;
+    uint32_t mask = 0;
+
+    bool operator==(const CanFilterConfig& rhs) const
+    {
+        return rhs.id == id && rhs.mask == mask;
+    }
+};
+
+/**
  * Common base class for ESP32 CAN implementations
  * Provides unified statistics, filtering, and MAVLink reporting
  * for both TWAI (native) and MCP2515 (external) controllers
@@ -35,7 +50,7 @@ public:
     ESP32_CANBase(uint8_t instance);
 
     // Common API implementations that both TWAI and MCP2515 will use
-    bool configureFilters(const CanFilterConfig* filter_configs, uint16_t num_configs) override;
+    bool configureFilters(const CanFilterConfig* filter_configs, uint16_t num_configs);
     uint32_t getErrorCount() const override;
     
     // Override base class get_stats method
