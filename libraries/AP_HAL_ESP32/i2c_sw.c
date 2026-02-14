@@ -58,6 +58,7 @@
 #include "soc/dport_reg.h"
 #include "esp_pm.h"
 #include "soc/soc_memory_layout.h"
+#include <arpa/inet.h>
 #include "i2c_sw.h"
 
 /* max clock stretching counter */
