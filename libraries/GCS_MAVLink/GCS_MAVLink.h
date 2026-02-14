@@ -99,15 +99,10 @@ uint16_t comm_get_txspace(mavlink_channel_t chan);
 #include "include/mavlink/v2.0/all/mavlink.h"
 #pragma GCC diagnostic pop
 
-// ESP32 fix: Override message IDs with explicit casts after MAVLink headers
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-#include "include/esp32_msgid_fix.h"
-#endif
-
-// Verify ESP32 MAVLink override was applied
+// Verify ESP32 MAVLink byte-wise packing is active
 #ifdef ESP32_MAVLINK_OVERRIDE_APPLIED
 #if MAVLINK_ALIGNED_FIELDS != 0
-#pragma message("ESP32: MAVLink override FAILED - still using unsafe packing!")
+#error "ESP32: MAVLINK_ALIGNED_FIELDS must be 0 for safe byte-wise serialization"
 #endif
 #endif
 

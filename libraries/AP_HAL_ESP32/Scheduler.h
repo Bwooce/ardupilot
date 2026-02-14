@@ -110,16 +110,16 @@ public:
     static const int IO_PRIO      = 5;
     static const int STORAGE_PRIO = 4;
 
-    static const int TIMER_SS     = 1024*3.5;   // Increased from 3KB to 3.5KB for watchdog
-    static const int MAIN_SS      = 1024*8;     // Already 8KB
-    static const int RCIN_SS      = 1024*3.5;   // Increased from 3KB to 3.5KB for watchdog
-    static const int RCOUT_SS     = 1024*3;     // Increased from 1.5KB to 3KB for watchdog
-    static const int WIFI_SS1     = 1024*3;     // Increased from 2.25KB to 3KB for watchdog
-    static const int WIFI_SS2     = 1024*3;     // Increased from 2.25KB to 3KB for watchdog
-    static const int UART_SS      = 1024*3;     // Increased from 2.25KB to 3KB for watchdog
-    static const int DEVICE_SS    = 1024*4;     // Already 4KB
-    static const int IO_SS        = 1024*4;     // Increased from 3.5KB to 4KB for watchdog
-    static const int STORAGE_SS   = 1024*3;     // Increased from 2KB to 3KB for watchdog
+    static const int TIMER_SS     = (1024*7)/2;  // 3.5KB
+    static const int MAIN_SS      = 1024*8;     // 8KB
+    static const int RCIN_SS      = (1024*7)/2;  // 3.5KB
+    static const int RCOUT_SS     = 1024*3;     // 3KB
+    static const int WIFI_SS1     = 1024*3;     // 3KB
+    static const int WIFI_SS2     = 1024*3;     // 3KB
+    static const int UART_SS      = 1024*3;     // 3KB
+    static const int DEVICE_SS    = 1024*4;     // 4KB
+    static const int IO_SS        = 1024*4;     // 4KB
+    static const int STORAGE_SS   = 1024*3;     // 3KB
 
 private:
     AP_HAL::HAL::Callbacks *callbacks;

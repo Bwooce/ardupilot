@@ -693,15 +693,49 @@ void CanardInterface::update_rx_protocol_stats(int16_t res)
         break;
     case CANARD_ERROR_RX_WRONG_TOGGLE:
         protocol_stats.rx_error_wrong_toggle++;
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        {
+            static uint32_t last_toggle_log_ms;
+            uint32_t now = AP_HAL::millis();
+            if (now - last_toggle_log_ms > 1000) {
+                ESP_LOGW("CANARD", "DroneCAN toggle error #%lu -- frame sequence issue",
+                         (unsigned long)protocol_stats.rx_error_wrong_toggle);
+                last_toggle_log_ms = now;
+            }
+        }
+#endif
         break;
     case CANARD_ERROR_RX_UNEXPECTED_TID:
         protocol_stats.rx_ignored_unexpected_tid++;
         break;
     case CANARD_ERROR_RX_SHORT_FRAME:
         protocol_stats.rx_error_short_frame++;
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        {
+            static uint32_t last_short_log_ms;
+            uint32_t now = AP_HAL::millis();
+            if (now - last_short_log_ms > 1000) {
+                ESP_LOGW("CANARD", "DroneCAN short frame #%lu -- truncated on bus",
+                         (unsigned long)protocol_stats.rx_error_short_frame);
+                last_short_log_ms = now;
+            }
+        }
+#endif
         break;
     case CANARD_ERROR_RX_BAD_CRC:
         protocol_stats.rx_error_bad_crc++;
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        {
+            // Log CRC failures -- these indicate bus-level corruption
+            static uint32_t last_crc_log_ms;
+            uint32_t now = AP_HAL::millis();
+            if (now - last_crc_log_ms > 1000) {
+                ESP_LOGW("CANARD", "DroneCAN CRC failure #%lu -- possible bus corruption",
+                         (unsigned long)protocol_stats.rx_error_bad_crc);
+                last_crc_log_ms = now;
+            }
+        }
+#endif
         break;
     default:
         // mark all other errors as internal
