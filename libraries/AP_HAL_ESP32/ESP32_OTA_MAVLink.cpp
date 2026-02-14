@@ -23,6 +23,7 @@
 
 #include "ESP32_OTA.h"
 #include "esp_log.h"
+#include "esp_rom_crc.h"
 
 extern const AP_HAL::HAL& hal;
 
@@ -170,7 +171,8 @@ bool esp32_ota_ftp_write(uint32_t offset, const uint8_t* data, uint32_t len) {
         return false;
     }
     
-    // Success - update state
+    // Success - update state and accumulate CRC32
+    ftp_session.crc32 = esp_rom_crc32_le(ftp_session.crc32, data, len);
     ftp_session.offset += len;
     ftp_session.retry_count = 0;
     ftp_session.retry_delay_ms = FTP_RETRY_DELAY_MS;
@@ -281,11 +283,21 @@ bool esp32_ota_simple_protocol(uint8_t command, uint32_t param1, const uint8_t* 
         // param1 = offset, data = chunk data
         return esp32_ota_write(data, len, param1);
         
-    case OTA_CMD_VERIFY:
+    case OTA_CMD_VERIFY: {
         // param1 = expected CRC32
-        // TODO: Implement CRC verification
-        ESP_LOGI("OTA", "Verify requested with CRC32: 0x%08lX (not yet implemented)", (unsigned long)param1);
-        return true;  // For now, always succeed
+        // Finalize the running CRC (initial value was 0xFFFFFFFF)
+        uint32_t computed_crc = ftp_session.crc32 ^ 0xFFFFFFFF;
+        if (computed_crc == param1) {
+            ESP_LOGI("OTA", "CRC32 verified: 0x%08lX (matched)", (unsigned long)computed_crc);
+            gcs().send_text(MAV_SEVERITY_INFO, "OTA: CRC32 verified OK");
+            return true;
+        } else {
+            ESP_LOGE("OTA", "CRC32 mismatch: expected 0x%08lX, computed 0x%08lX",
+                     (unsigned long)param1, (unsigned long)computed_crc);
+            gcs().send_text(MAV_SEVERITY_ERROR, "OTA: CRC32 mismatch - firmware corrupt");
+            return false;
+        }
+    }
         
     case OTA_CMD_COMPLETE:
         return esp32_ota_end();
