@@ -156,16 +156,6 @@ void GCS_FTP::Session::push_reply(Transaction &reply)
     if (reply.req_opcode == FTP_OP::TerminateSession) {
         last_send_ms = 0;
     }
-    /*
-      provide same banner we would give with old param download
-      Do this after send_ftp_reply() to get the first FTP response out sooner
-      on slow links to avoid GCS timeout.  The slowdown of normal streams in
-      get_reschedule_interval_ms() should help for subsequent responses.
-    */
-    if (GCS::ftp.need_banner_send_mask & (1U<<reply.chan)) {
-        GCS::ftp.need_banner_send_mask &= ~(1U<<reply.chan);
-        send_banner();
-    }
 }
 
 void GCS_MAVLINK::ftp_worker(void) {
@@ -304,7 +294,7 @@ void GCS_MAVLINK::ftp_worker(void) {
 
                         // provide compatibility with old protocol banner download
                         if (strncmp((const char *)request.data, "@PARAM/param.pck", 16) == 0) {
-                            GCS::ftp.need_banner_send_mask |= 1U<<reply.chan;
+                            GCS_MAVLINK::ftp.need_banner_send_mask |= 1U<<reply.chan;
                         }
                         break;
                     }

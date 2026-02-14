@@ -97,6 +97,8 @@ define HAL_LOGGER_WRITE_CHUNK_SIZE 1024  # PSRAM can handle larger chunks
 define HAL_MINIMIZE_FEATURES 0
 define HAL_MINIMIZE_FLASH_SIZE 0
 define HAL_OS_FATFS_IO 1
+# Disable FTP due to squash-related build issues
+define AP_MAVLINK_FTP_ENABLED 0
 
 # Buzzer/LED Configuration 
 # Note: Add your LED/buzzer pins here based on T-2CAN hardware
