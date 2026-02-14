@@ -75,6 +75,23 @@ To fully utilize the T-2CAN's dual CAN capability, the following would need to b
 - **Example Code**: CAN communication examples available in repository
 - **Pinout**: Complete pin definitions in `pin_config.h`
 
+### Serial Interfaces
+- **SERIAL0**: USB-Serial/JTAG (GPIO 43 TX, GPIO 44 RX) - Console/MAVLink
+- **SERIAL1**: GPIO 1 TX, GPIO 2 RX - Telemetry
+- **SERIAL2**: GPIO 17 TX, GPIO 18 RX - GPS or other devices
+
+### I2C
+- **SDA**: GPIO 41
+- **SCL**: GPIO 42 (400 kHz, internal pullups)
+
+### RC Input (Optional)
+RC receiver input is not enabled by default. The ESP32 RMT (Remote Control Transceiver)
+peripheral can decode PPM sum signals from a standard RC receiver on a single GPIO pin.
+To enable, add `RCIN_PIN <gpio>` to hwdef.dat. Suggested pin: GPIO 14 (free on this board).
+
+### Available GPIOs (not assigned)
+GPIO 3, 4, 5, 8, 14, 15, 16, 21, 35-40, 47, 48
+
 ## Development Notes
 
 The board definition is structured to support future MCP2515 implementation:

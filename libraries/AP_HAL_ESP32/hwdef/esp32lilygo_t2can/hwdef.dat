@@ -159,8 +159,11 @@ define AP_COMPASS_PROBING_ENABLED 1
 define HAL_DISABLE_ADC_DRIVER 1
 define HAL_USE_ADC 0
 
-# RMT configuration for receiver input (if needed)
-define HAL_ESP32_RMT_RX_PIN_NUMBER GPIO_NUM_14
+# RC Input via RMT (Remote Control Transceiver) peripheral
+# The ESP32 RMT hardware can decode PPM sum signals from a standard RC receiver
+# on a single GPIO pin. To enable, uncomment RCIN_PIN with a free GPIO.
+# The pin connects directly to the RC receiver signal output (no inverter needed).
+# RCIN_PIN 14   # Suggested free GPIO for RC receiver PPM input
 
 # Debugging options - Enable minimal debug to avoid compilation issues
 define AP_SIM_ENABLED 0

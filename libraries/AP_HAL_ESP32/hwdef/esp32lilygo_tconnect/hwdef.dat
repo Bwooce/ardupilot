@@ -178,11 +178,12 @@ define HAL_USE_ADC 0
 # - For rover applications, prefer DroneCAN + USB MAVLink over WiFi for better reliability
 # - To use WiFi-only: Set SERIAL0_PROTOCOL=0 and reboot
 
-# RMT configuration for receiver input (if needed)
-define HAL_ESP32_RMT_RX_PIN_NUMBER GPIO_NUM_14
-
-# Alternative RMT pins if GPIO14 conflicts:
-# define HAL_ESP32_RMT_RX_PIN_NUMBER GPIO_NUM_7
+# RC Input via RMT (Remote Control Transceiver) peripheral
+# The ESP32 RMT hardware can decode PPM sum signals from a standard RC receiver
+# on a single GPIO pin. To enable, uncomment RCIN_PIN with a free GPIO.
+# The pin connects directly to the RC receiver signal output (no inverter needed).
+# Note: GPIO 14 is already used by RCOUT1, so use a different pin.
+# RCIN_PIN 7   # Suggested free GPIO for RC receiver PPM input
 
 # Alternative serial port configurations:
 # For different UART pins if needed:
