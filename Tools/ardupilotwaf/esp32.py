@@ -60,21 +60,39 @@ def configure(cfg):
     env.SRCROOT = srcpath('')
     env.APJ_TOOL = srcpath('Tools/scripts/apj_tool.py')
 
-    #Check if esp-idf env are loaded, or load it
-    # Force use of local ESP-IDF to avoid mixing system and local installations
-    local_idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
-    env.IDF = local_idf_path
-    
+    # Use IDF_PATH from environment if set (e.g. by agent_build_wrapper.sh),
+    # otherwise fall back to the local submodule
+    idf_path = os.environ.get('IDF_PATH', '')
+    if not idf_path or not os.path.exists(idf_path):
+        idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
+    env.IDF = idf_path
+
     # Set IDF_PATH environment variable to ensure consistency
-    os.environ['IDF_PATH'] = local_idf_path
-    
+    os.environ['IDF_PATH'] = idf_path
+
+    # Detect IDF version for build-time decisions
+    idf_version_h = os.path.join(idf_path, 'components/esp_common/include/esp_idf_version.h')
+    idf_major = 5
+    idf_minor = 0
+    if os.path.exists(idf_version_h):
+        with open(idf_version_h, 'r') as f:
+            for line in f:
+                m = re.match(r'#define\s+ESP_IDF_VERSION_MAJOR\s+(\d+)', line)
+                if m:
+                    idf_major = int(m.group(1))
+                m = re.match(r'#define\s+ESP_IDF_VERSION_MINOR\s+(\d+)', line)
+                if m:
+                    idf_minor = int(m.group(1))
+    env.IDF_MAJOR = idf_major
+    env.IDF_MINOR = idf_minor
+
     # Source ESP-IDF environment to set up all necessary variables
-    export_script = os.path.join(local_idf_path, 'export.sh')
+    export_script = os.path.join(idf_path, 'export.sh')
     if os.path.exists(export_script):
         try:
             # Run export.sh and capture environment changes
             import subprocess
-            result = subprocess.run(['bash', '-c', f'source {export_script} && env'], 
+            result = subprocess.run(['bash', '-c', f'source {export_script} && env'],
                                   capture_output=True, text=True, check=True)
             # Update current environment with ESP-IDF variables
             for line in result.stdout.splitlines():
@@ -84,8 +102,8 @@ def configure(cfg):
                         os.environ[key] = value
         except Exception as e:
             print(f"Warning: Failed to source ESP-IDF environment: {e}")
-    
-    print("USING EXPRESSIF IDF:"+str(env.IDF))
+
+    print("ESP-IDF: %s (v%d.%d)" % (env.IDF, idf_major, idf_minor))
     
     # Report ESP32 debug mode status
     try:
@@ -247,13 +265,27 @@ def pre_build(self):
 
     from waflib import Task
     class load_generated_includes(Task.Task):
-        """After includes.list generated include it in env"""
+        """After includes.list generated, load includes and toolchain flags from cmake"""
         always_run = True
         def run(tsk):
             bld = tsk.generator.bld
             includes = bld.bldnode.find_or_declare('esp-idf_build/includes.list').read().split()
-            #print(includes)
             bld.env.prepend_value('INCLUDES', includes)
+
+            # Read IDF cmake toolchain flags (e.g. -specs=picolibc.specs for IDF 6.0)
+            for flag_file, env_key in [('toolchain/cflags', 'CFLAGS'),
+                                       ('toolchain/cxxflags', 'CXXFLAGS')]:
+                try:
+                    flags_path = bld.bldnode.find_or_declare(
+                        'esp-idf_build/' + flag_file).abspath()
+                    if os.path.exists(flags_path):
+                        with open(flags_path, 'r') as f:
+                            cmake_flags = f.read().split()
+                        for flag in cmake_flags:
+                            if flag not in bld.env[env_key]:
+                                bld.env.prepend_value(env_key, [flag])
+                except Exception:
+                    pass  # flags file may not exist on older IDF
 
     tsk = load_generated_includes(env=self.env)
     tsk.set_inputs(self.path.find_resource('esp-idf_build/includes.list'))
