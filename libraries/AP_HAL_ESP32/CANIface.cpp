@@ -67,6 +67,11 @@ bool IRAM_ATTR CANIface::on_rx_done(twai_node_handle_t handle,
     BaseType_t higher_priority_woken = pdFALSE;
     xQueueSendFromISR(iface->isr_rx_queue, &isr_frame, &higher_priority_woken);
 
+    // Wake rx_task instantly instead of waiting for 100ms poll timeout
+    if (iface->rx_task_handle != NULL) {
+        vTaskNotifyGiveFromISR(iface->rx_task_handle, &higher_priority_woken);
+    }
+
     return higher_priority_woken == pdTRUE;
 }
 
@@ -360,21 +365,9 @@ void CANIface::rx_task(void *arg)
             continue;
         }
 
-        // Wait for frames from ISR callback via isr_rx_queue
-        IsrRxFrame isr_frame;
-        if (xQueueReceive(iface->isr_rx_queue, &isr_frame, pdMS_TO_TICKS(100)) != pdPASS) {
-            // Timeout -- feed watchdog and continue
-            esp_task_wdt_reset();
-            continue;
-        }
-
-        // Reset watchdog periodically
-        static uint32_t last_wdt_reset = 0;
-        uint32_t now = xTaskGetTickCount();
-        if (now - last_wdt_reset > pdMS_TO_TICKS(100)) {
-            esp_task_wdt_reset();
-            last_wdt_reset = now;
-        }
+        // Wait for ISR notification (instant wake) with 100ms fallback timeout
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+        esp_task_wdt_reset();
 
         // Check again if restart happened while we were waiting
         if (iface->restart_in_progress) {
@@ -382,99 +375,103 @@ void CANIface::rx_task(void *arg)
             continue;
         }
 
-        // Convert ISR frame to ArduPilot CAN frame
-        CanRxItem rx_item;
-        rx_item.timestamp_us = isr_frame.timestamp_us;
-        rx_item.frame.id = isr_frame.id;
-        if (isr_frame.is_extended) {
-            rx_item.frame.id |= AP_HAL::CANFrame::FlagEFF;
-        }
-        rx_item.frame.dlc = isr_frame.dlc;
-        memcpy(rx_item.frame.data, isr_frame.data, isr_frame.dlc);
-        rx_item.flags = 0;
+        // Drain all queued frames (ISR may batch multiple before task runs)
+        IsrRxFrame isr_frame;
+        while (xQueueReceive(iface->isr_rx_queue, &isr_frame, 0) == pdPASS) {
+            // Convert ISR frame to ArduPilot CAN frame
+            CanRxItem rx_item;
+            rx_item.timestamp_us = isr_frame.timestamp_us;
+            rx_item.frame.id = isr_frame.id;
+            if (isr_frame.is_extended) {
+                rx_item.frame.id |= AP_HAL::CANFrame::FlagEFF;
+            }
+            rx_item.frame.dlc = isr_frame.dlc;
+            memcpy(rx_item.frame.data, isr_frame.data, isr_frame.dlc);
+            rx_item.flags = 0;
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        // Check for GetNodeInfo responses
-        if (isr_frame.is_extended) {
-            if ((isr_frame.id & 0xFF80) == 0x0180) { // Service frame, type 1
-                bool is_response = ((isr_frame.id >> 15) & 1) == 0;
-                if (is_response) {
-                    uint8_t dest = (isr_frame.id >> 8) & 0x7F;
-                    uint8_t src = isr_frame.id & 0x7F;
-                    static uint32_t rx_resp_count = 0;
-                    rx_resp_count++;
-                    if (rx_resp_count <= 20) {
-                        ESP_LOGI("TWAI_RX", "Received GetNodeInfo response #%lu: TWAI ID=0x%08lX",
-                                 (unsigned long)rx_resp_count, (unsigned long)isr_frame.id);
-                        ESP_LOGI("TWAI_RX", "  From node %d to node %d", src, dest);
-                        if (isr_frame.dlc >= 4) {
-                            ESP_LOGI("TWAI_RX", "  Data: %02X %02X %02X %02X ... %02X",
-                                     isr_frame.data[0], isr_frame.data[1],
-                                     isr_frame.data[2], isr_frame.data[3],
-                                     isr_frame.data[isr_frame.dlc - 1]);
+            // Check for GetNodeInfo responses
+            if (isr_frame.is_extended) {
+                if ((isr_frame.id & 0xFF80) == 0x0180) { // Service frame, type 1
+                    bool is_response = ((isr_frame.id >> 15) & 1) == 0;
+                    if (is_response) {
+                        uint8_t dest = (isr_frame.id >> 8) & 0x7F;
+                        uint8_t src = isr_frame.id & 0x7F;
+                        static uint32_t rx_resp_count = 0;
+                        rx_resp_count++;
+                        if (rx_resp_count <= 20) {
+                            ESP_LOGI("TWAI_RX", "Received GetNodeInfo response #%lu: TWAI ID=0x%08lX",
+                                     (unsigned long)rx_resp_count, (unsigned long)isr_frame.id);
+                            ESP_LOGI("TWAI_RX", "  From node %d to node %d", src, dest);
+                            if (isr_frame.dlc >= 4) {
+                                ESP_LOGI("TWAI_RX", "  Data: %02X %02X %02X %02X ... %02X",
+                                         isr_frame.data[0], isr_frame.data[1],
+                                         isr_frame.data[2], isr_frame.data[3],
+                                         isr_frame.data[isr_frame.dlc - 1]);
+                            }
                         }
                     }
                 }
             }
-        }
 #endif
 
 #if CAN_LOGLEVEL >= 4
-        // Verbose frame-by-frame logging
-        {
-            static uint32_t rx_count = 0;
-            rx_count++;
+            // Verbose frame-by-frame logging
+            {
+                static uint32_t rx_count = 0;
+                rx_count++;
 
-            char data_str[32] = {0};
-            for (int i = 0; i < isr_frame.dlc && i < 8; i++) {
-                snprintf(data_str + (i * 3), sizeof(data_str) - (i * 3), "%02X ", isr_frame.data[i]);
+                char data_str[32] = {0};
+                for (int i = 0; i < isr_frame.dlc && i < 8; i++) {
+                    snprintf(data_str + (i * 3), sizeof(data_str) - (i * 3), "%02X ", isr_frame.data[i]);
+                }
+
+                CAN_DEBUG_VERBOSE("RX #%lu: ID=0x%08lX DLC=%d DATA=[%s]",
+                                 (unsigned long)rx_count, (unsigned long)isr_frame.id,
+                                 isr_frame.dlc, data_str);
             }
-
-            CAN_DEBUG_VERBOSE("RX #%lu: ID=0x%08lX DLC=%d DATA=[%s]",
-                             (unsigned long)rx_count, (unsigned long)isr_frame.id,
-                             isr_frame.dlc, data_str);
-        }
 #elif CAN_LOGLEVEL >= 3
-        // INFO level - summary every 1000 frames
-        {
-            static uint32_t rx_count_summary = 0;
-            rx_count_summary++;
-            if ((rx_count_summary % 1000) == 0) {
-                CAN_DEBUG_DEBUG("Received %lu frames, latest ID=0x%08lX",
-                                (unsigned long)rx_count_summary, (unsigned long)isr_frame.id);
+            // INFO level - summary every 1000 frames
+            {
+                static uint32_t rx_count_summary = 0;
+                rx_count_summary++;
+                if ((rx_count_summary % 1000) == 0) {
+                    CAN_DEBUG_DEBUG("Received %lu frames, latest ID=0x%08lX",
+                                    (unsigned long)rx_count_summary, (unsigned long)isr_frame.id);
+                }
             }
-        }
 #endif
 
-        // Check if this is a self-transmitted frame
-        bool is_self_tx = false;
-        bool loopback_requested = false;
-        uint8_t start_idx = (isr_frame.id & 0xFF) % TX_TRACKER_SIZE;
-        for (uint8_t j = 0; j < TX_TRACKER_SIZE; j++) {
-            uint8_t i = (start_idx + j) % TX_TRACKER_SIZE;
-            if (iface->tx_tracker[i].can_id == isr_frame.id &&
-                iface->tx_tracker[i].timestamp_us != 0) {
-                is_self_tx = true;
-                loopback_requested = iface->tx_tracker[i].loopback_requested;
-                iface->tx_tracker[i].timestamp_us = 0;
-                break;
+            // Check if this is a self-transmitted frame
+            bool is_self_tx = false;
+            bool loopback_requested = false;
+            uint8_t start_idx = (isr_frame.id & 0xFF) % TX_TRACKER_SIZE;
+            for (uint8_t j = 0; j < TX_TRACKER_SIZE; j++) {
+                uint8_t i = (start_idx + j) % TX_TRACKER_SIZE;
+                if (iface->tx_tracker[i].can_id == isr_frame.id &&
+                    iface->tx_tracker[i].timestamp_us != 0) {
+                    is_self_tx = true;
+                    loopback_requested = iface->tx_tracker[i].loopback_requested;
+                    iface->tx_tracker[i].timestamp_us = 0;
+                    break;
+                }
             }
-        }
 
-        if (is_self_tx && !loopback_requested) {
-            continue;
-        }
+            if (is_self_tx && !loopback_requested) {
+                continue;
+            }
 
-        if (is_self_tx && loopback_requested) {
-            rx_item.flags = AP_HAL::CANIface::Loopback;
-        }
+            if (is_self_tx && loopback_requested) {
+                rx_item.flags = AP_HAL::CANIface::Loopback;
+            }
 
-        // Update statistics
-        iface->update_rx_stats();
+            // Update statistics
+            iface->update_rx_stats();
 
-        if (!iface->add_to_rx_queue(rx_item)) {
-            iface->update_error_stats(0x04); // Queue full error
-        }
+            if (!iface->add_to_rx_queue(rx_item)) {
+                iface->update_error_stats(0x04); // Queue full error
+            }
+        } // end while (xQueueReceive)
     }
 }
 
