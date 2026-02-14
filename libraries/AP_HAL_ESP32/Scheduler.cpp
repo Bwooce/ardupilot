@@ -891,8 +891,8 @@ void Scheduler::print_esp32_cpu_stats(void)
     last_run = AP_HAL::millis64();
 
     // Get per-core idle task statistics
-    TaskHandle_t idle0_handle = xTaskGetIdleTaskHandleForCPU(0);
-    TaskHandle_t idle1_handle = xTaskGetIdleTaskHandleForCPU(1);
+    TaskHandle_t idle0_handle = xTaskGetIdleTaskHandleForCore(0);
+    TaskHandle_t idle1_handle = xTaskGetIdleTaskHandleForCore(1);
 
     TaskStatus_t idle0_stats, idle1_stats;
     vTaskGetInfo(idle0_handle, &idle0_stats, pdTRUE, eRunning);
@@ -965,7 +965,7 @@ void Scheduler::print_esp32_cpu_stats(void)
         ESP_LOGI("ESP32_CPU", "Top tasks by CPU:");
         for (UBaseType_t i = 0; i < task_count && i < 5; i++) {
             uint32_t task_percent = (task_status[i].ulRunTimeCounter * 100ULL) / total_run_time;
-            BaseType_t core = xTaskGetAffinity(task_status[i].xHandle);
+            BaseType_t core = xTaskGetCoreID(task_status[i].xHandle);
             const char* core_str = (core == 0) ? "C0" : (core == 1) ? "C1" : "Any";
 
             ESP_LOGI("ESP32_CPU", "  %s: %lu%% (prio=%d, stack=%u, core=%s)",
