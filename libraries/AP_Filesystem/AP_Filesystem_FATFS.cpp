@@ -24,6 +24,11 @@
 #define debug(fmt, args ...)
 #endif
 
+// Maximum single I/O transfer size for non-ChibiOS platforms
+#ifndef MAX_IO_SIZE
+#define MAX_IO_SIZE 4096
+#endif
+
 extern const AP_HAL::HAL& hal;
 
 static bool remount_needed;

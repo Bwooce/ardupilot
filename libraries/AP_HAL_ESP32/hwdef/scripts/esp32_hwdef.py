@@ -455,7 +455,7 @@ class ESP32HWDef(hwdef.HWDef):
             f.write("#define HAL_USE_ADC 0\n")
         
         # Automatically disable GYROFFT when DSP is disabled (GYROFFT requires DSP)
-        if 'HAL_WITH_DSP' in self.intdefines and self.intdefines['HAL_WITH_DSP'] == '0':
+        if 'HAL_WITH_DSP' in self.intdefines and self.intdefines['HAL_WITH_DSP'] == 0:
             if 'HAL_GYROFFT_ENABLED' not in self.intdefines:
                 self.progress("HAL_WITH_DSP is 0, automatically disabling HAL_GYROFFT_ENABLED")
                 f.write("#undef HAL_GYROFFT_ENABLED\n")
@@ -892,7 +892,7 @@ class ESP32HWDef(hwdef.HWDef):
         
         # SPIFFS filesystem configuration for flash logging
         # Check if filesystem logging is enabled in the hwdef
-        if hasattr(self, 'intdefines') and self.intdefines.get('HAL_LOGGING_FILESYSTEM_ENABLED') == '1':
+        if hasattr(self, 'intdefines') and self.intdefines.get('HAL_LOGGING_FILESYSTEM_ENABLED') == 1:
             config_lines.append("# SPIFFS filesystem for internal flash logging - optimized for fast startup")
             config_lines.append("CONFIG_SPIFFS_SUPPORTED=y")
             
