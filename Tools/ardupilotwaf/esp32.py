@@ -61,10 +61,15 @@ def configure(cfg):
     env.APJ_TOOL = srcpath('Tools/scripts/apj_tool.py')
 
     # Use IDF_PATH from environment if set (e.g. by agent_build_wrapper.sh),
-    # otherwise fall back to the local submodule
+    # otherwise prefer IDF 6.x if installed, fall back to submodule
+    import glob
     idf_path = os.environ.get('IDF_PATH', '')
     if not idf_path or not os.path.exists(idf_path):
-        idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
+        idf6_candidates = sorted(glob.glob('/opt/espressif/esp-idf-v6*'), reverse=True)
+        if idf6_candidates:
+            idf_path = idf6_candidates[0]
+        else:
+            idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
     env.IDF = idf_path
 
     # Set IDF_PATH environment variable to ensure consistency

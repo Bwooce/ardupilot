@@ -1002,11 +1002,17 @@ class esp32(Board):
     def configure(self, cfg):
         # Set up ESP-IDF environment before toolchain detection.
         # Respect IDF_PATH if already set (e.g. by agent_build_wrapper.sh),
-        # otherwise fall back to the local submodule.
+        # otherwise prefer IDF 6.0 if installed, fall back to submodule.
         import subprocess
+        import glob
         idf_path = os.environ.get('IDF_PATH', '')
         if not idf_path or not os.path.exists(idf_path):
-            idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
+            # Look for IDF 6.x installations in standard location
+            idf6_candidates = sorted(glob.glob('/opt/espressif/esp-idf-v6*'), reverse=True)
+            if idf6_candidates:
+                idf_path = idf6_candidates[0]
+            else:
+                idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
         os.environ['IDF_PATH'] = idf_path
 
         # Source ESP-IDF environment to set up all necessary variables
