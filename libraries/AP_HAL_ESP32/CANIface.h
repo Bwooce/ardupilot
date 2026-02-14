@@ -8,6 +8,8 @@
 #include "ESP32_CANBase.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "esp_twai.h"
+#include "esp_twai_onchip.h"
 
 namespace ESP32 {
 
@@ -22,7 +24,7 @@ public:
 
     // Periodic status reporting (call from main loop)
     void update_status();
-    
+
     // Enhanced bus health monitoring
     void check_bus_health();
 
@@ -45,15 +47,41 @@ private:
         AP_HAL::CANIface::CanIOFlags flags;
     };
 
+    // ISR-safe struct for passing received frames from callback to rx_task
+    struct IsrRxFrame {
+        uint32_t id;
+        uint8_t data[TWAI_FRAME_MAX_LEN];
+        uint8_t dlc;
+        bool is_extended;
+        bool is_rtr;
+        uint64_t timestamp_us;
+    };
+
     static void rx_task(void *arg);
     static void tx_task(void *arg);
 
+    // ISR callbacks for new TWAI driver
+    static bool IRAM_ATTR on_rx_done(twai_node_handle_t handle,
+                                      const twai_rx_done_event_data_t *edata,
+                                      void *user_ctx);
+    static bool IRAM_ATTR on_tx_done(twai_node_handle_t handle,
+                                      const twai_tx_done_event_data_t *edata,
+                                      void *user_ctx);
+    static bool IRAM_ATTR on_state_change(twai_node_handle_t handle,
+                                           const twai_state_change_event_data_t *edata,
+                                           void *user_ctx);
+    static bool IRAM_ATTR on_error(twai_node_handle_t handle,
+                                    const twai_error_event_data_t *edata,
+                                    void *user_ctx);
+
     bool initialized;
     uint32_t current_bitrate;
-    // instance moved to ESP32_CANBase
+
+    twai_node_handle_t _node = nullptr;
 
     QueueHandle_t rx_queue;
     QueueHandle_t tx_queue;
+    QueueHandle_t isr_rx_queue;  // ISR callback → rx_task bridge
 
     // Task handles for cleanup on re-init
     TaskHandle_t rx_task_handle = NULL;
@@ -72,12 +100,16 @@ private:
     // Flag to indicate driver restart in progress
     volatile bool restart_in_progress = false;
 
+    // Current error state from ISR callback (updated by on_state_change)
+    volatile twai_error_state_t hw_error_state = TWAI_ERROR_ACTIVE;
+
     // Bus state tracking for rate-limited error logging
+    // Maps directly to TWAI error states (no STOPPED/RECOVERING -- those
+    // don't exist in the new esp_twai API)
     enum class BusState {
-        GOOD,
-        BUS_OFF,
-        STOPPED,
-        RECOVERING
+        GOOD,       // TWAI_ERROR_ACTIVE -- healthy
+        WARNING,    // TWAI_ERROR_WARNING or TWAI_ERROR_PASSIVE -- degraded
+        BUS_OFF     // TWAI_ERROR_BUS_OFF -- needs recovery
     };
     BusState last_bus_state = BusState::GOOD;
     uint32_t bus_state_change_ms = 0;
@@ -85,6 +117,9 @@ private:
 
     // Rate-limited bus error logging (private helper)
     void log_bus_state(BusState new_state);
+
+    // Helper to map twai_error_state_t to BusState
+    BusState error_state_to_bus_state(twai_error_state_t state) const;
 };
 
 } // namespace ESP32

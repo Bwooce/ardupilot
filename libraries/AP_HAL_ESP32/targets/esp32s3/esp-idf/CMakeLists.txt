@@ -25,6 +25,8 @@ idf_build_process(esp32s3
                esp_driver_mcpwm
                esp_driver_twai
                esp_driver_usb_serial_jtag
+               esp_driver_sdmmc
+               esp_driver_sdspi
                # Legacy driver shim (provides deprecated APIs during migration)
                driver
                lwip
@@ -126,6 +128,8 @@ target_link_libraries(${elf_file}
                 idf::esp_driver_mcpwm
                 idf::esp_driver_twai
                 idf::esp_driver_usb_serial_jtag
+                idf::esp_driver_sdmmc
+                idf::esp_driver_sdspi
                 idf::driver
                 idf::lwip
                 idf::esp_wifi

@@ -18,6 +18,8 @@
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
 
+#ifdef HAL_ESP32_RMT_RX_PIN_NUMBER
+
 #include "SoftSigReaderRMT.h"
 
 using namespace ESP32;
@@ -44,10 +46,6 @@ void SoftSigReaderRMT::start_receive()
 
 void SoftSigReaderRMT::init()
 {
-#ifndef HAL_ESP32_RMT_RX_PIN_NUMBER
-    #error HAL_ESP32_RMT_RX_PIN_NUMBER undefined in hwdef
-#endif
-
     rmt_rx_channel_config_t rx_chan_config = {};
     rx_chan_config.gpio_num = (gpio_num_t)HAL_ESP32_RMT_RX_PIN_NUMBER;
     rx_chan_config.clk_src = RMT_CLK_SRC_DEFAULT;
@@ -111,4 +109,5 @@ bool SoftSigReaderRMT::read(uint32_t &widths0, uint32_t &widths1)
     return false;
 }
 
-#endif //CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#endif // HAL_ESP32_RMT_RX_PIN_NUMBER
+#endif // CONFIG_HAL_BOARD == HAL_BOARD_ESP32
