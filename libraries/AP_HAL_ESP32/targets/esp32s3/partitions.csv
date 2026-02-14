@@ -3,3 +3,5 @@ nvs,      data, nvs,           ,  0x6000
 phy_init, data, phy,           ,  0x1000
 factory,   app, factory,       ,  3M
 storage,  0x45, 0x0,           ,  256K
+# Core dump storage - written by panic handler, read at next boot
+coredump, data, coredump,      ,  64K

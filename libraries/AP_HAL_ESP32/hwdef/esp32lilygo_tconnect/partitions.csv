@@ -8,5 +8,7 @@ ota_0,    app,  ota_0,   ,        3M
 ota_1,    app,  ota_1,   ,        3M
 ota_data, data, ota,     ,        0x2000
 storage,  0x45, 0x0,     ,        256K
+# Core dump storage - written by panic handler, read at next boot
+coredump, data, coredump,   ,        64K
 # SPIFFS for OTA firmware storage only - NEVER for logging (causes deadlocks)
-ota_storage, data, spiffs,  ,        6500K
+ota_storage, data, spiffs,  ,        6436K

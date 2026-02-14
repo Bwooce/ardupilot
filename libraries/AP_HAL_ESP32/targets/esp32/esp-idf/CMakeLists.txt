@@ -35,6 +35,7 @@ idf_build_process(esp32
                 esp_rom
                 esp_timer
                 esp_psram
+                espcoredump
 
     SDKCONFIG ${CMAKE_BINARY_DIR}/sdkconfig
     SDKCONFIG_DEFAULTS $ENV{ESP_IDF_SDKCONFIG_DEFAULTS}
@@ -135,6 +136,7 @@ target_link_libraries(${elf_file}
                 idf::esp_rom
                 idf::esp_timer
                 idf::esp_psram
+                idf::espcoredump
                 )
 
 target_compile_options(${elf_file} PRIVATE "-include" "${CMAKE_BINARY_DIR}/hwdef.h")

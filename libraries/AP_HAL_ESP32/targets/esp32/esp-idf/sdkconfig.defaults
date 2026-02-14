@@ -53,3 +53,8 @@ CONFIG_HEAP_POISONING_LIGHT=y
 CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
 # Per-task heap tracking for memory debugging (which task uses how much heap)
 CONFIG_HEAP_TASK_TRACKING=y
+# Core dump to flash -- on panic, writes ELF core dump to coredump partition
+# Retrieve with: idf.py coredump-info -p /dev/ttyUSBx
+# Debug with: idf.py coredump-debug -p /dev/ttyUSBx (launches GDB)
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
