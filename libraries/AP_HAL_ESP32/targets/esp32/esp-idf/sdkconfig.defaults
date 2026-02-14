@@ -49,3 +49,7 @@ CONFIG_RMT_SUPPRESS_DEPRECATE_WARN=y
 CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
 CONFIG_COMPILER_STACK_CHECK_MODE_STRONG=y
 CONFIG_HEAP_POISONING_LIGHT=y
+# Frame pointer enables runtime backtraces without debug symbols (~5% binary, ~1% perf)
+CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
+# Per-task heap tracking for memory debugging (which task uses how much heap)
+CONFIG_HEAP_TASK_TRACKING=y
