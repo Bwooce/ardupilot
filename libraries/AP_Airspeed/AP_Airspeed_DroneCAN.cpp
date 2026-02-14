@@ -1,4 +1,3 @@
-#if HAL_WITH_UAVCAN
 #include "AP_Airspeed_DroneCAN.h"
 
 #if AP_AIRSPEED_DRONECAN_ENABLED
@@ -185,4 +184,3 @@ bool AP_Airspeed_DroneCAN::get_hygrometer(uint32_t &last_sample_ms, float &tempe
 }
 #endif // AP_AIRSPEED_HYGROMETER_ENABLE
 #endif // AP_AIRSPEED_DRONECAN_ENABLED
-#endif // HAL_WITH_UAVCAN

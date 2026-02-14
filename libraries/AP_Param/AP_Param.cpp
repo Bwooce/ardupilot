@@ -25,15 +25,6 @@
 
 #include <cmath>
 #include <string.h>
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-#include "esp_log.h"
-#include "esp_attr.h"
-#include "esp_rom_uart.h"
-#include <stdio.h>
-#define IF_ESP32(x) x
-#else
-#define IF_ESP32(x)
-#endif
 
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
@@ -68,24 +59,13 @@ AP_Param *AP_Param::_singleton;
 #endif
 
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-// Enable debug on ESP32 to get better error messages
-#define ENABLE_DEBUG 1
-#else
 #define ENABLE_DEBUG 0
-#endif
 
 #if ENABLE_DEBUG
-# define FATAL(fmt, args ...) do { \
-    IF_ESP32(esp_rom_printf("\n*** AP_Param FATAL: " fmt " ***\n", ## args)); \
-    AP_HAL::panic(fmt, ## args); \
-  } while(0)
+# define FATAL(fmt, args ...) AP_HAL::panic(fmt, ## args);
  # define Debug(fmt, args ...)  do {::printf("%s:%d: " fmt "\n", __FUNCTION__, __LINE__, ## args); } while(0)
 #else
- # define FATAL(fmt, args ...) do { \
-    IF_ESP32(esp_rom_printf("\n*** AP_Param FATAL: Bad parameter table ***\n")); \
-    AP_HAL::panic("Bad parameter table"); \
-  } while(0)
+ # define FATAL(fmt, args ...) AP_HAL::panic("Bad parameter table");
  # define Debug(fmt, args ...)
 #endif
 
@@ -171,26 +151,12 @@ StorageAccess AP_Param::_storage_bak(StorageManager::StorageParamBak);
 uint16_t AP_Param::_frame_type_flags;
 
 // write to EEPROM
-bool AP_Param::eeprom_write_check(const void *ptr, uint16_t ofs, uint8_t size)
+void AP_Param::eeprom_write_check(const void *ptr, uint16_t ofs, uint8_t size)
 {
-    bool ret = _storage.write_block(ofs, ptr, size);
-    if (!ret) {
-        DEV_PRINTF("AP_Param: CRITICAL - Failed to write parameter to storage at offset %u, size %u\n",
-                   (unsigned)ofs, (unsigned)size);
-        GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Parameter storage write failed at offset %u", (unsigned)ofs);
-    }
-
+    _storage.write_block(ofs, ptr, size);
 #if AP_PARAM_STORAGE_BAK_ENABLED
-    bool ret_bak = _storage_bak.write_block(ofs, ptr, size);
-    if (!ret_bak) {
-        DEV_PRINTF("AP_Param: WARNING - Failed to write parameter to backup storage at offset %u, size %u\n",
-                   (unsigned)ofs, (unsigned)size);
-        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Parameter backup storage write failed at offset %u", (unsigned)ofs);
-    }
-    // Return false only if primary storage fails (backup is optional redundancy)
+    _storage_bak.write_block(ofs, ptr, size);
 #endif
-
-    return ret;
 }
 
 bool AP_Param::_hide_disabled_groups = true;
@@ -217,11 +183,7 @@ void AP_Param::erase_all(void)
     hdr.magic[1] = k_EEPROM_magic1;
     hdr.revision = k_EEPROM_revision;
     hdr.spare    = 0;
-    if (!eeprom_write_check(&hdr, 0, sizeof(hdr))) {
-        // Write failed, error already reported by eeprom_write_check
-        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Parameter erase_all failed - header write error");
-        return;
-    }
+    eeprom_write_check(&hdr, 0, sizeof(hdr));
 
     // add a sentinel directly after the header
     write_sentinel(sizeof(struct EEPROM_header));
@@ -1224,10 +1186,7 @@ void AP_Param::save_sync(bool force_save, bool send_to_gcs)
     uint16_t ofs;
     if (scan(&phdr, &ofs)) {
         // found an existing copy of the variable
-        if (!eeprom_write_check(ap, ofs+sizeof(phdr), type_size((enum ap_var_type)phdr.type))) {
-            // Write failed, error already reported by eeprom_write_check
-            return;
-        }
+        eeprom_write_check(ap, ofs+sizeof(phdr), type_size((enum ap_var_type)phdr.type));
         if (send_to_gcs) {
             send_parameter(name, (enum ap_var_type)phdr.type, idx);
         }
