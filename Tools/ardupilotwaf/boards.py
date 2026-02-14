@@ -1000,13 +1000,17 @@ class esp32(Board):
         self.with_can = True
 
     def configure(self, cfg):
-        # Set up ESP-IDF environment before toolchain detection
+        # Set up ESP-IDF environment before toolchain detection.
+        # Respect IDF_PATH if already set (e.g. by agent_build_wrapper.sh),
+        # otherwise fall back to the local submodule.
         import subprocess
-        local_idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
-        os.environ['IDF_PATH'] = local_idf_path
+        idf_path = os.environ.get('IDF_PATH', '')
+        if not idf_path or not os.path.exists(idf_path):
+            idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
+        os.environ['IDF_PATH'] = idf_path
 
         # Source ESP-IDF environment to set up all necessary variables
-        export_script = os.path.join(local_idf_path, 'export.sh')
+        export_script = os.path.join(idf_path, 'export.sh')
         if os.path.exists(export_script):
             try:
                 # Run export.sh and capture environment changes
@@ -1100,13 +1104,33 @@ class esp32(Board):
                          '-fdata-sections',
                          '-fno-exceptions',
                          '-fno-rtti',
-                         '-nostdlib',
                          '-fstrict-volatile-bitfields',
                          '-Wno-sign-compare',
                          '-fno-inline-functions',
                          '-mlongcalls',
-                         '-fsingle-precision-constant', # force const vals to be float , not double. so 100.0 means 100.0f 
+                         '-fsingle-precision-constant', # force const vals to be float , not double. so 100.0 means 100.0f
                          '-fno-threadsafe-statics']
+        # Detect IDF version from the IDF_PATH set during configure()
+        idf_major = 5
+        idf_version_h = os.path.join(os.environ.get('IDF_PATH', ''),
+                                     'components/esp_common/include/esp_idf_version.h')
+        if os.path.exists(idf_version_h):
+            with open(idf_version_h, 'r') as f:
+                for line in f:
+                    m = re.match(r'#define\s+ESP_IDF_VERSION_MAJOR\s+(\d+)', line)
+                    if m:
+                        idf_major = int(m.group(1))
+                        break
+        if idf_major >= 6:
+            # IDF 6.0 uses PicoLibC which is incompatible with -nostdlib.
+            # The -specs=picolibc.specs flag is needed so the compiler finds
+            # PicoLibC headers. The cmath std:: namespace fix is handled in
+            # libraries/AP_Common/missing/cmath via ESP_PLATFORM guard.
+            env.CFLAGS += ['-specs=picolibc.specs']
+            env.CXXFLAGS += ['-specs=picolibc.specs']
+        else:
+            # IDF 5.x uses Newlib which works with -nostdlib
+            env.CXXFLAGS += ['-nostdlib']
         env.CXXFLAGS.remove('-Werror=undef')
         env.CXXFLAGS.remove('-Werror=shadow')
 

@@ -19,6 +19,7 @@
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
 
 #include "esp_core_dump.h"
+#include "esp_idf_version.h"
 #include "esp_log.h"
 
 extern const AP_HAL::HAL& hal;
@@ -78,7 +79,8 @@ void esp32_check_and_report_coredump(void)
     GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,
                   "Coredump: previous crash detected");
 
-#if CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF
+// IDF 6.0 removed CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF (ELF is the only format)
+#if CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF || (ESP_IDF_VERSION_MAJOR >= 6)
     // Get the human-readable panic reason
     char reason[128];
     err = esp_core_dump_get_panic_reason(reason, sizeof(reason));

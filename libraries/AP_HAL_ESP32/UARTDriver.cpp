@@ -32,8 +32,13 @@
 
 // ESP-IDF Console configuration detection
 #ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    #include "esp_idf_version.h"
     #include "esp_vfs_dev.h"
-    #include "esp_vfs_usb_serial_jtag.h"
+    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+        #include "driver/usb_serial_jtag_vfs.h"
+    #else
+        #include "esp_vfs_usb_serial_jtag.h"
+    #endif
 #endif
 
 #define HAL_ESP32_UART_MIN_TX_SIZE 2048  // Large buffer to prevent watchdog during initialization logging

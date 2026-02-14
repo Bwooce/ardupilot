@@ -30,8 +30,8 @@
 
 extern const AP_HAL::HAL& hal;
 
-// QURT HAL already has a declaration of errno in errno.h
-#if CONFIG_HAL_BOARD != HAL_BOARD_QURT
+// QURT and ESP32 (PicoLibC) have their own errno declarations in errno.h
+#if CONFIG_HAL_BOARD != HAL_BOARD_QURT && CONFIG_HAL_BOARD != HAL_BOARD_ESP32
 extern int errno;
 #endif
 

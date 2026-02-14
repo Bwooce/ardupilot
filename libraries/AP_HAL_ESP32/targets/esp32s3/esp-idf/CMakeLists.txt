@@ -7,36 +7,24 @@ project(ardupilot)
 # Include for ESP-IDF build system functions
 include($ENV{IDF_PATH}/tools/cmake/idf.cmake)
 
+# Base components (both IDF 5.5 and 6.0)
+set(AP_COMPONENTS
+    freertos fatfs spiffs nvs_flash esptool_py app_update esp_adc
+    esp_driver_gpio esp_driver_i2c esp_driver_spi esp_driver_uart
+    esp_driver_rmt esp_driver_mcpwm esp_driver_twai
+    esp_driver_usb_serial_jtag esp_driver_sdmmc esp_driver_sdspi
+    driver  # Legacy driver shim
+    lwip esp_wifi esp_system esp_rom esp_timer esp_psram espcoredump
+)
+
+# IDF 6.0 split HAL into separate components
+if(EXISTS "$ENV{IDF_PATH}/components/esp_hal_wdt")
+    list(APPEND AP_COMPONENTS esp_hal_wdt)
+endif()
+
 # Create idf::esp32 and idf::freertos static libraries
 idf_build_process(esp32s3
-    COMPONENTS freertos
-               fatfs
-               spiffs
-               nvs_flash
-               esptool_py
-               app_update
-               esp_adc
-               # Individual driver components (exist in both IDF 5.5 and 6.0)
-               esp_driver_gpio
-               esp_driver_i2c
-               esp_driver_spi
-               esp_driver_uart
-               esp_driver_rmt
-               esp_driver_mcpwm
-               esp_driver_twai
-               esp_driver_usb_serial_jtag
-               esp_driver_sdmmc
-               esp_driver_sdspi
-               # Legacy driver shim (provides deprecated APIs during migration)
-               driver
-               lwip
-               esp_wifi
-               esp_system
-               esp_rom
-               esp_timer
-               esp_psram
-               espcoredump
-
+    COMPONENTS ${AP_COMPONENTS}
     SDKCONFIG ${CMAKE_BINARY_DIR}/sdkconfig
     SDKCONFIG_DEFAULTS ${CMAKE_BINARY_DIR}/../../sdkconfig.combined
     BUILD_DIR ${CMAKE_BINARY_DIR}
@@ -113,33 +101,24 @@ add_custom_target(showinc ALL
 
 # Link the static libraries to the executable
 target_include_directories(${elf_file} PRIVATE ${CMAKE_SOURCE_DIR}/../../../../modules/DroneCAN/libcanard)
-target_link_libraries(${elf_file}
-                idf::freertos
-                idf::fatfs
-                idf::spiffs
-                idf::nvs_flash
-                idf::spi_flash
-                idf::app_update
-                idf::esp_adc
-                idf::esp_driver_gpio
-                idf::esp_driver_i2c
-                idf::esp_driver_spi
-                idf::esp_driver_uart
-                idf::esp_driver_rmt
-                idf::esp_driver_mcpwm
-                idf::esp_driver_twai
-                idf::esp_driver_usb_serial_jtag
-                idf::esp_driver_sdmmc
-                idf::esp_driver_sdspi
-                idf::driver
-                idf::lwip
-                idf::esp_wifi
-                idf::esp_system
-                idf::esp_rom
-                idf::esp_timer
-                idf::esp_psram
-                idf::espcoredump
-                )
+
+set(AP_LINK_LIBS
+    idf::freertos idf::fatfs idf::spiffs idf::nvs_flash idf::spi_flash
+    idf::app_update idf::esp_adc
+    idf::esp_driver_gpio idf::esp_driver_i2c idf::esp_driver_spi
+    idf::esp_driver_uart idf::esp_driver_rmt idf::esp_driver_mcpwm
+    idf::esp_driver_twai idf::esp_driver_usb_serial_jtag
+    idf::esp_driver_sdmmc idf::esp_driver_sdspi
+    idf::driver idf::lwip idf::esp_wifi idf::esp_system idf::esp_rom
+    idf::esp_timer idf::esp_psram idf::espcoredump
+)
+
+# IDF 6.0 split HAL components
+if(TARGET idf::esp_hal_wdt)
+    list(APPEND AP_LINK_LIBS idf::esp_hal_wdt)
+endif()
+
+target_link_libraries(${elf_file} ${AP_LINK_LIBS})
 
 # Attach additional targets to the executable file for flashing,
 # linker script generation, partition_table generation, etc.

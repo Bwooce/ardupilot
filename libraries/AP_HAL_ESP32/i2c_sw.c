@@ -54,7 +54,6 @@
 #include "freertos/semphr.h"
 #include <xtensa_api.h>
 #include "freertos/task.h"
-#include "freertos/ringbuf.h"
 #include "soc/dport_reg.h"
 #include "esp_pm.h"
 #include "soc/soc_memory_layout.h"

@@ -18,7 +18,7 @@ uint32_t DataRateLimit::max_bytes(const float bytes_per_sec)
 
     // Get integer number of bytes and store the remainder
     float max_bytes_int;
-    remainder = modf(max_bytes, &max_bytes_int);
+    remainder = modff(max_bytes, &max_bytes_int);
 
     // Add 0.5 to make sure the float rounds to the correct int
     return uint32_t(max_bytes_int + 0.5);
