@@ -25,6 +25,22 @@ extern const AP_HAL::HAL& hal;
 
 static const char *TAG = "CRASH";
 
+// Xtensa exception cause names (from Xtensa ISA reference, Table 4-64)
+static const char *exc_cause_name(uint32_t cause)
+{
+    switch (cause) {
+    case  0: return "IllegalInstr";
+    case  2: return "InstrFetchErr";
+    case  3: return "LoadStoreErr";
+    case  6: return "DivByZero";
+    case  9: return "Unaligned";
+    case 20: return "InstrProhibit";
+    case 28: return "LoadProhibit";
+    case 29: return "StoreProhibit";
+    default: return nullptr;
+    }
+}
+
 void esp32_diagnostics_init(void)
 {
     rtc_breadcrumb_init();
@@ -67,8 +83,8 @@ void esp32_check_and_report_coredump(void)
     char reason[128];
     err = esp_core_dump_get_panic_reason(reason, sizeof(reason));
     if (err == ESP_OK) {
-        // Truncate to fit STATUSTEXT (max ~50 chars)
-        reason[80] = '\0';
+        // STATUSTEXT text field is 50 chars; "Panic: " = 7 chars
+        reason[43] = '\0';
         GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Panic: %s", reason);
     }
 
@@ -90,10 +106,20 @@ void esp32_check_and_report_coredump(void)
                       (unsigned long)summary->exc_pc);
 
         // Report exception cause and faulting address (Xtensa-specific)
-        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,
-                      "ExcCause: %lu  ExcVAddr: 0x%08lX",
-                      (unsigned long)summary->ex_info.exc_cause,
-                      (unsigned long)summary->ex_info.exc_vaddr);
+        const char *cause_str = exc_cause_name(summary->ex_info.exc_cause);
+        if (cause_str) {
+            // "Exc: LoadProhibit(28) @0x12345678" = ~35 chars
+            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,
+                          "Exc: %s(%lu) @0x%08lX",
+                          cause_str,
+                          (unsigned long)summary->ex_info.exc_cause,
+                          (unsigned long)summary->ex_info.exc_vaddr);
+        } else {
+            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,
+                          "Exc: cause=%lu @0x%08lX",
+                          (unsigned long)summary->ex_info.exc_cause,
+                          (unsigned long)summary->ex_info.exc_vaddr);
+        }
 
         // Report backtrace (up to 8 frames to keep message count reasonable)
         uint32_t bt_depth = summary->exc_bt_info.depth;
@@ -102,11 +128,12 @@ void esp32_check_and_report_coredump(void)
         }
 
         if (bt_depth > 0 && !summary->exc_bt_info.corrupted) {
-            // Pack 4 addresses per message to minimise STATUSTEXT count
-            for (uint32_t i = 0; i < bt_depth; i += 4) {
-                char bt_msg[80];
+            // Pack 3 addresses per message to fit STATUSTEXT 50-char limit
+            // "BT[0]: 0x12345678 0x12345678 0x12345678" = 42 chars max
+            for (uint32_t i = 0; i < bt_depth; i += 3) {
+                char bt_msg[52];
                 int len = snprintf(bt_msg, sizeof(bt_msg), "BT[%lu]:", (unsigned long)i);
-                for (uint32_t j = i; j < i + 4 && j < bt_depth; j++) {
+                for (uint32_t j = i; j < i + 3 && j < bt_depth; j++) {
                     len += snprintf(bt_msg + len, sizeof(bt_msg) - len,
                                     " 0x%08lX",
                                     (unsigned long)summary->exc_bt_info.bt[j]);
