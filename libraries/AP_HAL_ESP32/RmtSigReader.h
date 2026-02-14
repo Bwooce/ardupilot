@@ -15,28 +15,36 @@
  */
 #pragma once
 
-#include <AP_HAL/utility/RingBuffer.h>
 #include "AP_HAL_ESP32.h"
-#include "driver/rmt.h"
+#include "driver/rmt_rx.h"
 
 class ESP32::RmtSigReader
 {
 public:
-    static const int frequency = 1000000;  //1MHZ
+    static const uint32_t frequency = 1000000;  // 1MHz resolution
     static const int max_pulses = 128;
-    static const int idle_threshold = 3000;  //we require at least 3ms gap between frames
+    static const int idle_threshold = 3000;  // 3ms gap between frames (in ticks at 1MHz = us)
     void init();
+    void disable();
     bool read(uint32_t &width_high, uint32_t &width_low);
 private:
     bool add_item(uint32_t duration, bool level);
+    void start_receive();
 
-    RingbufHandle_t handle;
-    rmt_item32_t* item;
-    size_t item_size;
+    rmt_channel_handle_t rx_channel;
+    rmt_symbol_word_t rx_symbols[max_pulses];
+
+    volatile size_t num_received;
+    volatile bool data_ready;
     size_t current_item;
+    size_t item_count;
 
     uint32_t last_high;
     uint32_t ready_high;
     uint32_t ready_low;
     bool pulse_ready;
+
+    static bool IRAM_ATTR rx_done_callback(rmt_channel_handle_t channel,
+                                            const rmt_rx_done_event_data_t *edata,
+                                            void *user_ctx);
 };
