@@ -18,6 +18,7 @@
 #include "AP_HAL_ESP32/AnalogIn.h"
 #include "ESP32_Debug.h"
 #include "ESP32_Params.h"
+#include "ESP32_CrashDiagnostics.h"
 #include "AP_Math/AP_Math.h"
 #include "SdCard.h"
 #include "Profile.h"
@@ -244,9 +245,12 @@ void Scheduler::report_reset_reason()
         #endif
         
         // Log more details via ESP_LOG which might be captured
-        ESP_LOGE("WDT", "Watchdog reset detected - heap free=%u min=%u", 
+        ESP_LOGE("WDT", "Watchdog reset detected - heap free=%u min=%u",
                  (unsigned)free_heap, (unsigned)min_free_heap);
     }
+
+    // Check for stored core dump from previous crash and report via GCS
+    esp32_check_and_report_coredump();
 }
 
 void Scheduler::init()

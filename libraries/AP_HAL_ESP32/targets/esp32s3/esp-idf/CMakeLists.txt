@@ -35,6 +35,7 @@ idf_build_process(esp32s3
                esp_rom
                esp_timer
                esp_psram
+               espcoredump
 
     SDKCONFIG ${CMAKE_BINARY_DIR}/sdkconfig
     SDKCONFIG_DEFAULTS ${CMAKE_BINARY_DIR}/../../sdkconfig.combined
@@ -137,6 +138,7 @@ target_link_libraries(${elf_file}
                 idf::esp_rom
                 idf::esp_timer
                 idf::esp_psram
+                idf::espcoredump
                 )
 
 # Attach additional targets to the executable file for flashing,
