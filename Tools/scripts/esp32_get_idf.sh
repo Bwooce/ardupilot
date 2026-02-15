@@ -54,7 +54,7 @@ fi
 cd ../..
 
 cd modules/esp_idf
-git submodule update --init --recursive
+git submodule update --init --recursive --force
 
 echo
 echo "installing missing python modules"

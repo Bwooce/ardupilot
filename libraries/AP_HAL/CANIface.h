@@ -109,6 +109,13 @@ struct PACKED_IF_ESP32 AP_HAL::CANFrame {
     }
 };
 
+// Verify CANFrame has no unexpected padding beyond natural alignment.
+// Fields: id(4) + data(MaxDataLen) + dlc(1) + canfd(1)
+// Allow up to 2 bytes of alignment padding.
+static_assert(sizeof(AP_HAL::CANFrame) <=
+    sizeof(uint32_t) + AP_HAL::CANFrame::MaxDataLen + sizeof(uint8_t) + sizeof(bool) + 2,
+    "CANFrame has unexpected padding");
+
 class AP_HAL::CANIface
 {
 public:
