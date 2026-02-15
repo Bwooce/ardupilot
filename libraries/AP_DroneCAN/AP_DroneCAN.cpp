@@ -20,6 +20,10 @@
 
 #if HAL_ENABLE_DRONECAN_DRIVERS
 #include "AP_DroneCAN.h"
+
+#ifndef CAN_LOGLEVEL
+#define CAN_LOGLEVEL 0
+#endif
 #include <GCS_MAVLink/GCS.h>
 
 #include <AP_BoardConfig/AP_BoardConfig.h>

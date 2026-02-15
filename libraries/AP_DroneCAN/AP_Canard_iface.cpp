@@ -102,10 +102,10 @@ bool CanardInterface::broadcast(const Canard::Transfer &bcast_transfer) {
     // Validate and fix priority if corrupted
     uint8_t safe_priority = bcast_transfer.priority;
     if (safe_priority > 31) {
-        ESP_LOGE("CANARD", "INVALID PRIORITY %u (0x%02X) for DataTypeID %u - clamping to 31",
-                 (unsigned)safe_priority, (unsigned)safe_priority, 
-                 (unsigned)bcast_transfer.data_type_id);
-        
+        DEV_PRINTF("CANARD: INVALID PRIORITY %u (0x%02X) for DataTypeID %u - clamping to 31\n",
+                   (unsigned)safe_priority, (unsigned)safe_priority,
+                   (unsigned)bcast_transfer.data_type_id);
+
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         // Enhanced diagnostic to find corruption source
         ESP_LOGE("CANARD", "broadcast() corruption detected - Transfer at %p:", &bcast_transfer);
@@ -204,9 +204,9 @@ bool CanardInterface::request(uint8_t destination_node_id, const Canard::Transfe
     // Validate and fix priority if corrupted
     uint8_t safe_priority = req_transfer.priority;
     if (safe_priority > 31) {
-        ESP_LOGE("CANARD", "INVALID REQUEST PRIORITY %u (0x%02X) for DataTypeID %u - clamping to 31",
-                 (unsigned)safe_priority, (unsigned)safe_priority, 
-                 (unsigned)req_transfer.data_type_id);
+        DEV_PRINTF("CANARD: INVALID REQUEST PRIORITY %u (0x%02X) for DataTypeID %u - clamping to 31\n",
+                   (unsigned)safe_priority, (unsigned)safe_priority,
+                   (unsigned)req_transfer.data_type_id);
         safe_priority = 31;  // Clamp to maximum valid priority
     }
     
@@ -264,9 +264,9 @@ bool CanardInterface::respond(uint8_t destination_node_id, const Canard::Transfe
     // Validate and fix priority if corrupted
     uint8_t safe_priority = res_transfer.priority;
     if (safe_priority > 31) {
-        ESP_LOGE("CANARD", "INVALID RESPONSE PRIORITY %u (0x%02X) for DataTypeID %u - clamping to 31",
-                 (unsigned)safe_priority, (unsigned)safe_priority, 
-                 (unsigned)res_transfer.data_type_id);
+        DEV_PRINTF("CANARD: INVALID RESPONSE PRIORITY %u (0x%02X) for DataTypeID %u - clamping to 31\n",
+                   (unsigned)safe_priority, (unsigned)safe_priority,
+                   (unsigned)res_transfer.data_type_id);
         safe_priority = 31;  // Clamp to maximum valid priority
     }
     
