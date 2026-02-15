@@ -2133,21 +2133,22 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
         float val = rsp.value.real_value;
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         hal.console->printf("PARAM_HANDLER: Matched FLOAT type, calling float_cb (ptr=%p)\n", (void*)param_float_cb);
-#endif
         // Safety check for corrupted function pointer
         // ESP32-S3 valid code ranges: 0x40370000-0x403E0000 (IRAM), 0x42000000-0x44000000 (flash cache)
         // ESP32-S3 valid data ranges: 0x3FC00000-0x3FF00000 (DRAM - vtables/functors can be here)
-        uintptr_t ptr = (uintptr_t)param_float_cb;
-        bool valid_iram = (ptr >= 0x40370000 && ptr <= 0x403E0000);
-        bool valid_flash = (ptr >= 0x42000000 && ptr <= 0x44000000);
-        bool valid_dram = (ptr >= 0x3FC00000 && ptr <= 0x3FF00000);
-        if (!valid_iram && !valid_flash && !valid_dram) {
-            hal.console->printf("PARAM_HANDLER: ERROR - Corrupted float_cb pointer %p! Clearing callbacks.\n", (void*)param_float_cb);
-            param_request_sent_ms = 0;
-            param_int_cb = nullptr;
-            param_float_cb = nullptr;
-            param_string_cb = nullptr;
-            return;
+        {
+            uintptr_t ptr = (uintptr_t)param_float_cb;
+            bool valid_iram = (ptr >= 0x40370000 && ptr <= 0x403E0000);
+            bool valid_flash = (ptr >= 0x42000000 && ptr <= 0x44000000);
+            bool valid_dram = (ptr >= 0x3FC00000 && ptr <= 0x3FF00000);
+            if (!valid_iram && !valid_flash && !valid_dram) {
+                hal.console->printf("PARAM_HANDLER: ERROR - Corrupted float_cb pointer %p! Clearing callbacks.\n", (void*)param_float_cb);
+                param_request_sent_ms = 0;
+                param_int_cb = nullptr;
+                param_float_cb = nullptr;
+                param_string_cb = nullptr;
+                return;
+            }
         }
 #endif
         if ((*param_float_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val)) {
@@ -2404,3 +2405,5 @@ bool AP_DroneCAN::write_aux_frame(AP_HAL::CANFrame &out_frame, const uint32_t ti
     }
     return canard_iface.write_aux_frame(out_frame, timeout_us);
 }
+
+#endif // HAL_ENABLE_DRONECAN_DRIVERS

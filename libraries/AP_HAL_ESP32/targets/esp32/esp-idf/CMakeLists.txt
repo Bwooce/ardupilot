@@ -107,13 +107,16 @@ add_custom_target(showinc ALL
 set(AP_LINK_LIBS
     idf::freertos idf::fatfs idf::spiffs idf::nvs_flash idf::spi_flash
     idf::app_update idf::esp_adc
-    idf::esp_driver_gpio idf::esp_driver_i2c idf::esp_driver_spi
-    idf::esp_driver_uart idf::esp_driver_rmt idf::esp_driver_mcpwm
-    idf::esp_driver_twai idf::esp_driver_usb_serial_jtag
-    idf::esp_driver_sdmmc idf::esp_driver_sdspi
     idf::driver idf::lwip idf::esp_wifi idf::esp_system idf::esp_rom
     idf::esp_timer idf::esp_psram idf::espcoredump
 )
+
+# IDF 5.5+ individual driver components (detected at configure time)
+foreach(drv gpio i2c spi uart rmt mcpwm twai usb_serial_jtag sdmmc sdspi)
+    if(TARGET idf::esp_driver_${drv})
+        list(APPEND AP_LINK_LIBS idf::esp_driver_${drv})
+    endif()
+endforeach()
 
 # IDF 6.0 split HAL components
 if(TARGET idf::esp_hal_wdt)
