@@ -518,7 +518,7 @@ public:
     static ObjectBuffer<pending_param_ext_request> param_ext_requests;
 
     // parameter enumeration state for PARAM_EXT_REQUEST_LIST
-    struct param_enumeration_state {
+    struct param_ext_list_state {
         bool active;                // enumeration in progress
         mavlink_channel_t chan;     // requesting channel
         uint8_t can_driver_index;   // CAN driver index
@@ -528,7 +528,7 @@ public:
         uint16_t param_count;       // total parameters discovered
         uint8_t tried_types;        // bitmask of callback types tried for current_index (bit 0=int, 1=float, 2=string)
     };
-    static struct param_enumeration_state param_enum_state;
+    static struct param_ext_list_state param_enum_state;
 
     // PARAM_EXT send functions (must be public for static callbacks)
     // node_id is used to set correct source component ID (25 + node_id - 1)

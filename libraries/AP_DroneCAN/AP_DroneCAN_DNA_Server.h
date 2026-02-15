@@ -56,7 +56,7 @@ class AP_DroneCAN_DNA_Server
         void init_server(uint8_t own_node_id, const uint8_t own_unique_id[], uint8_t own_unique_id_len);
 
         // handle processing the node info message. returns true if from a duplicate node
-        bool handle_node_info(uint8_t source_node_id, const uint8_t unique_id[], const Bitmask<128> *node_healthy);
+        bool handle_node_info(uint8_t source_node_id, const uint8_t unique_id[], const Bitmask<128> *healthy_mask);
 
         // handle the allocation message. returns the allocated node ID, or 0 if allocation failed
         uint8_t handle_allocation(const uint8_t unique_id[], uint8_t uid_len, const Bitmask<128> *node_seen);

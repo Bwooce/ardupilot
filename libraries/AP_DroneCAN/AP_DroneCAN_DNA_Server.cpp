@@ -195,7 +195,7 @@ void AP_DroneCAN_DNA_Server::Database::init_server(uint8_t own_node_id, const ui
 }
 
 // handle processing the node info message. returns true if from a duplicate node
-bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, const uint8_t unique_id[], const Bitmask<128> *node_healthy)
+bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, const uint8_t unique_id[], const Bitmask<128> *healthy_mask)
 {
     WITH_SEMAPHORE(sem);
 
@@ -221,7 +221,7 @@ bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, 
 
     // UID is registered to a DIFFERENT node ID
     // Check if the rightful owner is still active
-    bool rightful_owner_active = node_healthy && node_healthy->get(registered_node_id);
+    bool rightful_owner_active = healthy_mask && healthy_mask->get(registered_node_id);
 
     if (rightful_owner_active) {
         // Rightful owner still active - update database to remap UID

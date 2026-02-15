@@ -41,7 +41,7 @@ ObjectBuffer<GCS_MAVLINK::pending_param_reply> GCS_MAVLINK::param_replies(5);
 ObjectBuffer<GCS_MAVLINK::pending_param_ext_request> GCS_MAVLINK::param_ext_requests(5);
 
 // parameter enumeration state
-GCS_MAVLINK::param_enumeration_state GCS_MAVLINK::param_enum_state = {};
+GCS_MAVLINK::param_ext_list_state GCS_MAVLINK::param_enum_state = {};
 
 // DroneCAN parameter get/set callback wrappers
 // These wrappers match the Functor signature requirement (void* obj as first param)
