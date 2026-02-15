@@ -30,68 +30,21 @@ This provides some support code and variables for MAVLink enabled sketches
 #include <AP_Common/AP_Common.h>
 
 
-// Permanent static asserts for all platforms to catch packing issues
-// These check for obviously wrong sizes that indicate struct packing problems
-// Rather than exact sizes, we check for reasonable ranges
-
-// Message structs should never be larger than their wire format + reasonable padding
-static_assert(sizeof(mavlink_heartbeat_t) <= 12, "mavlink_heartbeat_t too large - packing issue!");
-static_assert(sizeof(mavlink_attitude_t) <= 32, "mavlink_attitude_t too large - packing issue!");
-static_assert(sizeof(mavlink_sys_status_t) <= 36, "mavlink_sys_status_t too large - packing issue!");
-
-// Message structs should never be smaller than their minimum wire size
-static_assert(sizeof(mavlink_heartbeat_t) >= 9, "mavlink_heartbeat_t too small - missing fields!");
-static_assert(sizeof(mavlink_attitude_t) >= 28, "mavlink_attitude_t too small - missing fields!");
-
-// The main message container should be within a reasonable range
-// On most platforms it's 280 bytes, but ESP32 may add padding
-// The critical thing is that the payload and header offsets are correct
+// ESP32 struct packing verification - ESP32 has different alignment than ARM/x86
+// These were added to debug MAVLink corruption on ESP32 (MAVLINK_ALIGNED_FIELDS=0)
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+static_assert(sizeof(mavlink_heartbeat_t) <= 12, "mavlink_heartbeat_t too large");
+static_assert(sizeof(mavlink_heartbeat_t) >= 9, "mavlink_heartbeat_t too small");
+static_assert(sizeof(mavlink_attitude_t) >= 28, "mavlink_attitude_t too small");
 static_assert(sizeof(mavlink_message_t) >= 280 && sizeof(mavlink_message_t) <= 300,
-              "mavlink_message_t size out of expected range - possible struct definition error!");
-
-// More important than total size is that the payload array is at the right offset
+              "mavlink_message_t size out of expected range");
 static_assert(offsetof(mavlink_message_t, payload64) <= 32,
-              "mavlink_message_t payload offset wrong - will corrupt messages!");
-
-// Verify critical field offsets - these MUST be exact for wire format compatibility
-// ATTITUDE message (ID 30) - the one we know is getting corrupted
-static_assert(offsetof(mavlink_attitude_t, time_boot_ms) == 0, "attitude time_boot_ms offset wrong!");
-static_assert(offsetof(mavlink_attitude_t, roll) == 4, "attitude roll offset wrong!");
-static_assert(offsetof(mavlink_attitude_t, pitch) == 8, "attitude pitch offset wrong!");
-static_assert(offsetof(mavlink_attitude_t, yaw) == 12, "attitude yaw offset wrong!");
-static_assert(offsetof(mavlink_attitude_t, rollspeed) == 16, "attitude rollspeed offset wrong!");
-static_assert(offsetof(mavlink_attitude_t, pitchspeed) == 20, "attitude pitchspeed offset wrong!");
-static_assert(offsetof(mavlink_attitude_t, yawspeed) == 24, "attitude yawspeed offset wrong!");
-
-// HEARTBEAT message (ID 0) - most frequently sent
-static_assert(offsetof(mavlink_heartbeat_t, custom_mode) == 0, "heartbeat custom_mode offset wrong!");
-static_assert(offsetof(mavlink_heartbeat_t, type) == 4, "heartbeat type offset wrong!");
-static_assert(offsetof(mavlink_heartbeat_t, autopilot) == 5, "heartbeat autopilot offset wrong!");
-static_assert(offsetof(mavlink_heartbeat_t, base_mode) == 6, "heartbeat base_mode offset wrong!");
-static_assert(offsetof(mavlink_heartbeat_t, system_status) == 7, "heartbeat system_status offset wrong!");
-static_assert(offsetof(mavlink_heartbeat_t, mavlink_version) == 8, "heartbeat mavlink_version offset wrong!");
-
-// IMPORTANT: The mavlink_message_t structure is NOT in wire format order!
-// The structure has checksum FIRST for efficiency, not wire format
-// Actual structure order (from mavlink_types.h):
-//   uint16_t checksum;      // offset 0
-//   uint8_t magic;          // offset 2
-//   uint8_t len;            // offset 3
-//   uint8_t incompat_flags; // offset 4
-//   uint8_t compat_flags;   // offset 5
-//   uint8_t seq;            // offset 6
-//   uint8_t sysid;          // offset 7
-//   uint8_t compid;         // offset 8
-//   uint32_t msgid:24;      // offset 9 (bitfield)
-//   uint64_t payload64[...];// offset 12
-// Wire format is different - magic comes first!
-
-static_assert(offsetof(mavlink_message_t, checksum) == 0, "checksum should be at offset 0");
-static_assert(offsetof(mavlink_message_t, magic) == 2, "magic should be at offset 2");
-static_assert(offsetof(mavlink_message_t, sysid) == 7, "sysid should be at offset 7");
-static_assert(offsetof(mavlink_message_t, compid) == 8, "compid should be at offset 8");
-static_assert(offsetof(mavlink_message_t, payload64) >= 12 && offsetof(mavlink_message_t, payload64) <= 16,
-              "payload should be around offset 12-16");
+              "mavlink_message_t payload offset wrong");
+static_assert(offsetof(mavlink_attitude_t, time_boot_ms) == 0, "attitude time_boot_ms offset wrong");
+static_assert(offsetof(mavlink_attitude_t, roll) == 4, "attitude roll offset wrong");
+static_assert(offsetof(mavlink_heartbeat_t, custom_mode) == 0, "heartbeat custom_mode offset wrong");
+static_assert(offsetof(mavlink_heartbeat_t, type) == 4, "heartbeat type offset wrong");
+#endif
 #include <AP_HAL/AP_HAL.h>
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32

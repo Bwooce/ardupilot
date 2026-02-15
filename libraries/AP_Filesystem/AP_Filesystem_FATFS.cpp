@@ -13,6 +13,10 @@
 #include <AP_Common/time.h>
 
 #include <ff.h>
+// FatFS compatibility: ESP-IDF FatFS uses FF_DIR, ChibiOS FatFS uses DIR
+#ifndef FF_DIR
+#define FF_DIR DIR
+#endif
 #ifdef HAL_OS_CHIBIOS
 #include <AP_HAL_ChibiOS/sdcard.h>
 #include <AP_HAL_ChibiOS/hwdef/common/stm32_util.h>
