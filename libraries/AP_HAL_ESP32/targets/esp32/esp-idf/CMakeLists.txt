@@ -7,15 +7,19 @@ project(ardupilot)
 # Include for ESP-IDF build system functions
 include($ENV{IDF_PATH}/tools/cmake/idf.cmake)
 
-# Base components (both IDF 5.5 and 6.0)
+# Base components (all IDF versions)
 set(AP_COMPONENTS
     freertos fatfs spiffs nvs_flash esptool_py app_update esp_adc
-    esp_driver_gpio esp_driver_i2c esp_driver_spi esp_driver_uart
-    esp_driver_rmt esp_driver_mcpwm esp_driver_twai
-    esp_driver_usb_serial_jtag esp_driver_sdmmc esp_driver_sdspi
-    driver  # Legacy driver shim
+    driver  # Monolithic in IDF 5.4, shim in 5.5+
     lwip esp_wifi esp_system esp_rom esp_timer esp_psram espcoredump
 )
+
+# IDF 5.5+ split driver into individual esp_driver_* components
+foreach(drv gpio i2c spi uart rmt mcpwm twai usb_serial_jtag sdmmc sdspi)
+    if(EXISTS "$ENV{IDF_PATH}/components/esp_driver_${drv}")
+        list(APPEND AP_COMPONENTS esp_driver_${drv})
+    endif()
+endforeach()
 
 # IDF 6.0 split HAL into separate components
 if(EXISTS "$ENV{IDF_PATH}/components/esp_hal_wdt")

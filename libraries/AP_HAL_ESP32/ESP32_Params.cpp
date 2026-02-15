@@ -43,7 +43,6 @@ const struct AP_Param::GroupInfo ESP32Params::var_info[] = {
     // @Description: Controls ESP32 HAL debug output via ESP-IDF logging. 0=Disabled, 1=Errors only, 2=Warnings+Errors, 3=Info+Warnings+Errors, 4=Verbose, 5=All debug output
     // @Values: 0:Disabled, 1:Errors, 2:Warnings, 3:Info, 4:Verbose, 5:All
     // @User: Advanced
-    // @RebootRequired: False
     AP_GROUPINFO("DEBUG_LVL", 1, ESP32Params, debug_level, 3), // Default to Info level
     
     // @Param: LOG_MAV
@@ -51,7 +50,6 @@ const struct AP_Param::GroupInfo ESP32Params::var_info[] = {
     // @Description: Redirect ESP32 debug logs to MAVLink STATUSTEXT messages. Useful for debugging when console is not connected.
     // @Values: 0:Disabled, 1:Enabled
     // @User: Advanced
-    // @RebootRequired: False
 #ifdef ESP32_LOG_MAV_DEFAULT
     AP_GROUPINFO("LOG_MAV", 2, ESP32Params, log_to_mavlink, ESP32_LOG_MAV_DEFAULT),
 #else
