@@ -1163,15 +1163,15 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     ESP_LOGD("DNA_SERVER", "Preparing response: accumulated_uid_len=%d bytes", rcvd_unique_id_offset);
 #endif
 
-    // Check if this looks like a complete UID:
-    // - Require at least 12 bytes (2 stages) to avoid UID collision with single-stage partial UIDs
-    // - Two nodes sharing the same first 6 bytes would get allocated the same node ID otherwise
-    // - Standard UIDs are 16 bytes, but accept 12+ to handle variations
-    bool uid_looks_complete = (rcvd_unique_id_offset >= 12);
+    // Full 16-byte UID required before allocation.
+    // The DNA protocol client expects unique_id.len == 16 in the response to
+    // recognize a completed allocation. Allocating with fewer bytes causes the
+    // client to treat the response as a partial echo, creating an infinite loop.
+    bool uid_looks_complete = (rcvd_unique_id_offset == sizeof(rcvd_unique_id));
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGD("DNA_SERVER", "UID completeness check: offset=%d, min_required=12, looks_complete=%d",
-             rcvd_unique_id_offset, uid_looks_complete);
+    ESP_LOGD("DNA_SERVER", "UID completeness check: offset=%d, required=%d, looks_complete=%d",
+             rcvd_unique_id_offset, (int)sizeof(rcvd_unique_id), uid_looks_complete);
 #endif
 
     if (uid_looks_complete) { // full unique ID received, allocate it!
