@@ -18,9 +18,18 @@ class AP_DroneCAN_DNA_Server
 {
     StorageAccess storage;
 
+    // ESP32 stores full 16-byte UIDs for debugging/diagnostics; fits 62 nodes in 1KB
+    // Other platforms use upstream hash+CRC format; fits 125 nodes in 1KB
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     struct PACKED NodeRecord {
         uint8_t uid[16];  // Full 16-byte unique ID (no hash, no CRC)
     };
+#else
+    struct NodeRecord {
+        uint8_t uid_hash[6];
+        uint8_t crc;
+    };
+#endif
 
     /*
      * For each node ID (1 through MAX_NODE_ID), the database can have one
@@ -65,8 +74,10 @@ class AP_DroneCAN_DNA_Server
         // retrieve node ID that matches the given unique ID. returns 0 if not found
         uint8_t find_node_id(const uint8_t unique_id[], uint8_t size);
 
-        // fill the given record with the hash of the given unique ID
+#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
+        // fill the given record with the hash of the given unique ID (upstream format)
         void compute_uid_hash(NodeRecord &record, const uint8_t unique_id[], uint8_t size) const;
+#endif
 
         // register a given unique ID to a given node ID, deleting any existing registration for the unique ID
         void register_uid(uint8_t node_id, const uint8_t unique_id[], uint8_t size);

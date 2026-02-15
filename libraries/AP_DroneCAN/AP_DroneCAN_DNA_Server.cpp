@@ -44,18 +44,19 @@ static char g_node_names[128][81] = {};  // 80 chars + null terminator
 #endif
 extern const AP_HAL::HAL& hal;
 
-// NodeRecord now stores full 16-byte UIDs with no hashing or CRC
-// Storage limit: 1024 bytes = 2 (magic) + 62*16 (records) = 994 bytes used, 30 spare
-
-#define NODERECORD_MAGIC 0xAC02  // Incremented to force database reset after format change
+// Storage format is platform-dependent:
+// ESP32: Full 16-byte UIDs (no hash) for debugging, MAX_NODE_ID=62 to fit 1KB storage
+//        Also avoids MAVLink component ID collisions (camera=100, servo=140+, gimbal=154+)
+//        since PARAM_EXT bridge uses node_id == component_id per MAVLink UAVCAN spec.
+// Others: Upstream hash+CRC format, MAX_NODE_ID=125
 #define NODERECORD_MAGIC_LEN 2 // uint16_t
-// Reduced from 125 for two reasons:
-// 1. Storage: 16-byte full UIDs (vs upstream 6-byte hash) need 62*16+2=994 bytes to fit 1KB
-// 2. MAVLink PARAM_EXT bridge uses node_id == component_id (per MAVLink UAVCAN spec).
-//    Node IDs above ~62 collide with well-known MAVLink component IDs (camera=100,
-//    servo=140+, gimbal=154+). DNA allocates downward from MAX_NODE_ID, so keeping
-//    this low avoids handing out conflicting IDs.
-#define MAX_NODE_ID    62
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#define NODERECORD_MAGIC 0xAC02  // Different magic to force reset on format change
+#define MAX_NODE_ID    62        // 62*16+2 = 994 bytes fits 1KB storage
+#else
+#define NODERECORD_MAGIC 0xAC01
+#define MAX_NODE_ID    125       // 125*7+2 = 877 bytes fits 1KB storage
+#endif
 #define NODERECORD_LOC(node_id) ((node_id * sizeof(NodeRecord)) + NODERECORD_MAGIC_LEN)
 
 #define debug_dronecan(level_debug, fmt, args...) do { AP::can().log_text(level_debug, "DroneCAN", fmt, ##args); } while (0)
@@ -67,8 +68,13 @@ AP_DroneCAN_DNA_Server::Database AP_DroneCAN_DNA_Server::db;
 void AP_DroneCAN_DNA_Server::Database::init(StorageAccess *storage_)
 {
     // storage size must be synced with StorageCANDNA entry in StorageManager.cpp
-    // Check that the LAST record fits completely (start + size)
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32: 62 nodes * 16 bytes + 2 magic = 994 bytes
     static_assert(NODERECORD_LOC(MAX_NODE_ID) + sizeof(NodeRecord) <= 1024, "DNA storage too small");
+#else
+    // Upstream: 125 nodes * 7 bytes + 2 magic = 877 bytes (uses MAX_NODE_ID+1 to include slot 0)
+    static_assert(NODERECORD_LOC(MAX_NODE_ID+1) <= 1024, "DNA storage too small");
+#endif
 
     // might be called from multiple threads if multiple servers use the same database
     WITH_SEMAPHORE(sem);
@@ -320,40 +326,51 @@ uint8_t AP_DroneCAN_DNA_Server::Database::find_node_id(const uint8_t unique_id[]
 {
     NodeRecord record;
 
-    // Clamp size to 16 bytes maximum
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Direct UID comparison (full 16-byte storage)
     uint8_t search_len = (size > 16) ? 16 : size;
 
     for (int i = MAX_NODE_ID; i > 0; i--) {
         if (node_registered.get(i)) {
             read_record(record, i);
-
-            // PREFIX MATCH: Compare only the bytes we have
-            // This allows:
-            // - Allocation with 12 bytes to find registration with 16 bytes (prefix match)
-            // - GetNodeInfo with 16 bytes to find registration with 12 bytes (extends match)
-            // - Full 16-byte match when both have 16 bytes
-            bool matches = true;
-
-            // Compare the prefix (the bytes we have in the search)
-            if (memcmp(record.uid, unique_id, search_len) != 0) {
-                matches = false;
-            }
-            // Note: For partial searches (search_len < 16), we accept prefix matches
-            // This allows allocation with 12 bytes to find registration with 16 bytes
-            // and GetNodeInfo with 16 bytes to find registration with 12 bytes
-
-            if (matches) {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            if (memcmp(record.uid, unique_id, search_len) == 0) {
                 ESP_LOGD("DNA_DB", "find_node_id: Found match at node %d (search_len=%d)", i, search_len);
-#endif
-                return i; // node ID found
+                return i;
             }
         }
     }
+#else
+    // Hash-based comparison (upstream format)
+    NodeRecord cmp_record;
+    compute_uid_hash(cmp_record, unique_id, size);
+
+    for (int i = MAX_NODE_ID; i > 0; i--) {
+        if (node_registered.get(i)) {
+            read_record(record, i);
+            if (memcmp(record.uid_hash, cmp_record.uid_hash, sizeof(NodeRecord::uid_hash)) == 0) {
+                return i;
+            }
+        }
+    }
+#endif
     return 0; // not found
 }
 
-// No longer needed - we store full UIDs instead of hashes
+#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
+// fill the given record with the hash of the given unique ID (upstream format)
+void AP_DroneCAN_DNA_Server::Database::compute_uid_hash(NodeRecord &record, const uint8_t unique_id[], uint8_t size) const
+{
+    uint64_t hash = FNV_1_OFFSET_BASIS_64;
+    hash_fnv_1a(size, unique_id, &hash);
+
+    // xor-folding per http://www.isthe.com/chongo/tech/comp/fnv/
+    hash = (hash>>56) ^ (hash&(((uint64_t)1<<56)-1));
+
+    for (uint8_t i=0; i<6; i++) {
+        record.uid_hash[i] = (hash >> (8*i)) & 0xff;
+    }
+}
+#endif
 
 // register a given unique ID to a given node ID, deleting any existing registration for the unique ID
 void AP_DroneCAN_DNA_Server::Database::register_uid(uint8_t node_id, const uint8_t unique_id[], uint8_t size)
@@ -378,15 +395,19 @@ void AP_DroneCAN_DNA_Server::Database::register_uid(uint8_t node_id, const uint8
 void AP_DroneCAN_DNA_Server::Database::create_registration(uint8_t node_id, const uint8_t unique_id[], uint8_t size)
 {
     NodeRecord record;
-    memset(&record, 0, sizeof(record));  // Clear all bytes first
+    memset(&record, 0, sizeof(record));
 
-    // Copy the UID (up to 16 bytes)
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Store full UID directly
     uint8_t copy_size = (size > 16) ? 16 : size;
     memcpy(record.uid, unique_id, copy_size);
-    // Remaining bytes already zeroed by memset
+#else
+    // Compute hash and CRC (upstream format)
+    compute_uid_hash(record, unique_id, size);
+    record.crc = crc_crc8(record.uid_hash, sizeof(record.uid_hash));
+#endif
 
     write_record(record, node_id);
-
     node_registered.set(node_id);
 }
 
@@ -411,13 +432,23 @@ bool AP_DroneCAN_DNA_Server::Database::check_registration(uint8_t node_id)
     NodeRecord record;
     read_record(record, node_id);
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     // Check if UID is all zeros (no registration)
-    for (uint8_t i = 0; i < 16; i++) {
+    for (uint8_t i = 0; i < sizeof(record.uid); i++) {
         if (record.uid[i] != 0) {
-            return true; // Found non-zero byte, registration exists
+            return true;
         }
     }
-    return false; // All zero, no registration
+    return false;
+#else
+    // Check hash CRC (upstream format)
+    uint8_t empty_uid[sizeof(NodeRecord::uid_hash)] {};
+    uint8_t crc = crc_crc8(record.uid_hash, sizeof(record.uid_hash));
+    if (crc == record.crc && memcmp(&record.uid_hash[0], &empty_uid[0], sizeof(empty_uid)) != 0) {
+        return true;
+    }
+    return false;
+#endif
 }
 
 // read the given node ID's registration's record
@@ -744,18 +775,22 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     last_nodestatus_time[transfer.source_node_id] = now;
 #endif
     
-    // Send UAVCAN_NODE_STATUS MAVLink message for GCS reporting
-    send_node_status_mavlink(transfer.source_node_id, msg);
-
     // Handle health state changes with severity-based reporting
     const bool is_operational = (msg.mode == UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL);
     const bool is_healthy = (msg.health == UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK);
     const bool was_healthy = node_healthy.get(transfer.source_node_id);
+    const bool first_contact = !node_seen.get(transfer.source_node_id);
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     // Debug: Track node_healthy changes for troubleshooting LED flipping
     static bool first_log[128] = {true};
 #endif
     bool ignore_unhealthy = _ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_UNHEALTHY_NODE);
+
+    // Send UAVCAN_NODE_STATUS MAVLink message on first contact or health change only
+    // (not every heartbeat, which would flood MAVLink channels)
+    if (first_contact || (was_healthy != is_healthy)) {
+        send_node_status_mavlink(transfer.source_node_id, msg);
+    }
 
     if ((!is_healthy || !is_operational) && !ignore_unhealthy) {
 
@@ -776,8 +811,8 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
         }
 #endif
     } else {
-        // Node is now healthy
-        if (!was_healthy && is_healthy && is_operational) {
+        // Node is now healthy - only report recovery if previously seen (not first contact)
+        if (!was_healthy && is_healthy && is_operational && !first_contact) {
             report_node_health_change(transfer.source_node_id, msg.health, msg.mode, true);
         }
 
