@@ -18,6 +18,11 @@ extern "C" {
 extern const AP_HAL::HAL& hal;
 #define LOG_TAG "DroneCANIface"
 #include <canard.h>
+
+// Verify wire protocol struct sizes match expectations across platforms.
+// CanardCANFrame minimum: id(4) + data(CANARD_CAN_FRAME_MAX_DATA_LEN) + data_len(1) + iface_id(1)
+static_assert(sizeof(CanardCANFrame) >= sizeof(uint32_t) + CANARD_CAN_FRAME_MAX_DATA_LEN + 2,
+    "CanardCANFrame smaller than expected");
 #include <AP_CANManager/AP_CANSensor.h>
 
 #define DEBUG_PKTS 0
