@@ -1,7 +1,8 @@
-#pragma once
-
-#include <AP_HAL_ESP32/Semaphores.h>
+#include <AP_HAL/AP_HAL.h> // to include SEMAPHORE
 
 namespace Canard {
-    typedef ESP32::Semaphore Semaphore;
+typedef ::HAL_Semaphore Semaphore;
 }
+
+#define CANARD_MALLOC malloc
+#define CANARD_FREE free
