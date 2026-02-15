@@ -1203,7 +1203,7 @@ void GCS_MAVLINK::send_param_ext_ack(const char *param_name, const char *param_v
     comm_send_buffer(chan, (uint8_t*)buf, len);
 }
 
-void GCS_MAVLINK::start_param_enumeration(mavlink_channel_t chan, uint8_t can_driver_index, uint8_t node_id)
+void GCS_MAVLINK::start_param_enumeration(mavlink_channel_t reply_chan, uint8_t can_driver_index, uint8_t node_id)
 {
     // Stop any active enumeration
     if (param_enum_state.active) {
@@ -1212,7 +1212,7 @@ void GCS_MAVLINK::start_param_enumeration(mavlink_channel_t chan, uint8_t can_dr
 
     // Initialize enumeration state
     param_enum_state.active = true;
-    param_enum_state.chan = chan;
+    param_enum_state.chan = reply_chan;
     param_enum_state.can_driver_index = can_driver_index;
     param_enum_state.node_id = node_id;
     param_enum_state.current_index = 0;

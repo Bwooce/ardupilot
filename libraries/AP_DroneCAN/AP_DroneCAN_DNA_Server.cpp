@@ -250,7 +250,7 @@ bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, 
 }
 
 // handle the allocation message. returns the allocated node ID, or 0 if allocation failed
-uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique_id[], uint8_t uid_len, const Bitmask<128> *node_seen)
+uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique_id[], uint8_t uid_len, const Bitmask<128> *seen_mask)
 {
     WITH_SEMAPHORE(sem);
 
@@ -280,7 +280,7 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
         // 2. Device requesting allocation while already active (e.g., after reboot/state loss)
         // In both cases, we return the same node ID to maintain stable addressing
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        const char* status = (node_seen && node_seen->get(resp_node_id)) ? "active" : "offline";
+        const char* status = (seen_mask && seen_mask->get(resp_node_id)) ? "active" : "offline";
         ESP_LOGD("DNA_DB", "UID found with node %d (%s), returning existing allocation, UID=%02X%02X%02X%02X%02X%02X...",
                  resp_node_id, status,
                  unique_id[0], unique_id[1], unique_id[2],
@@ -296,7 +296,7 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
             // Check both registered (in DNA database) and seen (currently active)
             // This prevents allocating IDs used by active MAVLink components or unregistered nodes
             if (!node_registered.get(resp_node_id) &&
-                !(node_seen && node_seen->get(resp_node_id))) {
+                !(seen_mask && seen_mask->get(resp_node_id))) {
                 break;
             }
             resp_node_id--;
@@ -467,6 +467,7 @@ void AP_DroneCAN_DNA_Server::Database::write_record(const NodeRecord &record, ui
         return;
     }
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     // Check if we're writing a registration (non-zero UID) or clearing (all-zero UID)
     bool is_clearing = true;
     for (uint8_t i = 0; i < 16; i++) {
@@ -475,8 +476,6 @@ void AP_DroneCAN_DNA_Server::Database::write_record(const NodeRecord &record, ui
             break;
         }
     }
-
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     if (is_clearing) {
         ESP_LOGD("DNA_SERVER", "Clearing node %d record (old format garbage or deregistration) at offset=%d",
                  node_id, NODERECORD_LOC(node_id));
@@ -617,9 +616,6 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
             verification_attempt_count[curr_verifying_node]++;
 
             uavcan_protocol_GetNodeInfoRequest request;
-            ESP_LOGD("DNA_SERVER", "Sending GetNodeInfo request to node %d (attempt %lu)",
-                     curr_verifying_node,
-                     (unsigned long)verification_attempt_count[curr_verifying_node]);
             node_info_client.request(curr_verifying_node, request);
             nodeInfo_resp_rcvd = false;
 
@@ -755,8 +751,10 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     const bool is_operational = (msg.mode == UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL);
     const bool is_healthy = (msg.health == UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK);
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     // Debug: Track node_healthy changes for troubleshooting LED flipping
     static bool first_log[128] = {true};
+#endif
     bool ignore_unhealthy = _ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_UNHEALTHY_NODE);
 
     if ((!is_healthy || !is_operational) && !ignore_unhealthy) {
@@ -810,7 +808,6 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
 #endif
             //immediately begin verification of the node_id
             uavcan_protocol_GetNodeInfoRequest request;
-            ESP_LOGI("DNA_SERVER", "Sending GetNodeInfo request to node %d (after allocation)", transfer.source_node_id);
             node_info_client.request(transfer.source_node_id, request);
         }
     }
@@ -1346,11 +1343,11 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     last_response_time = now_guard;
     last_response_node_id = rsp.node_id;
     last_uid_hash = uid_hash;
-    
-    ESP_LOGD("DNA_SERVER", "CALLING allocation_pub.broadcast() for node_id=%d, uid_len=%d", 
+
+    ESP_LOGD("DNA_SERVER", "CALLING allocation_pub.broadcast() for node_id=%d, uid_len=%d",
              rsp.node_id, rsp.unique_id.len);
-    
-    
+#endif // CONFIG_HAL_BOARD == HAL_BOARD_ESP32 (rate limiting/dedup guard)
+
     // Log what we're about to transmit
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     ESP_LOGD("DNA_SERVER", "TRANSMITTING DNA Response:");
@@ -1520,5 +1517,4 @@ bool AP_DroneCAN_DNA_Server::prearm_check(char* fail_msg, uint8_t fail_msg_len) 
     return false;
 }
 
-#endif //HAL_NUM_CAN_IFACES
 #endif //HAL_ENABLE_DRONECAN_DRIVERS

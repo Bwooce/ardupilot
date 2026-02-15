@@ -538,7 +538,7 @@ public:
                             uint8_t param_type, uint8_t param_result, uint8_t node_id);
 
     // start parameter enumeration for a DroneCAN node
-    void start_param_enumeration(mavlink_channel_t chan, uint8_t can_driver_index, uint8_t node_id);
+    void start_param_enumeration(mavlink_channel_t reply_chan, uint8_t can_driver_index, uint8_t node_id);
     // continue parameter enumeration (called from loop)
     void continue_param_enumeration();
 #endif // HAL_ENABLE_DRONECAN_DRIVERS
@@ -1107,34 +1107,6 @@ private:
         uint8_t data[239];
     };
 
-    enum class FTP_FILE_MODE {
-        Read,
-        Write,
-        OTA_Write,    // ESP32 firmware update routing (ArduPilot-internal, not MAVLink)
-    };
-
-    struct ftp_state {
-        ObjectBuffer<pending_ftp> *requests;
-
-        // session specific info, currently only support a single session over all links
-        int fd = -1;
-        FTP_FILE_MODE mode; // work around AP_Filesystem not supporting file modes
-        int16_t current_session;
-        uint32_t last_send_ms;
-        uint8_t need_banner_send_mask;
-    };
-    static struct ftp_state ftp;
-
-    static void ftp_error(struct pending_ftp &response, FTP_ERROR error); // FTP helper method for packing a NAK
-    static bool ftp_check_name_len(const struct pending_ftp &request);
-    static int gen_dir_entry(char *dest, size_t space, const char * path, const struct dirent * entry); // FTP helper for emitting a dir response
-    static void ftp_list_dir(struct pending_ftp &request, struct pending_ftp &response);
-
-    bool ftp_init(void);
-    void handle_file_transfer_protocol(const mavlink_message_t &msg);
-    bool send_ftp_reply(const pending_ftp &reply);
-    void ftp_worker(void);
-    void ftp_push_replies(pending_ftp &reply);
 #endif  // AP_MAVLINK_FTP_ENABLED
 
     void send_distance_sensor(const class AP_RangeFinder_Backend *sensor, const uint8_t instance) const;

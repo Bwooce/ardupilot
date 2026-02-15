@@ -749,6 +749,7 @@ void CanardInterface::update_rx_protocol_stats(int16_t res)
     }
 }
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 || (defined(CAN_LOGLEVEL) && CAN_LOGLEVEL >= 1)
 // Extract source node ID from CAN ID (bits 0-6)
 // Using the same macro as canard.c uses internally
 #define SOURCE_ID_FROM_ID(x) ((uint8_t)(((x) >> 0U) & 0x7FU))
@@ -756,6 +757,7 @@ static inline uint8_t extractSourceNodeID(uint32_t can_id)
 {
     return SOURCE_ID_FROM_ID(can_id);
 }
+#endif
 
 void CanardInterface::processRx() {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
