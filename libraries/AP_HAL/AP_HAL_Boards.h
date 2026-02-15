@@ -153,6 +153,15 @@
 #error "No CONFIG_HAL_BOARD_SUBTYPE set"
 #endif
 
+// Packing attribute applied only on ESP32 where struct alignment
+// differs from other platforms (Xtensa is more permissive with
+// unaligned access than ARM Cortex-M but DMA requires packing)
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#define PACKED_IF_ESP32 __attribute__((__packed__))
+#else
+#define PACKED_IF_ESP32
+#endif
+
 // HAL_PROGRAM_SIZE_LIMIT_KB is the amount of space we have for
 // instructions.  on ChibiOS this is the sum of onboard and external
 // flash.  BOARD_FLASH_SIZE is reserved for use in the HAL backends

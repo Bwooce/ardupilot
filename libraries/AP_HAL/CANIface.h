@@ -26,7 +26,7 @@ class ExpandingString;
 /**
  * Raw CAN frame, as passed to/from the CAN driver.
  */
-struct AP_HAL::CANFrame {
+struct PACKED_IF_ESP32 AP_HAL::CANFrame {
     static const uint32_t MaskStdID = 0x000007FFU;
     static const uint32_t MaskExtID = 0x1FFFFFFFU;
     static const uint32_t FlagEFF = 1U << 31;                  ///< Extended frame format
