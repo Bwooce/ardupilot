@@ -139,10 +139,18 @@ void ESP32Params::apply_log_level() {
     esp_log_level_set("TWAI_BUG", ESP_LOG_INFO);   // TWAI bug detection
     esp_log_level_set("GETNODEINFO", ESP_LOG_WARN); // Reduced - DNA issues resolved
     esp_log_level_set("NODESTATUS", ESP_LOG_WARN);  // Reduced - DNA issues resolved
-    esp_log_level_set("BATTERY", ESP_LOG_INFO);    // Battery monitor debugging
+    esp_log_level_set("DNA", ESP_LOG_INFO);         // DNA allocation protocol
+    esp_log_level_set("DNA_DB", ESP_LOG_INFO);      // DNA database operations
+    esp_log_level_set("DNA_HEALTH", ESP_LOG_WARN);  // Node health transitions
+    esp_log_level_set("CAN_HEALTH", ESP_LOG_WARN);  // CAN health monitoring
+    esp_log_level_set("BATTERY", ESP_LOG_INFO);     // Battery monitor debugging
 
-    // Note: eFuse MAC_CUSTOM error was fixed by skipping custom MAC check in Util.cpp
-    
+    // OTA and system tags
+    esp_log_level_set("OTA", ESP_LOG_INFO);
+    esp_log_level_set("OTA_FTP", ESP_LOG_INFO);
+    esp_log_level_set("WDT", ESP_LOG_WARN);
+    esp_log_level_set("SCHED_WDT", ESP_LOG_WARN);
+
     // Apply global default for any unspecified tags
     esp_log_level_set("*", level);
     

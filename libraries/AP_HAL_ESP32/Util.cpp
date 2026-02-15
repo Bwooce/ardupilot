@@ -279,9 +279,20 @@ void Util::thread_info(ExpandingString &str)
     // a header to allow for machine parsers to determine format
     str.printf("ThreadsV1\n");
 
-    //    char buffer[1024];
-    //    vTaskGetRunTimeStats(buffer);
-    //    snprintf(buf, bufsize,"\n\n%s\n", buffer);
+    // list all FreeRTOS tasks with stack high-water marks
+    UBaseType_t num_tasks = uxTaskGetNumberOfTasks();
+    TaskStatus_t *task_array = (TaskStatus_t *)calloc(num_tasks, sizeof(TaskStatus_t));
+    if (task_array == nullptr) {
+        return;
+    }
+    UBaseType_t actual = uxTaskGetSystemState(task_array, num_tasks, nullptr);
+    for (UBaseType_t i = 0; i < actual; i++) {
+        str.printf("%-16s PRI=%2lu FREE=%5lu\n",
+                   task_array[i].pcTaskName,
+                   (unsigned long)task_array[i].uxCurrentPriority,
+                   (unsigned long)task_array[i].usStackHighWaterMark * sizeof(StackType_t));
+    }
+    free(task_array);
 }
 
 

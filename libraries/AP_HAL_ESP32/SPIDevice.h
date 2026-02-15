@@ -90,7 +90,7 @@ private:
     spi_device_handle_t low_speed_dev_handle;
     spi_device_handle_t high_speed_dev_handle;
     spi_device_handle_t current_handle();
-    void acquire_bus(bool accuire);
+    void acquire_bus(bool acquire);
 };
 
 #if defined(HAL_ESP32_SPI_BUSES)
