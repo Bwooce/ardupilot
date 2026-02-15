@@ -41,10 +41,7 @@
 #include "AnalogIn.h"
 #include "Util.h"
 #ifndef HAL_NUM_CAN_IFACES
-#error HAL_NUM_CAN_IFACES not defined
-#endif
-#if HAL_NUM_CAN_IFACES == 0
-#error HAL_NUM_CAN_IFACES is zero
+#define HAL_NUM_CAN_IFACES 0
 #endif
 #if HAL_NUM_CAN_IFACES > 0
 #include "CANIface.h"
