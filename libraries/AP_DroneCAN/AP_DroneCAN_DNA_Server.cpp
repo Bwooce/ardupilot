@@ -49,7 +49,13 @@ extern const AP_HAL::HAL& hal;
 
 #define NODERECORD_MAGIC 0xAC02  // Incremented to force database reset after format change
 #define NODERECORD_MAGIC_LEN 2 // uint16_t
-#define MAX_NODE_ID    62  // Reduced from 125 to fit 16-byte UIDs in 1KB storage
+// Reduced from 125 for two reasons:
+// 1. Storage: 16-byte full UIDs (vs upstream 6-byte hash) need 62*16+2=994 bytes to fit 1KB
+// 2. MAVLink PARAM_EXT bridge uses node_id == component_id (per MAVLink UAVCAN spec).
+//    Node IDs above ~62 collide with well-known MAVLink component IDs (camera=100,
+//    servo=140+, gimbal=154+). DNA allocates downward from MAX_NODE_ID, so keeping
+//    this low avoids handing out conflicting IDs.
+#define MAX_NODE_ID    62
 #define NODERECORD_LOC(node_id) ((node_id * sizeof(NodeRecord)) + NODERECORD_MAGIC_LEN)
 
 #define debug_dronecan(level_debug, fmt, args...) do { AP::can().log_text(level_debug, "DroneCAN", fmt, ##args); } while (0)
@@ -556,9 +562,11 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
     }
 #endif
 
-    // Track verification failures per node
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Track verification failures per node (ESP32 debug diagnostics only)
     static uint32_t verification_attempt_count[128] = {0};
     static uint32_t verification_start_time[128] = {0};
+#endif
 
     //Check if we got acknowledgement from previous request
     //except for requests using our own node_id
@@ -572,16 +580,16 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
 
         if (node_healthy.get(curr_verifying_node)) {
             node_healthy.clear(curr_verifying_node);
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
             GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
                           "DroneCAN Node %d: No response - possibly OFFLINE",
                           curr_verifying_node);
-#endif
         }
     } else {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         // Reset failure count and start time on successful verification
         verification_attempt_count[curr_verifying_node] = 0;
         verification_start_time[curr_verifying_node] = 0;
+#endif
     }
 
     last_verification_request = now;
@@ -601,20 +609,17 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
             node_verified.set(curr_verifying_node);
             node_healthy.set(curr_verifying_node);
         } else {
-            // Set start time on first attempt
-            if (verification_attempt_count[curr_verifying_node] == 0) {
-                verification_start_time[curr_verifying_node] = now;
-            }
-
-            // Increment verification attempt count
-            verification_attempt_count[curr_verifying_node]++;
-
             uavcan_protocol_GetNodeInfoRequest request;
             node_info_client.request(curr_verifying_node, request);
             nodeInfo_resp_rcvd = false;
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            // Warn about nodes that repeatedly fail verification
+            // Track and warn about nodes that repeatedly fail verification
+            if (verification_attempt_count[curr_verifying_node] == 0) {
+                verification_start_time[curr_verifying_node] = now;
+            }
+            verification_attempt_count[curr_verifying_node]++;
+
             if (verification_attempt_count[curr_verifying_node] % 10 == 0 &&
                 verification_attempt_count[curr_verifying_node] > 0) {
                 uint32_t duration_ms = now - verification_start_time[curr_verifying_node];
@@ -739,16 +744,13 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     last_nodestatus_time[transfer.source_node_id] = now;
 #endif
     
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     // Send UAVCAN_NODE_STATUS MAVLink message for GCS reporting
     send_node_status_mavlink(transfer.source_node_id, msg);
-#endif
-    
+
     // Handle health state changes with severity-based reporting
-    const bool was_healthy = node_healthy.get(transfer.source_node_id);
     const bool is_operational = (msg.mode == UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL);
     const bool is_healthy = (msg.health == UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK);
-
+    const bool was_healthy = node_healthy.get(transfer.source_node_id);
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     // Debug: Track node_healthy changes for troubleshooting LED flipping
     static bool first_log[128] = {true};
@@ -757,11 +759,9 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
 
     if ((!is_healthy || !is_operational) && !ignore_unhealthy) {
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         if (was_healthy) {
             report_node_health_change(transfer.source_node_id, msg.health, msg.mode, false);
         }
-#endif
 
         fault_node_id = transfer.source_node_id;
         server_state = NODE_STATUS_UNHEALTHY;
@@ -777,11 +777,9 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
 #endif
     } else {
         // Node is now healthy
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         if (!was_healthy && is_healthy && is_operational) {
             report_node_health_change(transfer.source_node_id, msg.health, msg.mode, true);
         }
-#endif
 
         node_healthy.set(transfer.source_node_id);
         if (node_healthy == node_verified) {
@@ -966,10 +964,9 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
         return;
     }
     
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     // Send UAVCAN_NODE_INFO MAVLink message for node discovery
     send_node_info_mavlink(transfer.source_node_id, rsp);
-#endif
+
     /*
       if we haven't logged this node then log it now
      */
@@ -1454,8 +1451,6 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
 // Request node info for all seen nodes (for MAV_CMD_UAVCAN_GET_NODE_INFO)
 void AP_DroneCAN_DNA_Server::request_all_node_info()
 {
-    uint8_t node_count = node_seen.count() - (node_seen.get(self_node_id) ? 1 : 0);
-
     // NOTE: The Client class can only track ONE outstanding request at a time
     // (it has a single server_node_id and transfer_id member). If we send multiple
     // requests in rapid succession, only the LAST request's response will be accepted.
@@ -1477,6 +1472,7 @@ void AP_DroneCAN_DNA_Server::request_all_node_info()
     last_verification_request = 0;
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    uint8_t node_count = node_seen.count() - (node_seen.get(self_node_id) ? 1 : 0);
     hal.console->printf("MAVLink: Triggered verification for %d nodes - info will arrive over ~%d seconds\n",
                        node_count, node_count * 5);
 #endif

@@ -1736,23 +1736,15 @@ void AP_DroneCAN::handle_debug(const CanardRxTransfer& transfer, const uavcan_pr
         if (send_mavlink) {
             // when we send as MAVLink it also gets logged locally, so
             // we return to avoid a duplicate
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            // Debug: Check if msg.text.data is valid
-            ESP_LOGE("DRONECAN", "Sending LogMessage as STATUSTEXT: src=%u, text='%.50s'",
-                     transfer.source_node_id, msg.text.data);
-            // Ensure null-termination and check for buffer issues
+            // Ensure null-termination for safety
             if (msg.text.len > 0 && msg.text.len < 91) {
                 char safe_text[91];
                 memcpy(safe_text, msg.text.data, msg.text.len);
                 safe_text[msg.text.len] = '\0';
                 GCS_SEND_TEXT(mavlink_level, "CAN[%u] %s", transfer.source_node_id, safe_text);
             } else {
-                ESP_LOGE("DRONECAN", "Invalid LogMessage text len=%u", msg.text.len);
                 GCS_SEND_TEXT(mavlink_level, "CAN[%u] (invalid text)", transfer.source_node_id);
             }
-#else
-            GCS_SEND_TEXT(mavlink_level, "CAN[%u] %s", transfer.source_node_id, msg.text.data);
-#endif
             return;
         }
     }

@@ -20,8 +20,10 @@
 #include "esp_debug_helpers.h"
 #include "esp_log.h"
 #include "driver/uart.h"
+#ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
 #include "driver/usb_serial_jtag.h"
 #include "hal/usb_serial_jtag_ll.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -94,8 +96,7 @@ UARTDriver::UARTDriver(uint8_t serial_num)
     // This avoids UART0 drops when no external UART is connected
     _is_usb_console = (serial_num == 0);
 #else
-    // Default behavior - check if this UART is the ESP-IDF console
-    _is_usb_console = is_console_uart(serial_num);
+    _is_usb_console = false;
 #endif
     
     // ESP log level will be controlled by ESP32_DEBUG_LVL parameter
@@ -137,6 +138,7 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
         
         // Debug via logging system - safe from serial contamination
         
+#ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
         if (_is_usb_console) {
             // Initialize USB-Serial/JTAG driver for console port
             // This is determined by ESP-IDF configuration, not hardcoded to port 0
@@ -145,7 +147,9 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
             usb_config.rx_buffer_size = RX_BUF_SIZE;
             usb_config.tx_buffer_size = TX_BUF_SIZE;
             usb_serial_jtag_driver_install(&usb_config);
-        } else {
+        } else
+#endif
+        {
             // Initialize regular UART for other ports with DMA support
             uart_config_t config = {
                 .baud_rate = (int)b,
@@ -204,10 +208,13 @@ void UARTDriver::_end()
 {
     if (_initialized) {
         uart_port_t p = (uart_port_t)uart_num;
+#ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
         if (_is_usb_console) {
             // Uninstall USB-Serial/JTAG driver for console port
             usb_serial_jtag_driver_uninstall();
-        } else {
+        } else
+#endif
+        {
             // Uninstall regular UART driver for other ports
             uart_driver_delete(p);
         }
@@ -224,11 +231,14 @@ void UARTDriver::_end()
 void UARTDriver::_flush()
 {
     uart_port_t p = (uart_port_t)uart_num;
+#ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
     if (_is_usb_console) {
         // Flush USB-Serial/JTAG interface
         // Note: usb_serial_jtag driver auto-flushes, but we ensure it here
         usb_serial_jtag_ll_txfifo_flush();
-    } else {
+    } else
+#endif
+    {
         // Flush regular UART
         uart_flush(p);
     }
@@ -327,6 +337,7 @@ void IRAM_ATTR UARTDriver::read_data()
     // Critical section: protect buffer writes from race conditions
     _read_mutex.take_blocking();
     
+#ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
     if (_is_usb_console) {
         // USB-Serial/JTAG interface uses polling (no events)
         int count = usb_serial_jtag_read_bytes(_buffer, sizeof(_buffer), 0);
@@ -334,7 +345,9 @@ void IRAM_ATTR UARTDriver::read_data()
             _readbuf.write(_buffer, count);
             _receive_timestamp_update();
         }
-    } else {
+    } else
+#endif
+    {
         // Use event-driven processing for regular UARTs
         if (_uart_event_queue == nullptr) {
             return;  // No event queue configured
@@ -466,10 +479,13 @@ void UARTDriver::write_data()
         count = _writebuf.peekbytes(_buffer, sizeof(_buffer));
         if (count > 0) {
             int sent = 0;
+#ifdef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
             if (_is_usb_console) {
                 // Use USB-Serial/JTAG interface for console port
                 sent = usb_serial_jtag_write_bytes(_buffer, count, 0);
-            } else {
+            } else
+#endif
+            {
                 // Use regular UART for other ports
                 
                 // Simple approach: uart_tx_chars() handles FIFO limitations
