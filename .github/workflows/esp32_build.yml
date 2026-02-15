@@ -152,6 +152,7 @@ jobs:
             esp32buzz,
             esp32s3empty,
         ]
+        idf_version: [5, 6]
         gcc: [10]
 
     steps:
@@ -180,12 +181,23 @@ jobs:
           python3 -m pip install gevent
 
           git submodule update --init --recursive --depth=1
-          ./Tools/scripts/esp32_get_idf.sh
 
           sudo ln -s /usr/bin/ninja /usr/bin/ninja-build
 
-          
-      - name: build ${{matrix.config}}
+      - name: Setup ESP-IDF 5 (submodule)
+        if: matrix.idf_version == 5
+        shell: bash
+        run: |
+          ./Tools/scripts/esp32_get_idf.sh
+
+      - name: Setup ESP-IDF 6
+        if: matrix.idf_version == 6
+        shell: bash
+        run: |
+          git clone -b release/v6.0 --depth 1 --recursive --shallow-submodules \
+            https://github.com/espressif/esp-idf.git /tmp/esp-idf-v6
+
+      - name: build ${{matrix.config}} (IDF ${{matrix.idf_version}})
         env:
           CI_BUILD_TARGET: ${{matrix.config}}
         shell: bash
@@ -193,15 +205,24 @@ jobs:
           source ~/.bash_profile
           PATH="/github/home/.local/bin:$PATH"
           echo $PATH
-          echo "### Configure ${{matrix.config}} :rocket:" >> $GITHUB_STEP_SUMMARY
+
+          # Select IDF version
+          if [ "${{matrix.idf_version}}" = "6" ]; then
+            export IDF_PATH=/tmp/esp-idf-v6
+          else
+            export IDF_PATH=$(pwd)/modules/esp_idf
+          fi
+          echo "Using ESP-IDF from: $IDF_PATH"
+
+          echo "### Configure ${{matrix.config}} IDF${{matrix.idf_version}} :rocket:" >> $GITHUB_STEP_SUMMARY
           echo "Installing ESP-IDF tools...."
-          cd modules/esp_idf
+          cd $IDF_PATH
           ./install.sh esp32,esp32s3
           source ./export.sh
-          cd ../..
+          cd $GITHUB_WORKSPACE
           python3 -m pip install --progress-bar off future lxml pymavlink MAVProxy pexpect flake8 geocoder empy==3.3.4 dronecan "pydantic<2.12"
           which cmake
-          ./waf configure --board ${{matrix.config}} 
+          ./waf configure --board ${{matrix.config}}
           echo './waf configure --board ${{matrix.config}}' >> $GITHUB_STEP_SUMMARY  
           echo "### Build Plane ${{matrix.config}} :rocket:" >> $GITHUB_STEP_SUMMARY
           echo './waf plane' >> $GITHUB_STEP_SUMMARY  
@@ -228,7 +249,7 @@ jobs:
       - name: Archive artifacts
         uses: actions/upload-artifact@v6
         with:
-           name: esp32-binaries -${{matrix.config}}
+           name: esp32-binaries-${{matrix.config}}-idf${{matrix.idf_version}}
            path: |
               /home/runner/work/ardupilot/ardupilot/ArduPlane.${{matrix.config}}.bin
               /home/runner/work/ardupilot/ardupilot/ArduPlane.${{matrix.config}}.elf
