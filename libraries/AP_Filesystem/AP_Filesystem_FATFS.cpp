@@ -13,7 +13,7 @@
 #include <AP_Common/time.h>
 
 #include <ff.h>
-#if HAL_OS_CHIBIOS
+#ifdef HAL_OS_CHIBIOS
 #include <AP_HAL_ChibiOS/sdcard.h>
 #include <AP_HAL_ChibiOS/hwdef/common/stm32_util.h>
 #endif
@@ -202,7 +202,7 @@ static int fatfs_to_errno(FRESULT Result)
  */
 static bool remount_file_system(void)
 {
-#if HAL_OS_CHIBIOS
+#ifdef HAL_OS_CHIBIOS
     EXPECT_DELAY_MS(3000);
     if (!remount_needed) {
         sdcard_stop();
@@ -352,7 +352,7 @@ int32_t AP_Filesystem_FATFS::read(int fd, void *buf, uint32_t count)
     do {
         UINT size = 0;
         UINT n = bytes;
-        #if HAL_OS_CHIBIOS
+        #ifdef HAL_OS_CHIBIOS
         if (!mem_is_dma_safe(buf, count, true)) {
             n = MIN(bytes, io_size);
         }
@@ -401,7 +401,7 @@ int32_t AP_Filesystem_FATFS::write(int fd, const void *buf, uint32_t count)
     UINT total = 0;
     do {
         UINT n = bytes;
-        #if HAL_OS_CHIBIOS
+        #ifdef HAL_OS_CHIBIOS
         if (!mem_is_dma_safe(buf, count, true)) {
             n = MIN(bytes, io_size);
         }
@@ -809,7 +809,7 @@ bool AP_Filesystem_FATFS::set_mtime(const char *filename, const uint32_t mtime_s
 */
 bool AP_Filesystem_FATFS::retry_mount(void)
 {
-#if HAL_OS_CHIBIOS
+#ifdef HAL_OS_CHIBIOS
     FS_CHECK_ALLOWED(false);
     WITH_SEMAPHORE(sem);
     return sdcard_retry();
@@ -823,7 +823,7 @@ bool AP_Filesystem_FATFS::retry_mount(void)
 */
 void AP_Filesystem_FATFS::unmount(void)
 {
-#if HAL_OS_CHIBIOS
+#ifdef HAL_OS_CHIBIOS
     WITH_SEMAPHORE(sem);
     return sdcard_stop();
 #endif
@@ -851,7 +851,7 @@ bool AP_Filesystem_FATFS::format(void)
 */
 void AP_Filesystem_FATFS::format_handler(void)
 {
-#if FF_USE_MKFS && HAL_OS_CHIBIOS
+#if FF_USE_MKFS && defined(HAL_OS_CHIBIOS)
     if (format_status != FormatStatus::PENDING) {
         return;
     }

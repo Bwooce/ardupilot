@@ -661,8 +661,6 @@ def configure(cfg):
 
     cfg.env.prepend_value('INCLUDES', [
         cfg.srcnode.abspath() + '/libraries/',
-        cfg.srcnode.find_dir('modules/DroneCAN/libcanard/').abspath(),
-        cfg.srcnode.find_dir('libraries/AP_HAL_ESP32/').abspath(),
     ])
 
     cfg.find_program('rsync', mandatory=False)
@@ -790,7 +788,6 @@ def _build_dynamic_sources(bld):
             )
 
     if (bld.get_board().with_can or bld.env.HAL_NUM_CAN_IFACES) and not bld.env.AP_PERIPH:
-        print("--- CREATING DRONECAN GEN TASK ---")
         bld(
             features='dronecangen',
             source=bld.srcnode.ant_glob('modules/DroneCAN/DSDL/[a-z]* libraries/AP_DroneCAN/dsdl/[a-z]*', dir=True, src=False),
@@ -799,6 +796,7 @@ def _build_dynamic_sources(bld):
             export_includes=[
                 bld.bldnode.make_node('modules/DroneCAN/libcanard/dsdlc_generated/include').abspath(),
                 bld.srcnode.find_dir('modules/DroneCAN/libcanard/').abspath(),
+                bld.srcnode.find_dir('libraries/AP_DroneCAN/canard/').abspath(),
                 ]
             )
     elif bld.env.AP_PERIPH:

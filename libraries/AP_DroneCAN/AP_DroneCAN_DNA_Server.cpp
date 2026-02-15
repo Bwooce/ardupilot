@@ -88,18 +88,11 @@ void AP_DroneCAN_DNA_Server::Database::init(StorageAccess *storage_)
     }
 
     // check and note each possible node ID's registration's presence
-    uint8_t registered_count = 0;
     for (uint8_t i = 1; i <= MAX_NODE_ID; i++) {
         if (check_registration(i)) {
             node_registered.set(i);
-            registered_count++;
         }
     }
-    
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGD("DNA_SERVER", "Found %d existing node registrations in database", registered_count);
-    hal.console->printf("DNA: Found %d existing node registrations\n", registered_count);
-#endif
 
     // Mark database as initialized - operations are now safe
     initialized = true;

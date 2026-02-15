@@ -679,21 +679,13 @@ void GCS_MAVLINK::send_parameter_value(const char *param_name, ap_var_type param
     if (!HAVE_PAYLOAD_SPACE(chan, PARAM_VALUE)) {
         return;
     }
-    // Use atomic message construction to avoid struct padding issues
-    mavlink_message_t msg;
-    mavlink_msg_param_value_pack(
-        mavlink_system.sysid,
-        mavlink_system.compid,
-        &msg,
+    mavlink_msg_param_value_send(
+        chan,
         param_name,
         param_value,
         mav_param_type(param_type),
         AP_Param::count_parameters(),
-        (uint16_t)-1
-    );
-    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
-    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
-    comm_send_buffer(chan, (uint8_t*)buf, len);
+        -1);
 }
 
 /*
@@ -701,29 +693,18 @@ void GCS_MAVLINK::send_parameter_value(const char *param_name, ap_var_type param
  */
 void GCS::send_parameter_value(const char *param_name, ap_var_type param_type, float param_value)
 {
-    // Use atomic MAVLink message assembly and transmission
-    // This avoids both struct padding issues AND transmission fragmentation
-    mavlink_message_t msg;
-    mavlink_msg_param_value_pack(
-        mavlink_system.sysid,
-        mavlink_system.compid,
-        &msg,
-        param_name,
-        param_value,
-        GCS_MAVLINK::mav_param_type(param_type),
-        AP_Param::count_parameters(),
-        (uint16_t)-1  // param_index = -1
-    );
+    mavlink_param_value_t packet{};
+    const uint8_t to_copy = MIN(ARRAY_SIZE(packet.param_id), strlen(param_name));
+    memcpy(packet.param_id, param_name, to_copy);
+    packet.param_value = param_value;
+    packet.param_type = GCS_MAVLINK::mav_param_type(param_type);
+    packet.param_count = AP_Param::count_parameters();
+    packet.param_index = -1;
 
-    // Send atomically to all channels using our safe method
-    for (uint8_t i=0; i<num_gcs(); i++) {
-        GCS_MAVLINK *chan = gcs().chan(i);
-        if (chan != nullptr) {
-            MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
-            uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
-            comm_send_buffer(chan->get_chan(), (uint8_t*)buf, len);
-        }
-    }
+    // send_to_active_channels handles per-channel serialization safely,
+    // including during early startup when channels may not be initialized
+    gcs().send_to_active_channels(MAVLINK_MSG_ID_PARAM_VALUE,
+                                  (const char *)&packet);
 
 #if HAL_LOGGING_ENABLED
     // also log to AP_Logger

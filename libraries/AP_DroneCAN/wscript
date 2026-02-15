@@ -1,3 +1,2 @@
 def build(bld):
-    print("--- EXECUTING AP_DRONECAN WSCRIPT ---")
-    bld.env.INCLUDES += [bld.srcnode.make_node('modules/DroneCAN/libcanard').abspath()]
+    pass

@@ -239,36 +239,26 @@ void comm_send_buffer(mavlink_channel_t chan, const uint8_t *buf, uint8_t len)
         last_stats_log_ms[chan] = now_ms;
     }
 
-    // ESP32: Check heap integrity before processing MAVLink messages (with recursion guard)
-    // Use thread-local storage to prevent recursion per-task
-    static __thread bool in_heap_check = false;
-    static uint32_t heap_check_count = 0;
-    
-    // Check heap integrity periodically (every 1000 messages) or in debug builds (every 100)
-    #ifdef DEBUG_BUILD
-    const uint32_t check_interval = 100;
-    #else
-    const uint32_t check_interval = 1000;
-    #endif
-    
-    // Only perform heap check if CONFIG_HEAP_POISONING is enabled
-    #if defined(CONFIG_HEAP_POISONING_COMPREHENSIVE) || defined(CONFIG_HEAP_POISONING_LIGHT)
-    if (!in_heap_check && (++heap_check_count % check_interval) == 0) {
-        in_heap_check = true;
-        // Use silent mode (false) to prevent ESP_LOG calls that could recurse
-        bool heap_ok = heap_caps_check_integrity_all(false);
-        in_heap_check = false;
-        
-        if (!heap_ok) {
-            // Direct console output only, no ESP_LOG to avoid recursion
-            hal.console->printf("ESP32: HEAP CORRUPTION DETECTED at msg %lu\n", (unsigned long)heap_check_count);
-            // Track corruption detection count for debugging
-            static uint32_t corruption_count = 0;
-            corruption_count++;
-            // Could add more actions here like reducing heap check frequency after first detection
+    // ESP32: Check heap integrity periodically if CONFIG_HEAP_POISONING is enabled
+#if defined(CONFIG_HEAP_POISONING_COMPREHENSIVE) || defined(CONFIG_HEAP_POISONING_LIGHT)
+    {
+        static __thread bool in_heap_check = false;
+        static uint32_t heap_check_count = 0;
+#ifdef DEBUG_BUILD
+        const uint32_t check_interval = 100;
+#else
+        const uint32_t check_interval = 1000;
+#endif
+        if (!in_heap_check && (++heap_check_count % check_interval) == 0) {
+            in_heap_check = true;
+            bool heap_ok = heap_caps_check_integrity_all(false);
+            in_heap_check = false;
+            if (!heap_ok) {
+                hal.console->printf("ESP32: HEAP CORRUPTION DETECTED at msg %lu\n", (unsigned long)heap_check_count);
+            }
         }
     }
-    #endif
+#endif
     
     // ESP32: Validate MAVLink message structure before sending
     static uint32_t msg_count = 0;
