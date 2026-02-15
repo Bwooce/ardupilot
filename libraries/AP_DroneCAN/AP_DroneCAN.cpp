@@ -327,6 +327,11 @@ bool AP_DroneCAN::add_interface(AP_HAL::CANIface* can_iface)
 
 void AP_DroneCAN::init(uint8_t driver_index)
 {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    hal.console->printf("\n=======================================\n");
+    hal.console->printf("DroneCAN::init STARTING! driver_index=%d\n", driver_index);
+    hal.console->printf("=======================================\n");
+#endif
     if (driver_index != _driver_index) {
         debug_dronecan(AP_CANManager::LOG_ERROR, "DroneCAN: init called with wrong driver_index");
         return;
@@ -373,14 +378,20 @@ void AP_DroneCAN::init(uint8_t driver_index)
     //Start Servers
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     ESP_LOGI("DRONECAN", "About to init DNA server, pool_size=%u", (unsigned)_pool_size);
+    hal.console->printf("DroneCAN: About to init DNA server, pool_size=%u\n", (unsigned)_pool_size);
 #endif
     if (!_dna_server.init(unique_id, uid_len, node)) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         ESP_LOGE("DRONECAN", "FAILED to start DNA Server");
+        hal.console->printf("DroneCAN: FAILED to start DNA Server\n");
 #endif
         debug_dronecan(AP_CANManager::LOG_ERROR, "DroneCAN: Failed to start DNA Server\n\r");
         return;
     }
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    ESP_LOGI("DRONECAN", "DNA Server started successfully");
+    hal.console->printf("DroneCAN: DNA Server started successfully\n");
+#endif
 
     // Roundup all subscribers from supported drivers
     bool subscribed = true;
@@ -537,13 +548,21 @@ void AP_DroneCAN::loop(void)
 {
     while (true) {
         if (!_initialized) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            hal.scheduler->delay(1);  // ESP32: feed watchdog via delay()
+#else
             hal.scheduler->delay_microseconds(1000);
+#endif
             continue;
         }
 
         // ensure that the DroneCAN thread cannot completely saturate
         // the CPU, preventing low priority threads from running
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        hal.scheduler->delay(1);  // ESP32: feed watchdog via delay()
+#else
         hal.scheduler->delay_microseconds(100);
+#endif
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         // Debug: Track how often we're calling process
@@ -1554,6 +1573,17 @@ void AP_DroneCAN::handle_ESC_status(const CanardRxTransfer& transfer, const uavc
 #if HAL_WITH_ESC_TELEM
     const uint8_t esc_offset = constrain_int16(_esc_offset.get(), 0, DRONECAN_SRV_NUMBER);
     const uint8_t esc_index = msg.esc_index + esc_offset;
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Debug: Log ESC message reception
+    static uint32_t last_debug_ms = 0;
+    uint32_t now_ms = AP_HAL::millis();
+    if (now_ms - last_debug_ms > 5000) {
+        last_debug_ms = now_ms;
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN ESC%d: rpm=%d V=%.1f I=%.1f T=%.1f",
+                      esc_index, (int)msg.rpm, msg.voltage, msg.current, msg.temperature);
+    }
+#endif
 
     if (!is_esc_data_index_valid(esc_index)) {
         return;
