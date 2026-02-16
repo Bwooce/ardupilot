@@ -239,6 +239,11 @@ class clean_sdkconfig(Task.Task):
 
 def pre_build(self):
     """Configure esp-idf as lib target"""
+    # Export ESP_IDF_SDKCONFIG_DEFAULTS to OS environment for cmake to read
+    # (waf env is internal storage, cmake reads $ENV{} from os.environ)
+    if self.env.get_flat('ESP_IDF_SDKCONFIG_DEFAULTS'):
+        os.environ['ESP_IDF_SDKCONFIG_DEFAULTS'] = self.env.get_flat('ESP_IDF_SDKCONFIG_DEFAULTS')
+
     lib_vars = OrderedDict()
     lib_vars['ARDUPILOT_CMD'] = self.cmd
     lib_vars['WAF_BUILD_TARGET'] = self.targets

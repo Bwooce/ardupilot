@@ -11,7 +11,7 @@ include($ENV{IDF_PATH}/tools/cmake/idf.cmake)
 set(AP_COMPONENTS
     freertos fatfs spiffs nvs_flash esptool_py app_update esp_adc
     driver  # Monolithic in IDF 5.4, shim in 5.5+
-    lwip esp_wifi esp_system esp_rom esp_timer esp_psram espcoredump
+    lwip esp_wifi esp_netif esp_system esp_rom esp_timer esp_psram espcoredump
 )
 
 # IDF 5.5+ split driver into individual esp_driver_* components
@@ -107,7 +107,7 @@ add_custom_target(showinc ALL
 set(AP_LINK_LIBS
     idf::freertos idf::fatfs idf::spiffs idf::nvs_flash idf::spi_flash
     idf::app_update idf::esp_adc
-    idf::driver idf::lwip idf::esp_wifi idf::esp_system idf::esp_rom
+    idf::driver idf::lwip idf::esp_wifi idf::esp_netif idf::esp_system idf::esp_rom
     idf::esp_timer idf::esp_psram idf::espcoredump
 )
 
@@ -125,7 +125,7 @@ endif()
 
 target_link_libraries(${elf_file} ${AP_LINK_LIBS})
 
-target_compile_options(${elf_file} PRIVATE "-include" "${CMAKE_BINARY_DIR}/hwdef.h")
+# hwdef.h is included by ArduPilot code through waf build includes, not needed here
 
 # Attach additional targets to the executable file for flashing,
 # linker script generation, partition_table generation, etc.

@@ -35,8 +35,8 @@ CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
 # Additional runtime checks
 CONFIG_ESP_SYSTEM_CHECK_INT_LEVEL_4=y
 
-# More detailed panic handler output
-CONFIG_ESP_PANIC_HANDLER_IRAM=y
+# Panic handler in IRAM -- disabled to save IRAM (not needed for ESP32-S3 with SPI flash auto-suspend)
+# CONFIG_ESP_PANIC_HANDLER_IRAM is not set
 
 # Enable undefined behavior sanitizer (if available in toolchain)
 # CONFIG_COMPILER_WARN_WRITE_STRINGS=y

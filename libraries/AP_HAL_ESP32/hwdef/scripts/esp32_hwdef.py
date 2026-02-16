@@ -122,10 +122,14 @@ class ESP32HWDef(hwdef.HWDef):
             first_part = parts[0].upper()
             
             # Explicitly exclude non-pin assignments
-            if ('_BAUD' in first_part or 
+            if ('_BAUD' in first_part or
                 '_PROTOCOL' in first_part or
                 '_SPEED' in first_part or
                 first_part.endswith('_ENABLED')):
+                return False
+
+            # Exclude ESP32-specific directives (handled by base class)
+            if first_part.startswith('ESP32_'):
                 return False
             
             # Check if it looks like a pin assignment (ends with _PIN or known patterns)
@@ -473,6 +477,12 @@ class ESP32HWDef(hwdef.HWDef):
         f.write("#define FALSE 0\n")
         f.write("\n")
         
+        # Write IMU probe list from IMU directives (generates HAL_INS_PROBE_LIST)
+        self.write_IMU_config(f)
+
+        # Write barometer probe list from BARO directives (generates HAL_BARO_PROBE_LIST)
+        self.write_BARO_config(f)
+
         # Write ESP32-specific board definitions
         self.write_esp32_board_config(f)
         f.close()
@@ -779,7 +789,9 @@ class ESP32HWDef(hwdef.HWDef):
             config_lines.append("# CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1 is not set")
             config_lines.append("# CONFIG_ESP_MAIN_TASK_AFFINITY_NO_AFFINITY is not set")
         else:
-            self.progress("WiFi enabled - using default ESP-IDF WiFi configuration")
+            self.progress("WiFi enabled - configuring ESP-IDF WiFi with SoftAP support")
+            config_lines.append("CONFIG_ESP_WIFI_ENABLED=y")
+            config_lines.append("CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y")
         
         if self.has_psram():
             self.progress("Generating ESP-IDF PSRAM configuration")
@@ -882,13 +894,7 @@ class ESP32HWDef(hwdef.HWDef):
             # Keep listen-only DOM fix disabled for performance (already in target config)
             # CONFIG_TWAI_ERRATA_FIX_LISTEN_ONLY_DOM=n
         
-        # UHCI (UART-DMA) configuration for high-speed serial communication
-        # Only enable on chips that support it (checked via SOC capabilities at runtime)
-        if self.serial_pins:
-            config_lines.append("# UHCI (UART-DMA) for high-speed MAVLink/CRSF communication")
-            config_lines.append("# Enabled conditionally based on SOC_UHCI_SUPPORTED capability")
-            config_lines.append("CONFIG_UHCI_ISR_HANDLER_IN_IRAM=y")
-            config_lines.append("CONFIG_UHCI_ISR_CACHE_SAFE=y")
+        # UHCI (UART-DMA) not used by ArduPilot ESP32 HAL -- skip to save IRAM
         
         # SPIFFS filesystem configuration for flash logging
         # Check if filesystem logging is enabled in the hwdef
