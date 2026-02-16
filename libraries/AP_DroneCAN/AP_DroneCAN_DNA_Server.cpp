@@ -868,7 +868,7 @@ void AP_DroneCAN_DNA_Server::send_node_status_mavlink(uint8_t node_id, const uav
         msg.vendor_specific_status_code
     );
 
-    // Send to all active MAVLink channels (best-effort, skip if no space)
+    // Send to all active MAVLink channels using lock protocol
     MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
     uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &mavlink_msg);
     for (uint8_t i=0; i<gcs().num_gcs(); i++) {
@@ -876,10 +876,9 @@ void AP_DroneCAN_DNA_Server::send_node_status_mavlink(uint8_t node_id, const uav
         if (c == nullptr || c->is_private() || !c->is_active()) {
             continue;
         }
-        if (comm_get_txspace((mavlink_channel_t)i) < len) {
-            continue;
-        }
+        comm_send_lock((mavlink_channel_t)i, len);
         comm_send_buffer((mavlink_channel_t)i, (uint8_t*)buf, len);
+        comm_send_unlock((mavlink_channel_t)i);
     }
 #endif
 }
@@ -972,7 +971,7 @@ void AP_DroneCAN_DNA_Server::send_node_info_mavlink(uint8_t node_id, const uavca
         msg.software_version.vcs_commit
     );
 
-    // Send to all active MAVLink channels (best-effort, skip if no space)
+    // Send to all active MAVLink channels using lock protocol
     MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
     uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &mavlink_msg);
     for (uint8_t i=0; i<gcs().num_gcs(); i++) {
@@ -980,10 +979,9 @@ void AP_DroneCAN_DNA_Server::send_node_info_mavlink(uint8_t node_id, const uavca
         if (c == nullptr || c->is_private() || !c->is_active()) {
             continue;
         }
-        if (comm_get_txspace((mavlink_channel_t)i) < len) {
-            continue;
-        }
+        comm_send_lock((mavlink_channel_t)i, len);
         comm_send_buffer((mavlink_channel_t)i, (uint8_t*)buf, len);
+        comm_send_unlock((mavlink_channel_t)i);
     }
 
     // Also send a text message for human-readable notification

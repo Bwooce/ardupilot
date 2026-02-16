@@ -252,7 +252,9 @@ static bool dronecan_param_enum_float_cb_wrapper(void* obj, AP_DroneCAN* ap_dron
 
         MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
         uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+        comm_send_lock(GCS_MAVLINK::param_enum_state.chan, len);
         comm_send_buffer(GCS_MAVLINK::param_enum_state.chan, (uint8_t*)buf, len);
+        comm_send_unlock(GCS_MAVLINK::param_enum_state.chan);
     }
 
     // Update state for next parameter
@@ -301,7 +303,9 @@ static bool dronecan_param_enum_int_cb_wrapper(void* obj, AP_DroneCAN* ap_dronec
 
         MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
         uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+        comm_send_lock(GCS_MAVLINK::param_enum_state.chan, len);
         comm_send_buffer(GCS_MAVLINK::param_enum_state.chan, (uint8_t*)buf, len);
+        comm_send_unlock(GCS_MAVLINK::param_enum_state.chan);
     }
 
     // Update state for next parameter
@@ -352,7 +356,9 @@ static bool dronecan_param_enum_string_cb_wrapper(void* obj, AP_DroneCAN* ap_dro
 
         MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
         uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+        comm_send_lock(GCS_MAVLINK::param_enum_state.chan, len);
         comm_send_buffer(GCS_MAVLINK::param_enum_state.chan, (uint8_t*)buf, len);
+        comm_send_unlock(GCS_MAVLINK::param_enum_state.chan);
     }
 
     // Update state for next parameter
@@ -427,7 +433,9 @@ GCS_MAVLINK::queued_param_send()
         );
         MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
         uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+        comm_send_lock(chan, len);
         comm_send_buffer(chan, (uint8_t*)buf, len);
+        comm_send_unlock(chan);
 
         _queued_parameter = AP_Param::next_scalar(&_queued_parameter_token, &_queued_parameter_type);
         _queued_parameter_index++;
@@ -1162,7 +1170,9 @@ void GCS_MAVLINK::send_param_ext_value(const char *param_name, const char *param
 
     MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
     uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+    comm_send_lock(chan, len);
     comm_send_buffer(chan, (uint8_t*)buf, len);
+    comm_send_unlock(chan);
 }
 
 void GCS_MAVLINK::send_param_ext_ack(const char *param_name, const char *param_value,
@@ -1181,7 +1191,9 @@ void GCS_MAVLINK::send_param_ext_ack(const char *param_name, const char *param_v
 
     MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
     uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
+    comm_send_lock(chan, len);
     comm_send_buffer(chan, (uint8_t*)buf, len);
+    comm_send_unlock(chan);
 }
 
 void GCS_MAVLINK::start_param_enumeration(mavlink_channel_t reply_chan, uint8_t can_driver_index, uint8_t node_id)

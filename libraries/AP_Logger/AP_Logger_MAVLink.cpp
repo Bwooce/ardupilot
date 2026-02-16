@@ -603,10 +603,12 @@ bool AP_Logger_MAVLink::send_log_block(struct dm_block &block)
     // problem and stop attempting to log
     _last_send_time = AP_HAL::millis();
 
-    // Use atomic packet assembly to prevent fragmentation
+    // Use atomic packet assembly with lock protocol
     uint8_t buf[MAVLINK_MAX_PACKET_LEN];
     uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+    comm_send_lock(_link->get_chan(), len);
     comm_send_buffer(_link->get_chan(), buf, len);
+    comm_send_unlock(_link->get_chan());
 
     return true;
 }
