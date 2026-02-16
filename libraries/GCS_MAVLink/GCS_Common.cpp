@@ -274,23 +274,10 @@ void GCS_MAVLINK::send_power_status(void)
         // avoid unnecessary errors being reported to user
         return;
     }
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // ESP32 workaround: use manual buffer to avoid MAVPACKED alignment issues
-    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MSG_ID_POWER_STATUS_LEN);
-    uint16_t vcc = hal.analogin->board_voltage() * 1000;
-    uint16_t vservo = hal.analogin->servorail_voltage() * 1000;
-    uint16_t flags = hal.analogin->power_status_flags();
-    _mav_put_uint16_t(buf, 0, vcc);
-    _mav_put_uint16_t(buf, 2, vservo);
-    _mav_put_uint16_t(buf, 4, flags);
-    _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_POWER_STATUS, buf, 
-                                   MAVLINK_MSG_ID_POWER_STATUS_MIN_LEN, MAVLINK_MSG_ID_POWER_STATUS_LEN, MAVLINK_MSG_ID_POWER_STATUS_CRC);
-#else
     mavlink_msg_power_status_send(chan,
                                   hal.analogin->board_voltage() * 1000,
                                   hal.analogin->servorail_voltage() * 1000,
                                   hal.analogin->power_status_flags());
-#endif
 }
 
 #if AP_SCHEDULER_ENABLED
@@ -652,24 +639,6 @@ void GCS_MAVLINK::send_ahrs2()
     // we want one or both of these, use | to avoid short-circuiting:
     if (uint8_t(ahrs.get_secondary_attitude(euler)) |
         uint8_t(ahrs.get_secondary_position(loc))) {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        // ESP32 workaround: use manual buffer to avoid MAVPACKED alignment issues
-        MAVLINK_ALIGNED_BUF(buf, MAVLINK_MSG_ID_AHRS2_LEN);
-        float roll = euler.x;
-        float pitch = euler.y;
-        float yaw = euler.z;
-        float altitude = loc.alt*1.0e-2f;
-        int32_t lat = loc.lat;
-        int32_t lng = loc.lng;
-        _mav_put_float(buf, 0, roll);
-        _mav_put_float(buf, 4, pitch);
-        _mav_put_float(buf, 8, yaw);
-        _mav_put_float(buf, 12, altitude);
-        _mav_put_int32_t(buf, 16, lat);
-        _mav_put_int32_t(buf, 20, lng);
-        _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_AHRS2, buf, 
-                                       MAVLINK_MSG_ID_AHRS2_MIN_LEN, MAVLINK_MSG_ID_AHRS2_LEN, MAVLINK_MSG_ID_AHRS2_CRC);
-#else
         mavlink_msg_ahrs2_send(chan,
                                euler.x,
                                euler.y,
@@ -677,7 +646,6 @@ void GCS_MAVLINK::send_ahrs2()
                                loc.alt*1.0e-2f,
                                loc.lat,
                                loc.lng);
-#endif
     }
 }
 #endif  // AP_AHRS_ENABLED
@@ -1495,21 +1463,14 @@ bool GCS_MAVLINK_InProgress::send_ack(MAV_RESULT result)
         return false;
     }
 
-    mavlink_message_t ack_msg;
-    mavlink_msg_command_ack_pack(
-        mavlink_system.sysid,
-        mavlink_system.compid,
-        &ack_msg,
+    mavlink_msg_command_ack_send(
+        chan,
         mav_cmd,
         result,
-        0,  // progress
-        0,  // result_param2
+        0,
+        0,
         requesting_sysid,
-        requesting_compid
-    );
-    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
-    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
-    comm_send_buffer(chan, (uint8_t*)buf, len);
+        requesting_compid);
 
     return true;
 }
@@ -2658,26 +2619,6 @@ void GCS_MAVLINK::send_ahrs()
 {
     const AP_AHRS &ahrs = AP::ahrs();
     const Vector3f &omega_I = ahrs.get_gyro_drift();
-    
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // ESP32 workaround: use manual buffer to avoid MAVPACKED alignment issues
-    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MSG_ID_AHRS_LEN);
-    float omega_x = omega_I.x;
-    float omega_y = omega_I.y;
-    float omega_z = omega_I.z;
-    float accel_weight = 0.0f;
-    float renorm_val = 0.0f;
-    float error_rp = ahrs.get_error_rp();
-    float error_yaw = ahrs.get_error_yaw();
-    _mav_put_float(buf, 0, omega_x);
-    _mav_put_float(buf, 4, omega_y);
-    _mav_put_float(buf, 8, omega_z);
-    _mav_put_float(buf, 12, accel_weight);
-    _mav_put_float(buf, 16, renorm_val);
-    _mav_put_float(buf, 20, error_rp);
-    _mav_put_float(buf, 24, error_yaw);
-    _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_AHRS, buf, MAVLINK_MSG_ID_AHRS_MIN_LEN, MAVLINK_MSG_ID_AHRS_LEN, MAVLINK_MSG_ID_AHRS_CRC);
-#else
     mavlink_msg_ahrs_send(
         chan,
         omega_I.x,
@@ -2687,7 +2628,6 @@ void GCS_MAVLINK::send_ahrs()
         0,
         ahrs.get_error_rp(),
         ahrs.get_error_yaw());
-#endif
 }
 #endif  // AP_AHRS_ENABLED
 
@@ -3851,21 +3791,13 @@ MAV_RESULT GCS_MAVLINK::handle_preflight_reboot(const mavlink_command_int_t &pac
 #endif
 
     // send ack before we reboot
-    mavlink_message_t ack_msg;
-    mavlink_msg_command_ack_pack(
-        mavlink_system.sysid,
-        mavlink_system.compid,
-        &ack_msg,
+    mavlink_msg_command_ack_send(
+        chan,
         packet.command,
         MAV_RESULT_ACCEPTED,
-        0,  // progress
-        0,  // result_param2
+        0, 0,
         msg.sysid,
-        msg.compid
-    );
-    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
-    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
-    comm_send_buffer(chan, (uint8_t*)buf, len);
+        msg.compid);
 
     // when packet.param1 == 3 we reboot to hold in bootloader
     const bool hold_in_bootloader = is_equal(packet.param1, 3.0f);
@@ -5753,21 +5685,8 @@ void GCS_MAVLINK::handle_command_long(const mavlink_message_t &msg)
 #endif
 
     // send ACK or NAK
-    mavlink_message_t ack_msg;
-    mavlink_msg_command_ack_pack(
-        mavlink_system.sysid,
-        mavlink_system.compid,
-        &ack_msg,
-        packet.command,
-        result,
-        0,  // progress
-        0,  // result_param2
-        msg.sysid,
-        msg.compid
-    );
-    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
-    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
-    comm_send_buffer(chan, (uint8_t*)buf, len);
+    mavlink_msg_command_ack_send(chan, packet.command, result,
+                                 0, 0, msg.sysid, msg.compid);
 
 #if HAL_LOGGING_ENABLED
     // log the packet:
@@ -5787,21 +5706,8 @@ void GCS_MAVLINK::handle_command_long(const mavlink_message_t &msg)
     mavlink_msg_command_long_decode(&msg, &packet);
 
     // send ACK or NAK
-    mavlink_message_t ack_msg;
-    mavlink_msg_command_ack_pack(
-        mavlink_system.sysid,
-        mavlink_system.compid,
-        &ack_msg,
-        packet.command,
-        MAV_RESULT_COMMAND_INT_ONLY,
-        0,  // progress
-        0,  // result_param2
-        msg.sysid,
-        msg.compid
-    );
-    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
-    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
-    comm_send_buffer(chan, (uint8_t*)buf, len);
+    mavlink_msg_command_ack_send(chan, packet.command, MAV_RESULT_COMMAND_INT_ONLY,
+                                 0, 0, msg.sysid, msg.compid);
 
 }
 #endif  // AP_MAVLINK_COMMAND_LONG_ENABLED
@@ -6332,21 +6238,8 @@ void GCS_MAVLINK::handle_command_int(const mavlink_message_t &msg)
 #endif
 
     // send ACK or NAK
-    mavlink_message_t ack_msg;
-    mavlink_msg_command_ack_pack(
-        mavlink_system.sysid,
-        mavlink_system.compid,
-        &ack_msg,
-        packet.command,
-        result,
-        0,  // progress
-        0,  // result_param2
-        msg.sysid,
-        msg.compid
-    );
-    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
-    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &ack_msg);
-    comm_send_buffer(chan, (uint8_t*)buf, len);
+    mavlink_msg_command_ack_send(chan, packet.command, result,
+                                 0, 0, msg.sysid, msg.compid);
 
 #if HAL_LOGGING_ENABLED
     AP::logger().Write_Command(packet, msg.sysid, msg.compid, result);
@@ -6515,8 +6408,6 @@ void GCS_MAVLINK::send_attitude() const
 #if AP_AHRS_ENABLED
     const AP_AHRS &ahrs = AP::ahrs();
     const Vector3f omega = ahrs.get_gyro();
-
-    
     mavlink_msg_attitude_send(
         chan,
         AP_HAL::millis(),
@@ -6580,8 +6471,6 @@ void GCS_MAVLINK::send_global_position_int()
         vel.zero();
     }
 
-    uint16_t heading = ahrs.yaw_sensor;
-
     mavlink_msg_global_position_int_send(
         chan,
         AP_HAL::millis(),
@@ -6592,7 +6481,7 @@ void GCS_MAVLINK::send_global_position_int()
         vel.x * 100,                     // X speed cm/s (+ve North)
         vel.y * 100,                     // Y speed cm/s (+ve East)
         vel.z * 100,                     // Z speed cm/s (+ve Down)
-        heading);                         // compass heading in 1/100 degree
+        ahrs.yaw_sensor);                // compass heading in 1/100 degree
 #endif  // AP_AHRS_ENABLED
 }
 

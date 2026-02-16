@@ -609,12 +609,16 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
         /* Node failed to respond - could be disconnected or conflicting ID */
         node_verified.clear(curr_verifying_node);
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+        // ESP32 diagnostics: mark node as unhealthy if it stops responding to GetNodeInfo
+        // Not enabled on other platforms as test_iface (SITL) doesn't respond to GetNodeInfo
         if (node_healthy.get(curr_verifying_node)) {
             node_healthy.clear(curr_verifying_node);
             GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
                           "DroneCAN Node %d: No response - possibly OFFLINE",
                           curr_verifying_node);
         }
+#endif
     } else {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         // Reset failure count and start time on successful verification

@@ -18,7 +18,9 @@
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
 
+#ifdef CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
 #include "esp_core_dump.h"
+#endif
 #include "esp_idf_version.h"
 #include "esp_log.h"
 
