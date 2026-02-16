@@ -1613,7 +1613,7 @@ void GCS_MAVLINK::update_send()
     // check for any in-progress tasks; check_tasks does its own rate-limiting
     GCS_MAVLINK_InProgress::check_tasks();
 
-#if HAL_ENABLE_DRONECAN_DRIVERS
+#if AP_DRONECAN_PARAM_EXT_ENABLED
     // Continue any active PARAM_EXT enumeration for DroneCAN nodes
     // This must be called unconditionally (not tied to stream rates) because
     // PARAM_EXT enumeration is initiated by explicit GCS requests
@@ -4625,7 +4625,7 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
         handle_common_param_message(msg);
         break;
 
-#if HAL_ENABLE_DRONECAN_DRIVERS
+#if AP_DRONECAN_PARAM_EXT_ENABLED
     case MAVLINK_MSG_ID_PARAM_EXT_REQUEST_LIST:
     case MAVLINK_MSG_ID_PARAM_EXT_REQUEST_READ:
     case MAVLINK_MSG_ID_PARAM_EXT_SET:
@@ -6082,7 +6082,7 @@ MAV_RESULT GCS_MAVLINK::handle_command_int_packet(const mavlink_command_int_t &p
     case MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN:
         return handle_preflight_reboot(packet, msg);
 
-#if HAL_ENABLE_DRONECAN_DRIVERS
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
     case MAV_CMD_UAVCAN_GET_NODE_INFO: {
         // Request node info for all seen UAVCAN/DroneCAN nodes
         // Per MAVLink spec: Command 5200
@@ -6105,7 +6105,9 @@ MAV_RESULT GCS_MAVLINK::handle_command_int_packet(const mavlink_command_int_t &p
             return MAV_RESULT_UNSUPPORTED;
         }
     }
+#endif  // AP_DRONECAN_MAVLINK_REPORTING_ENABLED
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
     case MAV_CMD_PREFLIGHT_UAVCAN: {
         // Trigger UAVCAN/DroneCAN actuator enumeration
         // Per MAVLink spec: Command 243
@@ -6761,7 +6763,7 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
     case MSG_NEXT_PARAM:
         CHECK_PAYLOAD_SIZE(PARAM_VALUE);
         queued_param_send();
-#if HAL_ENABLE_DRONECAN_DRIVERS
+#if AP_DRONECAN_PARAM_EXT_ENABLED
         // Continue any active parameter enumeration for DroneCAN nodes
         continue_param_enumeration();
 #endif

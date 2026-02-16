@@ -267,34 +267,45 @@ void AP_Periph_FW::handle_param_getset(CanardInstance* canard_instance, CanardRx
         }
     }
     if (vp != nullptr && req.name.len != 0 && req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY) {
-        // param set
+        // param set -- convert between DroneCAN value types and AP_Param types
+        // as needed, since the requesting node may not know the native type
         switch (ptype) {
         case AP_PARAM_INT8:
-            if (req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
-                return;
+            if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
+                ((AP_Int8 *)vp)->set_and_save_ifchanged(req.value.integer_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
+                ((AP_Int8 *)vp)->set_and_save_ifchanged((int8_t)req.value.real_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
+                ((AP_Int8 *)vp)->set_and_save_ifchanged(req.value.boolean_value ? 1 : 0);
             }
-            ((AP_Int8 *)vp)->set_and_save_ifchanged(req.value.integer_value);
             break;
         case AP_PARAM_INT16:
-            if (req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
-                return;
+            if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
+                ((AP_Int16 *)vp)->set_and_save_ifchanged(req.value.integer_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
+                ((AP_Int16 *)vp)->set_and_save_ifchanged((int16_t)req.value.real_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
+                ((AP_Int16 *)vp)->set_and_save_ifchanged(req.value.boolean_value ? 1 : 0);
             }
-            ((AP_Int16 *)vp)->set_and_save_ifchanged(req.value.integer_value);
             break;
         case AP_PARAM_INT32:
-            if (req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
-                return;
+            if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
+                ((AP_Int32 *)vp)->set_and_save_ifchanged(req.value.integer_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
+                ((AP_Int32 *)vp)->set_and_save_ifchanged((int32_t)req.value.real_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
+                ((AP_Int32 *)vp)->set_and_save_ifchanged(req.value.boolean_value ? 1 : 0);
             }
-            ((AP_Int32 *)vp)->set_and_save_ifchanged(req.value.integer_value);
             break;
         case AP_PARAM_FLOAT:
-            if (req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
-                return;
+            if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
+                ((AP_Float *)vp)->set_and_save_ifchanged(req.value.real_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
+                ((AP_Float *)vp)->set_and_save_ifchanged((float)req.value.integer_value);
             }
-            ((AP_Float *)vp)->set_and_save_ifchanged(req.value.real_value);
             break;
         default:
-            return;
+            break;
         }
     }
     if (vp != nullptr) {

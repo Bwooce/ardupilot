@@ -66,6 +66,8 @@
 #define AP_DRONECAN_SERIAL_ENABLED AP_SERIALMANAGER_REGISTER_ENABLED && (HAL_PROGRAM_SIZE_LIMIT_KB>1024)
 #endif
 
+#include "AP_DroneCAN_config.h"
+
 #ifndef AP_DRONECAN_VOLZ_FEEDBACK_ENABLED
 #define AP_DRONECAN_VOLZ_FEEDBACK_ENABLED 0
 #endif
@@ -110,6 +112,11 @@ public:
     FUNCTOR_TYPEDEF(ParamGetSetIntCb, bool, AP_DroneCAN*, const uint8_t, const char*, int32_t &);
     FUNCTOR_TYPEDEF(ParamGetSetFloatCb, bool, AP_DroneCAN*, const uint8_t, const char*, float &);
     FUNCTOR_TYPEDEF(ParamGetSetStringCb, bool, AP_DroneCAN*, const uint8_t, const char*, string &);
+    // Generic callback receives the raw DroneCAN response value with its type tag.
+    // Used by the PARAM_EXT bridge which must handle arbitrary parameter types
+    // without knowing the native type in advance.
+    FUNCTOR_TYPEDEF(ParamGetSetGenericCb, bool, AP_DroneCAN*, const uint8_t, const char*,
+                    const uavcan_protocol_param_Value &);
     FUNCTOR_TYPEDEF(ParamSaveCb, void, AP_DroneCAN*,  const uint8_t, bool);
 
     void send_node_status();
@@ -129,7 +136,7 @@ public:
     // THIS IS NOT A THREAD SAFE API!
     void send_reboot_request(uint8_t node_id);
 
-    // get or set param value
+    // get or set param value (typed callbacks - use when you know the expected type)
     // returns true on success, false on failure
     // failures occur when waiting on node to respond to previous get or set request
     bool set_parameter_on_node(uint8_t node_id, const char *name, float value, ParamGetSetFloatCb *cb);
@@ -139,12 +146,19 @@ public:
     bool get_parameter_on_node(uint8_t node_id, const char *name, ParamGetSetIntCb *cb);
     bool get_parameter_on_node(uint8_t node_id, const char *name, ParamGetSetStringCb *cb);
 
+    // get/set param value (generic callback - use when type is unknown)
+    // The callback receives the raw DroneCAN value union with its type tag.
+    bool set_parameter_on_node(uint8_t node_id, const char *name,
+                               const uavcan_protocol_param_Value &value, ParamGetSetGenericCb *cb);
+    bool get_parameter_on_node(uint8_t node_id, const char *name, ParamGetSetGenericCb *cb);
+
     // get parameter by index for enumeration
     // returns true on success, false on failure
     // failures occur when waiting on node to respond to previous get or set request
     bool get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetFloatCb *cb);
     bool get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetIntCb *cb);
     bool get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetStringCb *cb);
+    bool get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetGenericCb *cb);
 
     // Save parameters
     bool save_parameters_on_node(uint8_t node_id, ParamSaveCb *cb);
@@ -234,6 +248,7 @@ private:
     ParamGetSetIntCb *param_int_cb;         // latest get param request callback function (for integers)
     ParamGetSetFloatCb *param_float_cb;     // latest get param request callback function (for floats)
     ParamGetSetStringCb *param_string_cb;   // latest get param request callback function (for strings)
+    ParamGetSetGenericCb *param_generic_cb; // latest get param request callback function (for generic/untyped)
     bool param_request_sent = true;         // true after a param request has been sent, false when queued to be sent
     uint32_t param_request_sent_ms;         // system time that get param request was sent
     HAL_Semaphore _param_sem;               // semaphore protecting this block of variables

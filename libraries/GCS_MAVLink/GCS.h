@@ -4,6 +4,7 @@
 #pragma once
 
 #include "GCS_config.h"
+#include <AP_DroneCAN/AP_DroneCAN_config.h>
 
 #if HAL_GCS_ENABLED
 
@@ -500,7 +501,7 @@ public:
 
     MAV_RESULT set_message_interval(uint32_t msg_id, int32_t interval_us);
 
-#if HAL_ENABLE_DRONECAN_DRIVERS
+#if AP_DRONECAN_PARAM_EXT_ENABLED
     // PARAM_EXT support for DroneCAN parameter access via USER range (25-99)
     // Component ID = 25 + (node_id - 1), supports nodes 1-75
     struct pending_param_ext_request {
@@ -514,8 +515,9 @@ public:
         uint32_t request_time_ms;  // For timeout handling
     };
 
-    // queue of pending PARAM_EXT requests for DroneCAN nodes
-    static ObjectBuffer<pending_param_ext_request> param_ext_requests;
+    // Single pending PARAM_EXT request (AP_DroneCAN handles one at a time)
+    static pending_param_ext_request pending_param_ext;
+    static bool pending_param_ext_active;
 
     // parameter enumeration state for PARAM_EXT_REQUEST_LIST
     struct param_ext_list_state {
@@ -526,7 +528,6 @@ public:
         uint16_t current_index;     // current parameter index
         uint32_t start_time_ms;     // when enumeration started
         uint16_t param_count;       // total parameters discovered
-        uint8_t tried_types;        // bitmask of callback types tried for current_index (bit 0=int, 1=float, 2=string)
     };
     static struct param_ext_list_state param_enum_state;
 
@@ -541,7 +542,7 @@ public:
     void start_param_enumeration(mavlink_channel_t reply_chan, uint8_t can_driver_index, uint8_t node_id);
     // continue parameter enumeration (called from loop)
     void continue_param_enumeration();
-#endif // HAL_ENABLE_DRONECAN_DRIVERS
+#endif // AP_DRONECAN_PARAM_EXT_ENABLED
 
 protected:
 
@@ -1049,13 +1050,13 @@ private:
     void send_param_error(const pending_param_reply &msg, MAV_PARAM_ERROR error);
     uint8_t send_parameter_async_replies();
 
-#if HAL_ENABLE_DRONECAN_DRIVERS
+#if AP_DRONECAN_PARAM_EXT_ENABLED
     // PARAM_EXT message handlers
     void handle_param_ext_request_read(const mavlink_message_t &msg);
     void handle_param_ext_request_list(const mavlink_message_t &msg);
     void handle_param_ext_set(const mavlink_message_t &msg);
     void handle_common_param_ext_message(const mavlink_message_t &msg);
-#endif // HAL_ENABLE_DRONECAN_DRIVERS
+#endif // AP_DRONECAN_PARAM_EXT_ENABLED
 
 #if AP_MAVLINK_FTP_ENABLED
     enum class FTP_OP : uint8_t {

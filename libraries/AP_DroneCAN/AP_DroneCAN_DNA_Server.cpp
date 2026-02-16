@@ -769,10 +769,10 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     // Handle health state changes with severity-based reporting
     const bool is_operational = (msg.mode == UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL);
     const bool is_healthy = (msg.health == UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK);
-#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024 || CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED || CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     const bool was_healthy = node_healthy.get(transfer.source_node_id);
 #endif
-#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
     const bool first_contact = !node_seen.get(transfer.source_node_id);
 #endif
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
@@ -781,7 +781,7 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
 #endif
     bool ignore_unhealthy = _ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_UNHEALTHY_NODE);
 
-#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
     // Send UAVCAN_NODE_STATUS MAVLink message on first contact or health change only
     // (not every heartbeat, which would flood MAVLink channels)
     if (first_contact || (was_healthy != is_healthy)) {
@@ -791,7 +791,7 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
 
     if ((!is_healthy || !is_operational) && !ignore_unhealthy) {
 
-#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
         if (was_healthy) {
             report_node_health_change(transfer.source_node_id, msg.health, msg.mode, false);
         }
@@ -810,7 +810,7 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
         }
 #endif
     } else {
-#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
         // Report recovery only if previously seen (not first contact)
         if (!was_healthy && is_healthy && is_operational && !first_contact) {
             report_node_health_change(transfer.source_node_id, msg.health, msg.mode, true);
@@ -850,7 +850,7 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     node_seen.set(transfer.source_node_id);
 }
 
-#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
 void AP_DroneCAN_DNA_Server::send_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg)
 {
 #if HAL_GCS_ENABLED
@@ -990,7 +990,7 @@ void AP_DroneCAN_DNA_Server::send_node_info_mavlink(uint8_t node_id, const uavca
                   msg.software_version.major, msg.software_version.minor);
 #endif
 }
-#endif  // HAL_PROGRAM_SIZE_LIMIT_KB > 1024
+#endif  // AP_DRONECAN_MAVLINK_REPORTING_ENABLED
 
 /* Node Info message handler
 Handle responses from GetNodeInfo Request. We verify the node info
@@ -1008,7 +1008,7 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
         return;
     }
     
-#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
     // Send UAVCAN_NODE_INFO MAVLink message for node discovery
     send_node_info_mavlink(transfer.source_node_id, rsp);
 #endif

@@ -189,6 +189,8 @@ define HAL_DISPLAY_ENABLED 1
 # RemoteID Support - Enable for ground vehicle/obstacle beacon use
 define AP_OPENDRONEID_ENABLED 1
 define AP_DRONECAN_SEND_GPS 1
+define AP_DRONECAN_MAVLINK_REPORTING_ENABLED 1
+define AP_DRONECAN_PARAM_EXT_ENABLED 1
 # For ground/stationary use, configure as:
 # - RID_TYPE = 2 (MAV_ODID_CATEGORY_EU for ground obstacle)
 # - RID_UA_TYPE = 15 (MAV_ODID_UA_TYPE_OTHER for non-aircraft)

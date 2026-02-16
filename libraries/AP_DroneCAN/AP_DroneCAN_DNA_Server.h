@@ -1,6 +1,7 @@
 #pragma once
 #include <AP_HAL/AP_HAL_Boards.h>
 #include <AP_HAL/Semaphores.h>
+#include "AP_DroneCAN_config.h"
 
 #if HAL_ENABLE_DRONECAN_DRIVERS
 #include <AP_Common/Bitmask.h>
@@ -196,8 +197,7 @@ public:
     void request_all_node_info();
 
 private:
-#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
-    // MAVLink reporting functions -- excluded from flash-constrained boards (fmuv2)
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
     void send_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg);
     void report_node_health_change(uint8_t node_id, uint8_t health, uint8_t mode, bool recovered);
     void send_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg);

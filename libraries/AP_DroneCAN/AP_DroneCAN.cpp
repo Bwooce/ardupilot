@@ -1774,6 +1774,7 @@ void AP_DroneCAN::check_parameter_callback_timeout()
         param_int_cb = nullptr;
         param_float_cb = nullptr;
         param_string_cb = nullptr;
+        param_generic_cb = nullptr;
     }
 }
 
@@ -1801,7 +1802,8 @@ bool AP_DroneCAN::set_parameter_on_node(uint8_t node_id, const char *name, float
     // fail if waiting for any previous get/set request
     if (param_int_cb != nullptr ||
         param_float_cb != nullptr ||
-        param_string_cb != nullptr) {
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
         return false;
     }
     param_getset_req.index = 0;
@@ -1825,7 +1827,8 @@ bool AP_DroneCAN::set_parameter_on_node(uint8_t node_id, const char *name, int32
     // fail if waiting for any previous get/set request
     if (param_int_cb != nullptr ||
         param_float_cb != nullptr ||
-        param_string_cb != nullptr) {
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
         return false;
     }
     param_getset_req.index = 0;
@@ -1849,7 +1852,8 @@ bool AP_DroneCAN::set_parameter_on_node(uint8_t node_id, const char *name, const
     // fail if waiting for any previous get/set request
     if (param_int_cb != nullptr ||
         param_float_cb != nullptr ||
-        param_string_cb != nullptr) {
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
         return false;
     }
     param_getset_req.index = 0;
@@ -1873,7 +1877,8 @@ bool AP_DroneCAN::get_parameter_on_node(uint8_t node_id, const char *name, Param
     // fail if waiting for any previous get/set request
     if (param_int_cb != nullptr ||
         param_float_cb != nullptr ||
-        param_string_cb != nullptr) {
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
         return false;
     }
     param_getset_req.index = 0;
@@ -1896,7 +1901,8 @@ bool AP_DroneCAN::get_parameter_on_node(uint8_t node_id, const char *name, Param
     // fail if waiting for any previous get/set request
     if (param_int_cb != nullptr ||
         param_float_cb != nullptr ||
-        param_string_cb != nullptr) {
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
         return false;
     }
     param_getset_req.index = 0;
@@ -1919,7 +1925,8 @@ bool AP_DroneCAN::get_parameter_on_node(uint8_t node_id, const char *name, Param
     // fail if waiting for any previous get/set request
     if (param_int_cb != nullptr ||
         param_float_cb != nullptr ||
-        param_string_cb != nullptr) {
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
         return false;
     }
     param_getset_req.index = 0;
@@ -1943,17 +1950,14 @@ bool AP_DroneCAN::get_parameter_by_index_on_node(uint8_t node_id, uint16_t index
     // fail if waiting for any previous get/set request
     if (param_int_cb != nullptr ||
         param_float_cb != nullptr ||
-        param_string_cb != nullptr) {
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
         return false;
     }
     param_getset_req.index = index;
     param_getset_req.name.len = 0;  // empty name for index-based enumeration
     param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY;
     param_float_cb = cb;
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    hal.console->printf("PARAM_REQUEST: Registered float_cb=%p for node %d index %d\n",
-                       (void*)param_float_cb, node_id, index);
-#endif
     param_request_sent = false;
     param_request_sent_ms = AP_HAL::millis();
     param_request_node_id = node_id;
@@ -1970,7 +1974,8 @@ bool AP_DroneCAN::get_parameter_by_index_on_node(uint8_t node_id, uint16_t index
     // fail if waiting for any previous get/set request
     if (param_int_cb != nullptr ||
         param_float_cb != nullptr ||
-        param_string_cb != nullptr) {
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
         return false;
     }
     param_getset_req.index = index;
@@ -1993,13 +1998,89 @@ bool AP_DroneCAN::get_parameter_by_index_on_node(uint8_t node_id, uint16_t index
     // fail if waiting for any previous get/set request
     if (param_int_cb != nullptr ||
         param_float_cb != nullptr ||
-        param_string_cb != nullptr) {
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
         return false;
     }
     param_getset_req.index = index;
     param_getset_req.name.len = 0;  // empty name for index-based enumeration
     param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY;
     param_string_cb = cb;
+    param_request_sent = false;
+    param_request_sent_ms = AP_HAL::millis();
+    param_request_node_id = node_id;
+    return true;
+}
+
+/*
+  set parameter on node using raw DroneCAN value (generic callback).
+  The value union is sent directly without type conversion.
+*/
+bool AP_DroneCAN::set_parameter_on_node(uint8_t node_id, const char *name,
+                                         const uavcan_protocol_param_Value &value, ParamGetSetGenericCb *cb)
+{
+    WITH_SEMAPHORE(_param_sem);
+
+    // fail if waiting for any previous get/set request
+    if (param_int_cb != nullptr ||
+        param_float_cb != nullptr ||
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
+        return false;
+    }
+    param_getset_req.index = 0;
+    param_getset_req.name.len = strncpy_noterm((char*)param_getset_req.name.data, name, sizeof(param_getset_req.name.data)-1);
+    param_getset_req.value = value;
+    param_generic_cb = cb;
+    param_request_sent = false;
+    param_request_sent_ms = AP_HAL::millis();
+    param_request_node_id = node_id;
+    return true;
+}
+
+/*
+  get named parameter on node (generic callback).
+  Response arrives with the actual DroneCAN type tag intact.
+*/
+bool AP_DroneCAN::get_parameter_on_node(uint8_t node_id, const char *name, ParamGetSetGenericCb *cb)
+{
+    WITH_SEMAPHORE(_param_sem);
+
+    // fail if waiting for any previous get/set request
+    if (param_int_cb != nullptr ||
+        param_float_cb != nullptr ||
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
+        return false;
+    }
+    param_getset_req.index = 0;
+    param_getset_req.name.len = strncpy_noterm((char*)param_getset_req.name.data, name, sizeof(param_getset_req.name.data));
+    param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY;
+    param_generic_cb = cb;
+    param_request_sent = false;
+    param_request_sent_ms = AP_HAL::millis();
+    param_request_node_id = node_id;
+    return true;
+}
+
+/*
+  get parameter by index on node for enumeration (generic callback)
+*/
+bool AP_DroneCAN::get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetGenericCb *cb)
+{
+    WITH_SEMAPHORE(_param_sem);
+
+    // fail if waiting for any previous get/set request
+    if (param_int_cb != nullptr ||
+        param_float_cb != nullptr ||
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
+        return false;
+    }
+    param_getset_req.index = index;
+    param_getset_req.name.len = 0;  // empty name for index-based enumeration
+    param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY;
+    param_generic_cb = cb;
     param_request_sent = false;
     param_request_sent_ms = AP_HAL::millis();
     param_request_node_id = node_id;
@@ -2024,10 +2105,11 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
     } else if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
         hal.console->printf("PARAM_HANDLER:   Bool value=%s\n", rsp.value.boolean_value ? "true" : "false");
     }
-    hal.console->printf("PARAM_HANDLER:   Registered callbacks: int=%s, float=%s, string=%s\n",
+    hal.console->printf("PARAM_HANDLER:   Registered callbacks: int=%s, float=%s, string=%s, generic=%s\n",
                        param_int_cb ? "YES" : "NO",
                        param_float_cb ? "YES" : "NO",
-                       param_string_cb ? "YES" : "NO");
+                       param_string_cb ? "YES" : "NO",
+                       param_generic_cb ? "YES" : "NO");
 
     // Dump raw transfer payload for debugging decode issues
     hal.console->printf("PARAM_HANDLER:   Raw payload (%d bytes):", transfer.payload_len);
@@ -2041,10 +2123,22 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
 
     if (!param_int_cb &&
         !param_float_cb &&
-        !param_string_cb) {
+        !param_string_cb &&
+        !param_generic_cb) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         hal.console->printf("PARAM_HANDLER: ERROR - No callbacks registered, returning early\n");
 #endif
+        return;
+    }
+
+    // Generic callback handles all response types directly, including EMPTY.
+    // No type conversion needed - the callback receives the raw DroneCAN value.
+    if (param_generic_cb) {
+        const char* name = (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY)
+                           ? "" : (const char*)rsp.name.data;
+        (*param_generic_cb)(this, transfer.source_node_id, name, rsp.value);
+        param_request_sent_ms = 0;
+        param_generic_cb = nullptr;
         return;
     }
 
@@ -2191,6 +2285,31 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         hal.console->printf("PARAM_HANDLER: string_cb returned FALSE, continuing to cleanup\n");
 #endif
+    } else if (param_float_cb || param_int_cb) {
+        // Type mismatch fallback: response type doesn't match the registered callback.
+        // This happens when e.g. a float callback was registered but the node returned
+        // an integer value. Convert the value and call whichever callback IS registered.
+        if (param_float_cb) {
+            float val;
+            if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
+                val = (float)rsp.value.integer_value;
+            } else if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
+                val = rsp.value.boolean_value ? 1.0f : 0.0f;
+            } else {
+                val = 0.0f;
+            }
+            (*param_float_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val);
+        } else if (param_int_cb) {
+            int32_t val;
+            if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
+                val = (int32_t)rsp.value.real_value;
+            } else if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_STRING_VALUE) {
+                val = 0;
+            } else {
+                val = 0;
+            }
+            (*param_int_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val);
+        }
     }
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     else {
