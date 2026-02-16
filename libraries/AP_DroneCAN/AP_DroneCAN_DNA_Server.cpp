@@ -202,54 +202,52 @@ bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, 
 {
     WITH_SEMAPHORE(sem);
 
-    // UID is the source of truth - find what node ID this UID is registered to
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32: UID-based conflict resolution with takeover support
     uint8_t registered_node_id = find_node_id(unique_id, 16);
 
     if (registered_node_id == 0) {
         // UID not in database - new node
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         ESP_LOGI("DNA_DB", "UID not found in DB (new node), registering node %d, UID=%02X%02X%02X%02X%02X%02X...",
                  source_node_id,
                  unique_id[0], unique_id[1], unique_id[2],
                  unique_id[3], unique_id[4], unique_id[5]);
-#endif
         register_uid(source_node_id, unique_id, 16);
         return false;
     }
 
     if (registered_node_id == source_node_id) {
-        // UID and node ID match our records - all good
         return false;
     }
 
-    // UID is registered to a DIFFERENT node ID
-    // Check if the rightful owner is still active
+    // UID is registered to a DIFFERENT node ID -- allow takeover
     bool rightful_owner_active = healthy_mask && healthy_mask->get(registered_node_id);
-
     if (rightful_owner_active) {
-        // Rightful owner still active - update database to remap UID
-        // (allocation should have given this device a different ID, but handle it here too)
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
         ESP_LOGW("DNA_DB", "UID conflict: Node %d using ID registered to active node %d",
                  source_node_id, registered_node_id);
-        ESP_LOGW("DNA_DB", "  Updating mapping (device got wrong ID somehow)");
-#endif
     } else {
-        // Rightful owner offline - allow takeover
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP_LOGW("DNA_DB", "Allowing takeover: Node %d (inactive) → Node %d (active)",
+        ESP_LOGW("DNA_DB", "Allowing takeover: Node %d (inactive) -> Node %d (active)",
                  registered_node_id, source_node_id);
-#endif
     }
 
-    // Clear old registration and register with new node ID
     NodeRecord empty_record;
     memset(&empty_record, 0, sizeof(empty_record));
     write_record(empty_record, registered_node_id);
     node_registered.clear(registered_node_id);
     register_uid(source_node_id, unique_id, 16);
-
-    return false; // Allow it (allocation should prevent conflicts, but handle here too)
+    return false;
+#else
+    // Non-ESP32: upstream behavior -- report duplicates, register unknowns
+    (void)healthy_mask;
+    if (is_registered(source_node_id)) {
+        if (source_node_id != find_node_id(unique_id, 16)) {
+            return true; // duplicate: this node ID belongs to a different UID
+        }
+    } else {
+        register_uid(source_node_id, unique_id, 16);
+    }
+    return false;
+#endif
 }
 
 // handle the allocation message. returns the allocated node ID, or 0 if allocation failed
@@ -257,14 +255,13 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
 {
     WITH_SEMAPHORE(sem);
 
-    // Reject operations before database is initialized
-    // init() validates magic number and resets if needed - must complete before allocations
-    if (!initialized) {
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Reject operations before database is initialized
+    if (!initialized) {
         ESP_LOGW("DNA_DB", "Allocation requested before database initialized - ignoring");
-#endif
-        return 0;  // Allocation failed - database not ready
+        return 0;
     }
+#endif
 
     uint8_t resp_node_id = find_node_id(unique_id, uid_len);
 
@@ -276,32 +273,23 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
     }
 #endif
 
-    if (resp_node_id != 0) {
-        // UID found in database - return the existing node ID allocation
-        // This handles both cases:
-        // 1. Device coming back online after being offline (node not in node_seen)
-        // 2. Device requesting allocation while already active (e.g., after reboot/state loss)
-        // In both cases, we return the same node ID to maintain stable addressing
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        const char* status = (seen_mask && seen_mask->get(resp_node_id)) ? "active" : "offline";
-        ESP_LOGD("DNA_DB", "UID found with node %d (%s), returning existing allocation, UID=%02X%02X%02X%02X%02X%02X...",
-                 resp_node_id, status,
-                 unique_id[0], unique_id[1], unique_id[2],
-                 unique_id[3], unique_id[4], unique_id[5]);
-#endif
-        return resp_node_id;
-    }
-
     if (resp_node_id == 0) {
         // find free node ID, starting at the max as prescribed by the standard
         resp_node_id = MAX_NODE_ID;
         while (resp_node_id > 0) {
-            // Check both registered (in DNA database) and seen (currently active)
-            // This prevents allocating IDs used by active MAVLink components or unregistered nodes
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            // ESP32: also check seen_mask to avoid allocating IDs used by active nodes
             if (!node_registered.get(resp_node_id) &&
                 !(seen_mask && seen_mask->get(resp_node_id))) {
                 break;
             }
+#else
+            // Non-ESP32: upstream behavior -- only check registered
+            (void)seen_mask;
+            if (!node_registered.get(resp_node_id)) {
+                break;
+            }
+#endif
             resp_node_id--;
         }
 
@@ -313,7 +301,6 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
 #endif
             create_registration(resp_node_id, unique_id, uid_len);
         } else {
-            debug_dronecan(AP_CANManager::LOG_ERROR, "DNA_DB ERROR: No free node IDs available in database");
             GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "DroneCAN DNA allocation failed - database full");
         }
     }
@@ -634,7 +621,7 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
         if ((curr_verifying_node == self_node_id) || (curr_verifying_node == 0)) {
             continue;
         }
-        if (node_seen.get(curr_verifying_node)) {
+        if (db.is_registered(curr_verifying_node)) {
             break;
         }
     }
@@ -790,17 +777,21 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
 #endif
     bool ignore_unhealthy = _ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_UNHEALTHY_NODE);
 
+#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
     // Send UAVCAN_NODE_STATUS MAVLink message on first contact or health change only
     // (not every heartbeat, which would flood MAVLink channels)
     if (first_contact || (was_healthy != is_healthy)) {
         send_node_status_mavlink(transfer.source_node_id, msg);
     }
+#endif
 
     if ((!is_healthy || !is_operational) && !ignore_unhealthy) {
 
+#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
         if (was_healthy) {
             report_node_health_change(transfer.source_node_id, msg.health, msg.mode, false);
         }
+#endif
 
         fault_node_id = transfer.source_node_id;
         server_state = NODE_STATUS_UNHEALTHY;
@@ -815,10 +806,12 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
         }
 #endif
     } else {
-        // Node is now healthy - only report recovery if previously seen (not first contact)
+#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
+        // Report recovery only if previously seen (not first contact)
         if (!was_healthy && is_healthy && is_operational && !first_contact) {
             report_node_health_change(transfer.source_node_id, msg.health, msg.mode, true);
         }
+#endif
 
         node_healthy.set(transfer.source_node_id);
         if (node_healthy == node_verified) {
@@ -853,6 +846,7 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     node_seen.set(transfer.source_node_id);
 }
 
+#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
 void AP_DroneCAN_DNA_Server::send_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg)
 {
 #if HAL_GCS_ENABLED
@@ -986,6 +980,7 @@ void AP_DroneCAN_DNA_Server::send_node_info_mavlink(uint8_t node_id, const uavca
                   msg.software_version.major, msg.software_version.minor);
 #endif
 }
+#endif  // HAL_PROGRAM_SIZE_LIMIT_KB > 1024
 
 /* Node Info message handler
 Handle responses from GetNodeInfo Request. We verify the node info
@@ -1003,8 +998,10 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
         return;
     }
     
+#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
     // Send UAVCAN_NODE_INFO MAVLink message for node discovery
     send_node_info_mavlink(transfer.source_node_id, rsp);
+#endif
 
     /*
       if we haven't logged this node then log it now

@@ -196,10 +196,12 @@ public:
     void request_all_node_info();
 
 private:
-    // MAVLink reporting functions
+#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
+    // MAVLink reporting functions -- excluded from flash-constrained boards (fmuv2)
     void send_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg);
     void report_node_health_change(uint8_t node_id, uint8_t health, uint8_t mode, bool recovered);
     void send_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg);
+#endif
 };
 
 #endif
