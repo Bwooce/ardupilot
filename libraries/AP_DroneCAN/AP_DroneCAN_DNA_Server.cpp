@@ -769,8 +769,12 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     // Handle health state changes with severity-based reporting
     const bool is_operational = (msg.mode == UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL);
     const bool is_healthy = (msg.health == UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK);
+#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024 || CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     const bool was_healthy = node_healthy.get(transfer.source_node_id);
+#endif
+#if HAL_PROGRAM_SIZE_LIMIT_KB > 1024
     const bool first_contact = !node_seen.get(transfer.source_node_id);
+#endif
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     // Debug: Track node_healthy changes for troubleshooting LED flipping
     static bool first_log[128] = {true};
