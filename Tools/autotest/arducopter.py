@@ -16045,5 +16045,9 @@ class AutoTestDroneCAN(AutoTestCopter):
             self.DroneCAN_NodeInfo,
             self.DroneCAN_ParamExtRead,
             self.DroneCAN_ParamExtSet,
+            self.DroneCAN_ParamExtSetFloat,
+            self.DroneCAN_ParamExtTypeCross,
+            self.DroneCAN_ParamExtSavePersist,
             self.DroneCAN_ParamExtList,
+            self.DroneCAN_NodeDisconnect,
         ]

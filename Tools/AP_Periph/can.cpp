@@ -352,7 +352,9 @@ void AP_Periph_FW::handle_param_executeopcode(CanardInstance* canard_instance, C
     if (uavcan_protocol_param_ExecuteOpcodeRequest_decode(transfer, &req)) {
         return;
     }
-    if (req.opcode == UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_REQUEST_OPCODE_ERASE) {
+    if (req.opcode == UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_REQUEST_OPCODE_SAVE) {
+        AP_Param::flush();
+    } else if (req.opcode == UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_REQUEST_OPCODE_ERASE) {
         StorageManager::erase();
         AP_Param::erase_all();
         AP_Param::load_all();
