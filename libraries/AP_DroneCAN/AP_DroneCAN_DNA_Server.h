@@ -19,18 +19,12 @@ class AP_DroneCAN_DNA_Server
 {
     StorageAccess storage;
 
-    // ESP32 stores full 16-byte UIDs for debugging/diagnostics; fits 62 nodes in 1KB
-    // Other platforms use upstream hash+CRC format; fits 125 nodes in 1KB
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Store full 16-byte unique IDs for reliable matching and diagnostics.
+    // Fits 62 nodes in 1KB storage (16 bytes * 63 entries + 2 byte magic = 1010).
+    // Format version 0xAC02; auto-resets databases from older hash-based format.
     struct PACKED NodeRecord {
-        uint8_t uid[16];  // Full 16-byte unique ID (no hash, no CRC)
+        uint8_t uid[16];
     };
-#else
-    struct NodeRecord {
-        uint8_t uid_hash[6];
-        uint8_t crc;
-    };
-#endif
 
     /*
      * For each node ID (1 through MAX_NODE_ID), the database can have one
