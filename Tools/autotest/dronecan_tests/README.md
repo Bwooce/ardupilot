@@ -162,6 +162,67 @@ self.stop_sup_program(instance=0)
 self.start_sup_program(instance=0, args="-M")  # maintenance mode
 ```
 
+## MAVLink Protocol Test Coverage Audit
+
+Comprehensive audit of MAVLink protocol SITL test coverage for the ESP32
+Rover build (February 2026).
+
+### Rover Protocol Coverage Summary
+
+| Protocol Area | Status | Test Methods |
+|---|---|---|
+| Parameters (PARAM_*) | FULL | Parameters, MAVProxyParam, PARAM_ERROR |
+| Mission (MISSION_*) | FULL | GCSMission, DriveMission, MissionFrames, ClearMission, MissionRetransfer |
+| Fence (poly+points) | FULL | GCSFence, PolyFence*, SDPolyFence, FenceFullAndPartialTransfer |
+| Commands (COMMAND_LONG/INT) | FULL | 28+ MAV_CMD_* tested individually |
+| RC Override | FULL | RCOverrides, RCOverridesCancel, MANUAL_CONTROL |
+| Mode Changes | FULL | ModeSwitch, AuxModeSwitch, ChangeModeByNumber |
+| Arming/Disarming | FULL | ArmFeatures, implicit in most tests |
+| GPS/Position telemetry | FULL | Implicit in all movement tests |
+| Heartbeat/Status | FULL | All tests (via wait_heartbeat) |
+| Message Rate Control | FULL | SET_MESSAGE_INTERVAL, REQUEST_MESSAGE, GetMessageInterval |
+| Logging/DataFlash | FULL | DataFlashOverMAVLink, DataFlash, Logging |
+| Failsafes | FULL | GCSFailsafe, CPUFailsafe, ThrottleFailsafe, SafetySwitch |
+| Position Targets | FULL | SET_ATTITUDE/POSITION_TARGET, SetpointGlobalPos/Vel |
+| Proximity/Obstacles | FULL | AP_Proximity_MAV, RangeFinder, DepthFinder |
+| DroneCAN bridge | FULL | 13 tests in test.DroneCAN (this suite) |
+| PARAM_EXT bridge | FULL | 7 tests: Read/Set/Float/TypeCross/List/Invalid* |
+| Rally Points | Basic | Rally |
+| Camera | Basic | CameraMission |
+| Battery | Implicit | Via telemetry streams |
+| Home Position | Basic | SetHome, MAV_CMD_GET_HOME_POSITION |
+| High Latency | Tested | HIGH_LATENCY2 |
+
+### Identified Gaps (with priority for ESP32)
+
+1. **MAVFTP (FILE_TRANSFER_PROTOCOL)** -- tested in Plane but not Rover.
+   Relevant to ESP32 for filesystem access over WiFi.
+2. **Terrain protocol explicit validation** -- data served implicitly but
+   TERRAIN_DATA/TERRAIN_CHECK messages not explicitly validated in Rover.
+3. **ESP32 transport testing** -- all SITL tests run on localhost TCP; no
+   tests exercise WiFi UDP/TCP transport. Would require ESP32 SITL shim.
+4. **GCS_Common.cpp ESP32 debug instrumentation** -- lines 4591-4624 and
+   5660-5685 still have `#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32` debug
+   printf blocks that should get the same debug_dronecan() treatment.
+
+### Message Handler Statistics
+
+- 96 unique MAVLink message IDs handled in GCS_Common.cpp
+- 29 unconditional (always compiled)
+- 67 conditional (feature-dependent)
+- 3 Rover-specific additions (SET_ATTITUDE_TARGET, SET_POSITION_TARGET_*)
+
+### CI Test Matrix
+
+DroneCAN tests run in the `test ap_periph` workflow (`test_sitl_periph.yml`):
+- `sitltest-can`: test.CAN (GPS ordering, battery, log download)
+- `sitltest-dronecan`: test.DroneCAN (node status/info, PARAM_EXT, DNA, firmware update)
+
+Rover tests run in `test_sitl_rover.yml`:
+- `sitltest-rover`: ~95 tests covering all core MAVLink protocols
+- `sitltest-sailboat`: sailboat-specific tests
+- `sitltest-balancebot`: balance bot-specific tests
+
 ## Troubleshooting
 
 - **No UAVCAN_NODE_STATUS**: Ensure `MAVLINK20=1` is set. These are MAVLink2-only
