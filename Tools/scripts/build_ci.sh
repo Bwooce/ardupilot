@@ -171,6 +171,7 @@ for t in $CI_BUILD_TARGET; do
     fi
     if [ "$t" == "sitltest-dronecan" ]; then
         echo "Building SITL DroneCAN Tests"
+        pip install --progress-bar off dronecan 2>/dev/null || true
         $waf configure --board sitl
         $waf copter
         run_autotest "Copter" "build.SITLPeriphUniversal" "test.DroneCAN"

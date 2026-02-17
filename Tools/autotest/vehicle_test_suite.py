@@ -5509,7 +5509,11 @@ class TestSuite(abc.ABC):
 
     def DroneCAN_FirmwareUpdate(self):
         '''test DroneCAN BeginFirmwareUpdate via direct CAN service request'''
-        import dronecan
+        try:
+            import dronecan
+        except ImportError:
+            self.progress("dronecan module not available, skipping test")
+            return
         import threading
 
         self.context_push()
