@@ -30,13 +30,11 @@
 extern const AP_HAL::HAL& hal;
 
 // FORMAT REVISION DREAMS (things to address if the NodeRecord needs to be changed substantially)
-// * have DNA server accept only a 16 byte local UID to avoid overhead from variable sized hash
-// * have a real empty flag for entries and/or use a CRC which is not zero for an input of all zeros
-// * fix FNV-1a hash folding to be to 48 bits (6 bytes) instead of 56
-
-#define NODERECORD_MAGIC 0xAC01
+// Format version 0xAC02: full 16-byte UID storage (replaces 0xAC01 hash format).
+// Existing databases are automatically reset on upgrade; nodes re-allocate on next boot.
+#define NODERECORD_MAGIC 0xAC02
 #define NODERECORD_MAGIC_LEN 2 // uint16_t
-#define MAX_NODE_ID    125
+#define MAX_NODE_ID    62
 #define NODERECORD_LOC(node_id) ((node_id * sizeof(NodeRecord)) + NODERECORD_MAGIC_LEN)
 
 #define debug_dronecan(level_debug, fmt, args...) do { AP::can().log_text(level_debug, "DroneCAN", fmt, ##args); } while (0)
@@ -55,10 +53,13 @@ void AP_DroneCAN_DNA_Server::Database::init(StorageAccess *storage_)
 
     storage = storage_; // use supplied accessor
 
-    // validate magic number
+    // validate magic number -- format changed from hash-based (0xAC01) to
+    // full-UID storage (0xAC02). Mismatched magic triggers a clean reset;
+    // nodes will re-allocate on next boot.
     uint16_t magic = storage->read_uint16(0);
     if (magic != NODERECORD_MAGIC) {
         reset(); // resetting the database will put the magic back
+        GCS_SEND_TEXT(MAV_SEVERITY_NOTICE, "DroneCAN: DNA database reset (format upgrade)");
     }
 
     // check and note each possible node ID's registration's presence
@@ -144,52 +145,18 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
 uint8_t AP_DroneCAN_DNA_Server::Database::find_node_id(const uint8_t unique_id[], uint8_t size)
 {
     NodeRecord record;
-
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Direct UID comparison (full 16-byte storage)
-    uint8_t search_len = (size > 16) ? 16 : size;
+    const uint8_t cmp_len = MIN(size, (uint8_t)sizeof(record.uid));
 
     for (int i = MAX_NODE_ID; i > 0; i--) {
         if (node_registered.get(i)) {
             read_record(record, i);
-            if (memcmp(record.uid, unique_id, search_len) == 0) {
+            if (memcmp(record.uid, unique_id, cmp_len) == 0) {
                 return i;
             }
         }
     }
-#else
-    // Hash-based comparison (upstream format)
-    NodeRecord cmp_record;
-    compute_uid_hash(cmp_record, unique_id, size);
-
-    for (int i = MAX_NODE_ID; i > 0; i--) {
-        if (node_registered.get(i)) {
-            read_record(record, i);
-            if (memcmp(record.uid_hash, cmp_record.uid_hash, sizeof(NodeRecord::uid_hash)) == 0) {
-                return i; // node ID found
-            }
-        }
-    }
-#endif
-    return 0; // not found
+    return 0;
 }
-
-#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
-// fill the given record with the hash of the given unique ID
-void AP_DroneCAN_DNA_Server::Database::compute_uid_hash(NodeRecord &record, const uint8_t unique_id[], uint8_t size) const
-{
-    uint64_t hash = FNV_1_OFFSET_BASIS_64;
-    hash_fnv_1a(size, unique_id, &hash);
-
-    // xor-folding per http://www.isthe.com/chongo/tech/comp/fnv/
-    hash = (hash>>56) ^ (hash&(((uint64_t)1<<56)-1)); // 56 should be 48 since we use 6 bytes
-
-    // write it to ret
-    for (uint8_t i=0; i<6; i++) {
-        record.uid_hash[i] = (hash >> (8*i)) & 0xff;
-    }
-}
-#endif
 
 // register a given unique ID to a given node ID, deleting any existing registration for the unique ID
 void AP_DroneCAN_DNA_Server::Database::register_uid(uint8_t node_id, const uint8_t unique_id[], uint8_t size)
@@ -207,16 +174,7 @@ void AP_DroneCAN_DNA_Server::Database::create_registration(uint8_t node_id, cons
 {
     NodeRecord record;
     memset(&record, 0, sizeof(record));
-
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Store full UID directly
-    uint8_t copy_size = (size > 16) ? 16 : size;
-    memcpy(record.uid, unique_id, copy_size);
-#else
-    // Compute hash and CRC (upstream format)
-    compute_uid_hash(record, unique_id, size);
-    record.crc = crc_crc8(record.uid_hash, sizeof(record.uid_hash));
-#endif
+    memcpy(record.uid, unique_id, MIN(size, (uint8_t)sizeof(record.uid)));
 
     write_record(record, node_id);
     node_registered.set(node_id);
@@ -237,18 +195,14 @@ void AP_DroneCAN_DNA_Server::Database::delete_registration(uint8_t node_id)
     node_registered.clear(node_id);
 }
 
-// return true if the given node ID has a registration
+// return true if the given node ID has a registration (non-zero UID)
 bool AP_DroneCAN_DNA_Server::Database::check_registration(uint8_t node_id)
 {
     NodeRecord record;
     read_record(record, node_id);
 
-    uint8_t empty_uid[sizeof(NodeRecord::uid_hash)] {};
-    uint8_t crc = crc_crc8(record.uid_hash, sizeof(record.uid_hash));
-    if (crc == record.crc && memcmp(&record.uid_hash[0], &empty_uid[0], sizeof(empty_uid)) != 0) {
-        return true; // CRC matches and UID hash is not all zero
-    }
-    return false;
+    uint8_t empty_uid[sizeof(record.uid)] {};
+    return memcmp(record.uid, empty_uid, sizeof(record.uid)) != 0;
 }
 
 // read the given node ID's registration's record
