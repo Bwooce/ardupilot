@@ -1,101 +1,162 @@
-# This board is tomte76's version of esp32empty.h to work with an aliexpress WROOM32 devkit clone, mpu9255 spi, bmp280 i2c, micro sd on spi2 and NEO M8 clone on UART.
+# ArduPilot Hardware Definition for ESP32-Tomte76 Board
+# Based on ESP32 Classic with MPU9250 SPI, BMP280 I2C, and SD card support
+# This is tomte76's version of esp32empty for use with AliExpress WROOM32 devkit clone
+# Features: MPU9255 SPI, BMP280 I2C, micro SD on SPI2, NEO M8 GPS on UART
 
+MCU ESP32
+
+# Board identification
 define HAL_ESP32_BOARD_NAME "esp32-tomte76"
 
-//Protocols
-//list of protocols/enum:	ardupilot/libraries/AP_SerialManager/AP_SerialManager.h
-//default protocols:		ardupilot/libraries/AP_SerialManager/AP_SerialManager.cpp
-//ESP32 serials:		AP_HAL_ESP32/HAL_ESP32_Class.cpp
+# Sensor probe helper macros for easier configuration
+define PROBE_IMU_SPI(driver, devname, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))
+define PROBE_MAG_IMU(driver, imudev, imu_instance, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe_ ## imudev(imu_instance,##args))
+define PROBE_BARO_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(GET_I2C_DEVICE(bus, addr)),##args))
 
-//#define HAL_SERIAL0_PROTOCOL				SerialProtocol_MAVLink2			//A	UART0: Always: Console, MAVLink2
-//#define HAL_SERIAL0_BAUD				AP_SERIALMANAGER_CONSOLE_BAUD/1000	//115200
+# IMU Configuration - MPU9250/MPU9255 via SPI (default)
+define HAL_INS_DEFAULT HAL_INS_MPU9250_SPI
+define HAL_INS_MPU9250_NAME "mpu9250"
+define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, HAL_INS_MPU9250_NAME, ROTATION_NONE)
 
-//#define HAL_SERIAL1_PROTOCOL				SerialProtocol_MAVLink2			//C	WiFi:  TCP, UDP, or disable (depends on HAL_ESP32_WIFI)
-//#define HAL_SERIAL1_BAUD				AP_SERIALMANAGER_MAVLINK_BAUD/1000	//57600
+# Alternative IMU configurations (uncomment to use):
+# For different rotations if board mounted differently:
+# define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, HAL_INS_MPU9250_NAME, ROTATION_ROLL_180)
+# define HAL_INS_PROBE_LIST PROBE_IMU_SPI(Invensense, HAL_INS_MPU9250_NAME, ROTATION_YAW_270)
 
-//#define HAL_SERIAL2_PROTOCOL				SerialProtocol_GPS			//D	UART2: Always: MAVLink2 on ESP32
-//#define HAL_SERIAL2_BAUD				AP_SERIALMANAGER_GPS_BAUD/1000		//38400
+# Compass Configuration - AK8963 integrated in MPU9250
+define ALLOW_ARM_NO_COMPASS 1
+define HAL_MAG_PROBE_LIST PROBE_MAG_IMU(AK8963, mpu9250, 0, ROTATION_NONE)
 
-//#define HAL_SERIAL3_PROTOCOL				SerialProtocol_GPS			//B	UART1: GPS1
-//#define HAL_SERIAL4_BAUD				AP_SERIALMANAGER_GPS_BAUD/1000		//38400, Can not define default baudrate here (by config only)
+# Alternative compass configurations (uncomment to use):
+# For different rotations:
+# define HAL_MAG_PROBE_LIST PROBE_MAG_IMU(AK8963, mpu9250, 0, ROTATION_ROLL_180)
+# define HAL_MAG_PROBE_LIST PROBE_MAG_IMU(AK8963, mpu9250, 0, ROTATION_YAW_270)
 
-//#define HAL_SERIAL4_PROTOCOL				SerialProtocol_None			//E
-//#define HAL_SERIAL4_BAUD				AP_SERIALMANAGER_GPS_BAUD/1000		//38400, Can not define default baudrate here (by config only)
+# Barometer Configuration - BMP280 via I2C at address 0x76
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
+define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x76)
 
-/*#define HAL_SERIAL5_PROTOCOL				SerialProtocol_None			//F
-#define HAL_SERIAL5_BAUD				(115200/1000)
+# Alternative barometer configurations (uncomment to use):
+# For different I2C addresses:
+# define HAL_BARO_PROBE_LIST PROBE_BARO_I2C(BMP280, 0, 0x77)
 
-#define HAL_SERIAL6_PROTOCOL				SerialProtocol_None			//G
-#define HAL_SERIAL6_BAUD				(115200/1000)
+# WiFi Configuration
+# 1 = TCP mode (default for tomte76 board)
+define HAL_ESP32_WIFI 1
+define WIFI_SSID "ardupilot123"
+define WIFI_PWD "ardupilot123"
 
-#define HAL_SERIAL7_PROTOCOL				SerialProtocol_None			//H
-#define HAL_SERIAL7_BAUD				(115200/1000)
+# WiFi Usage Notes:
+# - 1 = TCP mode, 2 = UDP mode, comment out = WiFi disabled
+# - Client connects to 192.168.4.1 port 14550
+# - To disable MAVLink over USB: Set SERIAL0_PROTOCOL = 0
 
-#define HAL_SERIAL8_PROTOCOL				SerialProtocol_None			//I
-#define HAL_SERIAL8_BAUD				(115200/1000)
+# ADC Configuration - disabled (no analog sensors on this board)
+# NOTE: ADC disabled to avoid conflicts and save resources
+define HAL_DISABLE_ADC_DRIVER 1
+define HAL_USE_ADC 0
 
-#define HAL_SERIAL9_PROTOCOL				SerialProtocol_None			//J
-define HAL_SERIAL9_BAUD				(115200/1000)*/
+# Alternative ADC configuration (uncomment to enable if needed):
+# define HAL_USE_ADC 1
+# Available ADC1 pins: 32, 33, 34, 35, 36, 39 (ADC2 unavailable with WiFi)
 
-# SPI Buses
-#            Host      DMA Channel     MOSI        MISO        SCLK
-ESP32_SPIBUS VSPI_HOST 2               GPIO_NUM_23 GPIO_NUM_19 GPIO_NUM_18
+# LED Configuration - no external LEDs on this DIY board
+define BUILD_DEFAULT_LED_TYPE Notify_LED_None
 
-# SPI Devices
-#            Name                Bus   Device  ChipSel      Mode LoSpeed HiSpeed
-ESP32_SPIDEV mpu9250             0     0       GPIO_NUM_5   0    2*MHZ   2*MHZ
+# Alternative LED configurations (uncomment to use):
+# For boards with external LEDs:
+# define BUILD_DEFAULT_LED_TYPE Notify_LED_WS2812
+# define BUILD_DEFAULT_LED_TYPE Notify_LED_NeoPixel
 
-# i2c Buses
-#             Port       SDA         SCL          SPEED    INTERNAL SOFT
-ESP32_I2CBUS  I2C_NUM_0  GPIO_NUM_21 GPIO_NUM_22  400*KHZ  true     false
+# Storage Configuration - SD Card via SPI
+# Uses HSPI (SPI2) to avoid conflict with MPU9250 on VSPI (SPI3)
+define HAL_ESP32_SDCARD 1
+define HAL_LOGGING_FILESYSTEM_ENABLED 1
+define HAL_LOGGING_DATAFLASH_ENABLED 0  
+define HAL_LOGGING_MAVLINK_ENABLED 0
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
+define HAL_LOGGING_BACKENDS_DEFAULT 1
 
-#-----INS/IMU-----
-IMU Invensense SPI:mpu9250 ROTATION_NONE
-define HAL_INS_DEFAULT                              	HAL_INS_MPU9250_SPI
-define INS_MAX_INSTANCES 3  # only here for binary identicality
+# Storage Configuration Notes:
+# - SD card configured for SPI mode using HSPI host
+# - MMC mode not used to allow flexible pin assignment
+# - Logging backend 1 = filesystem (SD card)
+# - Alternative: set HAL_LOGGING_BACKENDS_DEFAULT 2 for MAVLink logging
 
-#-----COMPASS-----
-COMPASS AK8963:probe_mpu9250 0 ROTATION_NONE
-define ALLOW_ARM_NO_COMPASS				1
+# RMT (Remote Control) receiver input pin
+define HAL_ESP32_RMT_RX_PIN_NUMBER 4
 
-# -----BARO-----
-BARO BMP280 I2C:0:0x76
-define HAL_BARO_ALLOW_INIT_NO_BARO			1
+# Pin Configuration for ESP32-Tomte76 Board
+# Optimized for AliExpress WROOM32 devkit with external sensors
 
-# RCIN
-define HAL_ESP32_RCIN					GPIO_NUM_36
+# I2C Bus Configuration
+# Bus 0: SDA=GPIO21, SCL=GPIO22 (standard ESP32 DevKit pins)
+# Used for BMP280 barometer at address 0x76
+I2C_ORDER I2C0
+I2C0_SDA_PIN 21
+I2C0_SCL_PIN 22
+I2C0_SPEED 400000
+I2C0_INTERNAL 1
 
-#RCOUT
-ESP32_RCOUT GPIO_NUM_25
-ESP32_RCOUT GPIO_NUM_27
-ESP32_RCOUT GPIO_NUM_33
-ESP32_RCOUT GPIO_NUM_32
+# Alternative I2C configurations:
+# For different pin assignments, modify GPIO numbers above
+# Standard DevKit alternatives: SDA(4,5,13), SCL(15,18,19)
 
-# WIFI
-define HAL_ESP32_WIFI					1	# 1-TCP, 2-UDP, comment this line = without wifi
-define WIFI_SSID					"ardupilot123"
-define WIFI_PWD					"ardupilot123"
+# UART Configuration
+# SERIAL0: TX=GPIO1, RX=GPIO3 (USB programming/debug console)
+# SERIAL1: TX=GPIO17, RX=GPIO16 (NEO M8 GPS connection)
+UART_ORDER SERIAL0 SERIAL1
+SERIAL0_TX_PIN 1
+SERIAL0_RX_PIN 3
+SERIAL1_TX_PIN 17
+SERIAL1_RX_PIN 16
 
-# UARTs
-ESP32_SERIAL  UART_NUM_0  GPIO_NUM_3   GPIO_NUM_1
-ESP32_SERIAL  UART_NUM_1  GPIO_NUM_16   GPIO_NUM_17
+# Alternative UART configurations:
+# GPS can be moved to different pins if needed
+# Common ESP32 UART pins: TX(2,4,12,14), RX(13,15,16,17)
 
-# ADC
+# RCOUT Configuration (servo/motor outputs)
+# 4 channels: GPIO25, GPIO27, GPIO33, GPIO32
+RCOUT1_PIN 25
+RCOUT2_PIN 27
+RCOUT3_PIN 33
+RCOUT4_PIN 32
 
-# LED
-define BUILD_DEFAULT_LED_TYPE				Notify_LED_None
+# Alternative RCOUT configurations:
+# For different pin assignments: 2, 4, 12, 13, 14, 15, 16, 17
+# Avoid strapping pins: 0, 2, 5, 12, 15
 
-# RMT pin number
-define HAL_ESP32_RMT_RX_PIN_NUMBER			4
+# RCIN Configuration (receiver input)
+# GPIO36 - input-only pin, good for receiver input
+RCIN_PIN 36
 
-# SD CARD
-#           Host      DMACh MOSI        MISO        SCLK        CS
-ESP32_SDSPI HSPI_HOST 1     GPIO_NUM_13 GPIO_NUM_12 GPIO_NUM_14 GPIO_NUM_15
+# Alternative RCIN configurations:
+# Other input-only pins: 34, 35, 39
+# Regular GPIO pins can also be used: 4, 16, 17
 
-define HAL_ESP32_SDCARD 				1
+# SPI1 Bus - VSPI for MPU9250 IMU
+# Standard VSPI pins for ESP32 DevKit
+SPI1_SCK_PIN 18
+SPI1_MISO_PIN 19
+SPI1_MOSI_PIN 23
+MPU9250_CS_PIN 5
 
-define HAL_LOGGING_FILESYSTEM_ENABLED			1
-define HAL_LOGGING_DATAFLASH_ENABLED			0
-define HAL_LOGGING_MAVLINK_ENABLED			0
+# Alternative SPI1 configurations:
+# CS pin can be any available GPIO: 2, 4, 12, 13, 14, 15, 16, 17
+# VSPI pins are fixed: SCK=18, MISO=19, MOSI=23
 
-define HAL_LOGGING_BACKENDS_DEFAULT			1
+# SD Card SPI Configuration (HSPI/SPI2)
+# Uses HSPI to avoid conflicts with MPU9250 on VSPI
+# DMA channel 1 for high-speed transfers
+SPI2_MOSI_PIN 13
+SPI2_MISO_PIN 12
+SPI2_SCK_PIN 14
+SPI2_CS_PIN 15
+
+# Alternative SD Card SPI configurations:
+# HSPI pins are fixed: MOSI=13, MISO=12, SCK=14
+# CS pin can be any available GPIO
+# For MMC mode instead (faster but fixed pins):
+# Comment out SPI2 lines and uncomment: define HAL_ESP32_SDMMC 1
