@@ -19,29 +19,23 @@ class AP_DroneCAN_DNA_Server
 {
     StorageAccess storage;
 
-    // ESP32 stores full 16-byte UIDs for debugging/diagnostics; fits 62 nodes in 1KB
-    // Other platforms use upstream hash+CRC format; fits 125 nodes in 1KB
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Store full 16-byte unique IDs for lossless node identification.
+    // This uses 16 bytes/node vs the previous 7-byte FNV-1a hash format,
+    // reducing MAX_NODE_ID from 125 to 62 in the 1KB storage area.
+    // 62 nodes is well beyond any practical CAN bus deployment.
     struct PACKED NodeRecord {
-        uint8_t uid[16];  // Full 16-byte unique ID (no hash, no CRC)
+        uint8_t uid[16];
     };
-#else
-    struct NodeRecord {
-        uint8_t uid_hash[6];
-        uint8_t crc;
-    };
-#endif
 
     /*
      * For each node ID (1 through MAX_NODE_ID), the database can have one
      * registration for it. Each registration consists of a NodeRecord which
-     * contains the (hash of the) unique ID reported by that node ID. Other
-     * info could be added to the registration in the future.
+     * contains the unique ID reported by that node ID.
      *
      * Physically, the database is stored as a header and format version,
      * followed by an array of NodeRecords indexed by node ID. If a particular
-     * NodeRecord has an all-zero unique ID hash or an invalid CRC, then that
-     * node ID isn't considerd to have a registration.
+     * NodeRecord has an all-zero unique ID, then that node ID isn't
+     * considered to have a registration.
      *
      * The database has public methods which handle the server behavior for the
      * relevant message. The methods can be used by multiple servers in
@@ -74,11 +68,6 @@ class AP_DroneCAN_DNA_Server
     private:
         // retrieve node ID that matches the given unique ID. returns 0 if not found
         uint8_t find_node_id(const uint8_t unique_id[], uint8_t size);
-
-#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
-        // fill the given record with the hash of the given unique ID (upstream format)
-        void compute_uid_hash(NodeRecord &record, const uint8_t unique_id[], uint8_t size) const;
-#endif
 
         // register a given unique ID to a given node ID, deleting any existing registration for the unique ID
         void register_uid(uint8_t node_id, const uint8_t unique_id[], uint8_t size);
