@@ -327,11 +327,7 @@ bool AP_DroneCAN::add_interface(AP_HAL::CANIface* can_iface)
 
 void AP_DroneCAN::init(uint8_t driver_index)
 {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    hal.console->printf("\n=======================================\n");
-    hal.console->printf("DroneCAN::init STARTING! driver_index=%d\n", driver_index);
-    hal.console->printf("=======================================\n");
-#endif
+    debug_dronecan(AP_CANManager::LOG_INFO, "DroneCAN: init starting, driver_index=%d", driver_index);
     if (driver_index != _driver_index) {
         debug_dronecan(AP_CANManager::LOG_ERROR, "DroneCAN: init called with wrong driver_index");
         return;
@@ -376,22 +372,11 @@ void AP_DroneCAN::init(uint8_t driver_index)
     memcpy(node_info_rsp.hardware_version.unique_id, unique_id, uid_len);
 
     //Start Servers
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DRONECAN", "About to init DNA server, pool_size=%u", (unsigned)_pool_size);
-    hal.console->printf("DroneCAN: About to init DNA server, pool_size=%u\n", (unsigned)_pool_size);
-#endif
+    debug_dronecan(AP_CANManager::LOG_DEBUG, "DroneCAN: init DNA server, pool_size=%u", (unsigned)_pool_size);
     if (!_dna_server.init(unique_id, uid_len, node)) {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        ESP_LOGE("DRONECAN", "FAILED to start DNA Server");
-        hal.console->printf("DroneCAN: FAILED to start DNA Server\n");
-#endif
-        debug_dronecan(AP_CANManager::LOG_ERROR, "DroneCAN: Failed to start DNA Server\n\r");
+        debug_dronecan(AP_CANManager::LOG_ERROR, "DroneCAN: Failed to start DNA Server");
         return;
     }
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("DRONECAN", "DNA Server started successfully");
-    hal.console->printf("DroneCAN: DNA Server started successfully\n");
-#endif
 
     // Roundup all subscribers from supported drivers
     bool subscribed = true;
@@ -890,17 +875,6 @@ void AP_DroneCAN::SRV_send_himark(void)
 
 void AP_DroneCAN::SRV_send_esc(void)
 {
-#if 0  // Temporarily disabled for debugging node allocation
-    static uint32_t esc_send_call_count = 0;
-    static uint32_t last_esc_log_ms = 0;
-    esc_send_call_count++;
-    uint32_t now_ms = AP_HAL::millis();
-    if (now_ms - last_esc_log_ms >= 60000) {  // Log every 60 seconds for reduced spam
-        printf("DroneCAN: SRV_send_esc() called %lu times in last minute\n", (unsigned long)esc_send_call_count);
-        esc_send_call_count = 0;
-        last_esc_log_ms = now_ms;
-    }
-#endif
 
     uavcan_equipment_esc_RawCommand esc_msg;
 
@@ -1014,18 +988,6 @@ void AP_DroneCAN::SRV_push_servos()
 {
     WITH_SEMAPHORE(SRV_sem);
     
-#if 0  // Temporarily disabled for debugging node allocation
-    static uint32_t push_count = 0;
-    static uint32_t last_log_ms = 0;
-    push_count++;
-    uint32_t now_ms = AP_HAL::millis();
-    if (now_ms - last_log_ms >= 60000) {  // Log every 60 seconds
-        printf("DroneCAN: SRV_push_servos() called %lu times in last minute\n", push_count);
-        push_count = 0;
-        last_log_ms = now_ms;
-    }
-#endif
-
     uint32_t non_zero_channels = 0;
     for (uint8_t i = 0; i < DRONECAN_SRV_NUMBER; i++) {
         // Check if this channels has any function assigned
@@ -2091,43 +2053,13 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
 {
     WITH_SEMAPHORE(_param_sem);
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Debug: Log callback entry and response details
-    hal.console->printf("PARAM_HANDLER: Callback invoked for node %d\n", transfer.source_node_id);
-    hal.console->printf("PARAM_HANDLER:   Response name='%.*s'\n",
-                       rsp.name.len, rsp.name.data);
-    hal.console->printf("PARAM_HANDLER:   Response type=%d (0=EMPTY, 1=INT, 2=FLOAT, 3=BOOL, 4=STRING)\n",
-                       rsp.value.union_tag);
-    if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
-        hal.console->printf("PARAM_HANDLER:   Float value=%f\n", rsp.value.real_value);
-    } else if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
-        hal.console->printf("PARAM_HANDLER:   Int value=%d\n", (int)rsp.value.integer_value);
-    } else if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
-        hal.console->printf("PARAM_HANDLER:   Bool value=%s\n", rsp.value.boolean_value ? "true" : "false");
-    }
-    hal.console->printf("PARAM_HANDLER:   Registered callbacks: int=%s, float=%s, string=%s, generic=%s\n",
-                       param_int_cb ? "YES" : "NO",
-                       param_float_cb ? "YES" : "NO",
-                       param_string_cb ? "YES" : "NO",
-                       param_generic_cb ? "YES" : "NO");
-
-    // Dump raw transfer payload for debugging decode issues
-    hal.console->printf("PARAM_HANDLER:   Raw payload (%d bytes):", transfer.payload_len);
-    const uint8_t* payload = (const uint8_t*)transfer.payload_head;
-    for (int i = 0; i < transfer.payload_len && i < 64; i++) {
-        if (i % 16 == 0) hal.console->printf("\n    ");
-        hal.console->printf("%02X ", payload[i]);
-    }
-    hal.console->printf("\n");
-#endif
+    debug_dronecan(AP_CANManager::LOG_DEBUG, "param response node=%d name='%.*s' type=%d",
+                   transfer.source_node_id, rsp.name.len, rsp.name.data, rsp.value.union_tag);
 
     if (!param_int_cb &&
         !param_float_cb &&
         !param_string_cb &&
         !param_generic_cb) {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        hal.console->printf("PARAM_HANDLER: ERROR - No callbacks registered, returning early\n");
-#endif
         return;
     }
 
@@ -2145,9 +2077,6 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
     // Check for EMPTY response (end of parameter list)
     // Per UAVCAN spec: when index is beyond valid range, response has union_tag=EMPTY and name.len=0
     if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY) {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        hal.console->printf("PARAM_HANDLER: EMPTY response received (end of parameters)\n");
-#endif
         // Call whichever callback is registered with empty name as signal to stop enumeration
         // Enumeration callbacks will detect empty name and stop immediately (no 30s timeout)
         if (param_int_cb) {
@@ -2171,10 +2100,7 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
     // Check for protocol violation: typed value with empty name
     // Per UAVCAN spec: typed responses MUST have a name
     if (rsp.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY && rsp.name.len == 0) {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        hal.console->printf("PARAM_HANDLER: ERROR - Protocol violation! Typed response (type=%d) with empty name\n",
-                           rsp.value.union_tag);
-#endif
+        debug_dronecan(AP_CANManager::LOG_WARNING, "param protocol violation: type=%d with empty name", rsp.value.union_tag);
         // Treat as type mismatch - clear callbacks and let retry logic try next type
         param_request_sent_ms = 0;
         param_int_cb = nullptr;
@@ -2190,21 +2116,12 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
         int32_t val;
         if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
             val = rsp.value.boolean_value ? 1 : 0;
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            hal.console->printf("PARAM_HANDLER: Matched BOOLEAN type (converted to int=%ld), calling int_cb\n", (long)val);
-#endif
         } else {
             val = rsp.value.integer_value;
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            hal.console->printf("PARAM_HANDLER: Matched INTEGER type, calling int_cb\n");
-#endif
         }
 
         if ((*param_int_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val)) {
             // we want the parameter to be set with val
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            hal.console->printf("PARAM_HANDLER: int_cb returned TRUE, queuing SET request\n");
-#endif
             param_getset_req.index = 0;
             memcpy(param_getset_req.name.data, rsp.name.data, rsp.name.len);
             // Preserve the original type when setting back
@@ -2220,36 +2137,10 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
             param_request_node_id = transfer.source_node_id;
             return;
         }
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        hal.console->printf("PARAM_HANDLER: int_cb returned FALSE, continuing to cleanup\n");
-#endif
     } else if ((rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) && param_float_cb) {
         float val = rsp.value.real_value;
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        hal.console->printf("PARAM_HANDLER: Matched FLOAT type, calling float_cb (ptr=%p)\n", (void*)param_float_cb);
-        // Safety check for corrupted function pointer
-        // ESP32-S3 valid code ranges: 0x40370000-0x403E0000 (IRAM), 0x42000000-0x44000000 (flash cache)
-        // ESP32-S3 valid data ranges: 0x3FC00000-0x3FF00000 (DRAM - vtables/functors can be here)
-        {
-            uintptr_t ptr = (uintptr_t)param_float_cb;
-            bool valid_iram = (ptr >= 0x40370000 && ptr <= 0x403E0000);
-            bool valid_flash = (ptr >= 0x42000000 && ptr <= 0x44000000);
-            bool valid_dram = (ptr >= 0x3FC00000 && ptr <= 0x3FF00000);
-            if (!valid_iram && !valid_flash && !valid_dram) {
-                hal.console->printf("PARAM_HANDLER: ERROR - Corrupted float_cb pointer %p! Clearing callbacks.\n", (void*)param_float_cb);
-                param_request_sent_ms = 0;
-                param_int_cb = nullptr;
-                param_float_cb = nullptr;
-                param_string_cb = nullptr;
-                return;
-            }
-        }
-#endif
         if ((*param_float_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val)) {
             // we want the parameter to be set with val
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            hal.console->printf("PARAM_HANDLER: float_cb returned TRUE, queuing SET request\n");
-#endif
             param_getset_req.index = 0;
             memcpy(param_getset_req.name.data, rsp.name.data, rsp.name.len);
             param_getset_req.value.real_value = val;
@@ -2259,20 +2150,11 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
             param_request_node_id = transfer.source_node_id;
             return;
         }
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        hal.console->printf("PARAM_HANDLER: float_cb returned FALSE, continuing to cleanup\n");
-#endif
     } else if ((rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_STRING_VALUE) && param_string_cb) {
         string val;
         memcpy(&val, &rsp.value.string_value, sizeof(val));
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        hal.console->printf("PARAM_HANDLER: Matched STRING type, calling string_cb\n");
-#endif
         if ((*param_string_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val)) {
             // we want the parameter to be set with val
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            hal.console->printf("PARAM_HANDLER: string_cb returned TRUE, queuing SET request\n");
-#endif
             param_getset_req.index = 0;
             memcpy(param_getset_req.name.data, rsp.name.data, rsp.name.len);
             memcpy(&param_getset_req.value.string_value, &val, sizeof(val));
@@ -2282,9 +2164,6 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
             param_request_node_id = transfer.source_node_id;
             return;
         }
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-        hal.console->printf("PARAM_HANDLER: string_cb returned FALSE, continuing to cleanup\n");
-#endif
     } else if (param_float_cb || param_int_cb) {
         // Type mismatch fallback: response type doesn't match the registered callback.
         // This happens when e.g. a float callback was registered but the node returned
@@ -2310,17 +2189,11 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
             }
             (*param_int_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val);
         }
+    } else {
+        debug_dronecan(AP_CANManager::LOG_WARNING, "param type=%d unhandled for node %d",
+                       rsp.value.union_tag, transfer.source_node_id);
     }
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    else {
-        hal.console->printf("PARAM_HANDLER: NO TYPE MATCH! Response type=%d doesn't match any registered callback\n",
-                           rsp.value.union_tag);
-    }
-#endif
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    hal.console->printf("PARAM_HANDLER: Clearing callbacks and completing request\n");
-#endif
     param_request_sent_ms = 0;
     param_int_cb = nullptr;
     param_float_cb = nullptr;
@@ -2393,9 +2266,7 @@ void AP_DroneCAN::begin_actuator_enumeration()
     for (uint8_t node_id = 1; node_id <= 127; node_id++) {
         if (_dna_server.is_node_seen(node_id)) {
             enumeration_begin_client.request(node_id, request);
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-            hal.console->printf("DroneCAN: Sent enumeration Begin to node %u\n", node_id);
-#endif
+            debug_dronecan(AP_CANManager::LOG_DEBUG, "Sent enumeration Begin to node %u", node_id);
         }
     }
 }
@@ -2405,10 +2276,8 @@ void AP_DroneCAN::begin_actuator_enumeration()
  */
 void AP_DroneCAN::handle_enumeration_begin_response(const CanardRxTransfer& transfer, const uavcan_protocol_enumeration_BeginResponse& msg)
 {
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    hal.console->printf("DroneCAN: Enumeration Begin response from node %u: error=%u\n",
-                       transfer.source_node_id, msg.error);
-#endif
+    debug_dronecan(AP_CANManager::LOG_DEBUG, "Enumeration response node=%u error=%u",
+                   transfer.source_node_id, msg.error);
 
     // Report status to GCS
     if (msg.error == UAVCAN_PROTOCOL_ENUMERATION_BEGIN_RESPONSE_ERROR_OK) {

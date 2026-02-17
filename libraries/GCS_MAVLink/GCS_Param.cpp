@@ -27,7 +27,8 @@
 
 #if AP_DRONECAN_PARAM_EXT_ENABLED
 #include <AP_DroneCAN/AP_DroneCAN.h>
-#include <AP_CANManager/AP_CANManager_config.h>
+#include <AP_CANManager/AP_CANManager.h>
+#define debug_param_ext(level_debug, fmt, args...) do { AP::can().log_text(level_debug, "ParamExt", fmt, ##args); } while (0)
 #endif
 
 extern const AP_HAL::HAL& hal;
@@ -731,13 +732,12 @@ void GCS_MAVLINK::handle_param_ext_request_list(const mavlink_message_t &msg)
     mavlink_param_ext_request_list_t packet;
     mavlink_msg_param_ext_request_list_decode(&msg, &packet);
 
-    hal.console->printf("GCS: PARAM_EXT_REQUEST_LIST for component %d\n", packet.target_component);
+    debug_param_ext(AP_CANManager::LOG_DEBUG, "PARAM_EXT_REQUEST_LIST for component %d", packet.target_component);
 
     // Per MAVLink UAVCAN spec: Component ID = Node ID (1:1 mapping)
     // Valid DroneCAN node IDs are 1-127
     if (packet.target_component < 1 || packet.target_component > 127) {
         // Not a valid DroneCAN node ID
-        hal.console->printf("GCS: Invalid component ID %d (must be 1-127)\n", packet.target_component);
         return;
     }
 
@@ -760,7 +760,7 @@ void GCS_MAVLINK::handle_param_ext_request_list(const mavlink_message_t &msg)
 
     if (ap_dronecan == nullptr) {
         // Node not found on any interface - not seen at all (no NodeStatus messages)
-        hal.console->printf("GCS: Node %d NOT SEEN - rejecting PARAM_EXT request\n", node_id);
+        debug_param_ext(AP_CANManager::LOG_DEBUG, "node %d not seen on any CAN interface", node_id);
         send_param_ext_ack("", "", MAV_PARAM_EXT_TYPE_REAL32, PARAM_ACK_FAILED, node_id);
         return;
     }
@@ -768,8 +768,7 @@ void GCS_MAVLINK::handle_param_ext_request_list(const mavlink_message_t &msg)
     // Node is seen - log its status
     // Note: Nodes in INITIALIZATION mode (mode=1) can still respond to parameter requests
     // so we allow enumeration for all seen nodes regardless of mode/health
-    hal.console->printf("GCS: Node %d SEEN on CAN%d - starting parameter enumeration\n",
-                       node_id, can_driver_index);
+    debug_param_ext(AP_CANManager::LOG_DEBUG, "node %d on CAN%d, starting enumeration", node_id, can_driver_index);
 
     // Start parameter enumeration
     start_param_enumeration(chan, can_driver_index, node_id);
@@ -783,7 +782,7 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
     char param_id[17];
     memcpy(param_id, packet.param_id, 16);
     param_id[16] = '\0';
-    hal.console->printf("GCS: PARAM_EXT_REQUEST_READ node=%d param='%s'\n", packet.target_component, param_id);
+    debug_param_ext(AP_CANManager::LOG_DEBUG, "PARAM_EXT_REQUEST_READ node=%d param='%s'", packet.target_component, param_id);
 
     // Per MAVLink UAVCAN spec: Component ID = Node ID (1:1 mapping)
     // Valid DroneCAN node IDs are 1-127

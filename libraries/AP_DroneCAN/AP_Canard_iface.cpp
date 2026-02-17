@@ -10,10 +10,6 @@
 #include "esp_log.h"
 #include <stdio.h>
 #include <string.h>
-// Include for manual LogMessage decode check
-extern "C" {
-#include <uavcan.protocol.debug.LogMessage.h>
-}
 #endif
 extern const AP_HAL::HAL& hal;
 #define LOG_TAG "DroneCANIface"
@@ -24,6 +20,8 @@ extern const AP_HAL::HAL& hal;
 static_assert(sizeof(CanardCANFrame) >= sizeof(uint32_t) + CANARD_CAN_FRAME_MAX_DATA_LEN + 2,
     "CanardCANFrame smaller than expected");
 #include <AP_CANManager/AP_CANSensor.h>
+
+#define debug_dronecan(level_debug, fmt, args...) do { AP::can().log_text(level_debug, "DroneCAN", fmt, ##args); } while (0)
 
 #define DEBUG_PKTS 0
 
@@ -81,10 +79,7 @@ void CanardInterface::init(void* mem_arena, size_t mem_arena_size, uint8_t node_
     canardSetLocalNodeID(&canard, node_id);
     initialized = true;
     
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    ESP_LOGI("CAN_RX", "CanardInterface initialized with node_id=%d - CAN_RX logging is ENABLED", node_id);
-    hal.console->printf("ESP32: CanardInterface init - CAN_RX logging enabled (you should see ESP_LOGE above)\n");
-#endif
+    debug_dronecan(AP_CANManager::LOG_DEBUG, "CanardInterface init, node_id=%d", node_id);
 }
 
 bool CanardInterface::broadcast(const Canard::Transfer &bcast_transfer) {
@@ -173,13 +168,7 @@ bool CanardInterface::broadcast(const Canard::Transfer &bcast_transfer) {
     // Debug logging removed to reduce spam
     // ESP_LOGD("CANARD", "Allocation deadline: now=%llu, deadline=%llu", now, deadline);
 #endif
-    // Debug what DroneCAN thinks it's sending (only at verbose debug level)
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && 0  // Disabled - too verbose, enable only for debugging broadcast issues
-    hal.console->printf("DRONECAN: Broadcasting: DataTypeID=%u, Priority=%u, PayloadLen=%u, TransferID=%u\n", 
-                        (unsigned)bcast_transfer.data_type_id, (unsigned)bcast_transfer.priority, 
-                        (unsigned)bcast_transfer.payload_len, (unsigned)*bcast_transfer.inout_transfer_id);
-#endif
-    
+
     // do canard broadcast
     int16_t ret = canardBroadcastObj(&canard, &tx_transfer);
 #if AP_TEST_DRONECAN_DRIVERS
@@ -229,13 +218,6 @@ bool CanardInterface::request(uint8_t destination_node_id, const Canard::Transfe
         .iface_mask = uint8_t((1<<num_ifaces) - 1),
 #endif
     };
-    // Debug what DroneCAN thinks it's requesting (only at verbose debug level)
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && 0  // Disabled - too verbose, enable only for debugging service issues
-    hal.console->printf("DRONECAN: Service Request: DataTypeID=%u, Priority=%u, TransferType=%u, Dest=%u, Source=%u\n", 
-                        (unsigned)req_transfer.data_type_id, (unsigned)req_transfer.priority, 
-                        (unsigned)req_transfer.transfer_type, destination_node_id, canard.node_id);
-#endif
-    
     // do canard request
     int16_t ret = canardRequestOrRespondObj(&canard, destination_node_id, &tx_transfer);
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
@@ -301,123 +283,7 @@ bool CanardInterface::respond(uint8_t destination_node_id, const Canard::Transfe
 
 void CanardInterface::onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer) {
     CanardInterface* iface = (CanardInterface*) ins->user_reference;
-    
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Debug for allocation messages (only for broadcast messages with ID 1, not service responses)
-    if (transfer->data_type_id == 1 && transfer->transfer_type == CanardTransferTypeBroadcast) {
-        if (transfer->source_node_id == 0) {
-            hal.console->printf("DNA: onTransferReception got Allocation message from anonymous node (node_id=0, pre-allocation)\n");
-        } else {
-            hal.console->printf("DNA: onTransferReception got Allocation message from node %d\n",
-                               transfer->source_node_id);
-        }
-    }
-#endif
-    
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Debug GetNodeInfo responses (changed to INFO level for better visibility)
-    if (transfer->transfer_type == CanardTransferTypeResponse && transfer->data_type_id == 1) {
-        ESP_LOGD("CAN_RX", "GetNodeInfo RESPONSE received in onTransferReception from node %d, payload len=%d",
-                 transfer->source_node_id, transfer->payload_len);
-        ESP_LOGD("CAN_RX", "  About to dispatch to handlers...");
-    }
-#endif
-    
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    // Track all DroneCAN message reception
-    static uint32_t dronecan_msg_count = 0;
-    static uint32_t logmsg_count = 0;
-    static uint32_t last_report_ms = 0;
-    static bool first_can_rx = true;
-    
-    dronecan_msg_count++;
-    
-    // Verify ESP-IDF logging is working on first message
-    if (first_can_rx) {
-        ESP_LOGE("CAN_RX", "CAN_RX logging test - you should see this ERROR level message!");
-        hal.console->printf("ESP32: If you see this printf but not the ESP_LOGE above, ESP-IDF CAN_RX logging is broken\n");
-        first_can_rx = false;
-    }
-    
-    // Log LogMessage transfers at DEBUG level (only visible when debugging)
-    if (transfer->data_type_id == 16383) { // uavcan.protocol.debug.LogMessage
-        logmsg_count++;
-
-        // Special logging for Node 2 LogMessages (phantom node)
-        if (transfer->source_node_id == 2) {
-            ESP_LOGW("CAN_RX", "=== LogMessage from PHANTOM NODE 2 ===");
-            ESP_LOGW("CAN_RX", "This should be from your real node but has corrupted source ID!");
-        }
-
-        ESP_LOGD("CAN_RX", "LogMessage RX: src_node=%d, len=%d",
-                 transfer->source_node_id, transfer->payload_len);
-        
-        // Only log payload in verbose debug mode
-        #ifdef DEBUG_BUILD
-        if (transfer->payload_len > 0) {
-            char hex_buf[97] = {0}; // 32 bytes * 3 chars per byte + null
-            int bytes_to_log = transfer->payload_len > 32 ? 32 : transfer->payload_len;
-            for (int i = 0; i < bytes_to_log; i++) {
-                snprintf(&hex_buf[i*3], 4, "%02X ", ((uint8_t*)transfer->payload_head)[i]);
-            }
-            ESP_LOGD("CAN_RX", "  Payload preview: %s%s", hex_buf, 
-                     transfer->payload_len > 32 ? "..." : "");
-        }
-        #endif
-        
-        // Try to decode it manually to check for errors
-        struct uavcan_protocol_debug_LogMessage test_msg;
-        bool decode_result = uavcan_protocol_debug_LogMessage_decode(transfer, &test_msg);
-        if (!decode_result) {  // Fixed logic - decode_result is false on failure
-            ESP_LOGE("CAN_RX", "ERROR: Failed to decode LogMessage from node %d! Payload len=%d",
-                     transfer->source_node_id, transfer->payload_len);
-            // Log full payload for analysis
-            ESP_LOGE("CAN_RX", "  Full payload dump:");
-            for (int i = 0; i < transfer->payload_len; i += 16) {
-                char line_buf[49] = {0}; // 16 bytes * 3 chars + null
-                int bytes_in_line = (transfer->payload_len - i) > 16 ? 16 : (transfer->payload_len - i);
-                for (int j = 0; j < bytes_in_line; j++) {
-                    snprintf(&line_buf[j*3], 4, "%02X ", ((uint8_t*)transfer->payload_head)[i+j]);
-                }
-                ESP_LOGE("CAN_RX", "    [%03d-%03d]: %s", i, i+bytes_in_line-1, line_buf);
-            }
-        } else {
-            ESP_LOGW("CAN_RX", "  LogMessage decoded OK: level=%d, text='%.40s%s'", 
-                     test_msg.level.value, test_msg.text.data,
-                     strlen((char*)test_msg.text.data) > 40 ? "..." : "");
-        }
-    }
-    
-    // Report statistics every 5 seconds (use ESP_LOGD for debug-level logging only)
-    uint32_t now_ms = AP_HAL::millis();
-    if (now_ms - last_report_ms > 5000) {
-        ESP_LOGD("CAN_RX", "DroneCAN stats: %lu total msgs, %lu LogMessages in last 5s",
-                 dronecan_msg_count, logmsg_count);
-        // Only print to console if we have LogMessages (indicating potential issues)
-        if (logmsg_count > 0) {
-            hal.console->printf("ESP32 CAN_RX: DroneCAN received %lu msgs (%lu LogMessages) in 5s\n",
-                               dronecan_msg_count, logmsg_count);
-        }
-        dronecan_msg_count = 0;
-        logmsg_count = 0;
-        last_report_ms = now_ms;
-    }
-#endif
-    
-    // Debug dispatch for GetNodeInfo responses - reduced to DEBUG level
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    if (transfer->transfer_type == CanardTransferTypeResponse && transfer->data_type_id == 1) {
-        ESP_LOGD("CAN_RX", "  Calling iface->handle_message for GetNodeInfo response from node %d...", transfer->source_node_id);
-    }
-#endif
-
     iface->handle_message(*transfer);
-
-#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
-    if (transfer->transfer_type == CanardTransferTypeResponse && transfer->data_type_id == 1) {
-        ESP_LOGD("CAN_RX", "  Returned from iface->handle_message for node %d", transfer->source_node_id);
-    }
-#endif
 }
 
 bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
@@ -430,31 +296,6 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     static uint32_t reject_count = 0;
     static uint32_t last_debug = 0;
-#endif
-    
-    // Debug logging for all important message types (disabled - DNA issues resolved)
-#if 0  // Disable verbose shouldAccept logging - DNA issues resolved
-    bool is_important = (data_type_id == 1) || // Allocation/GetNodeInfo
-                        (data_type_id == 341) || // NodeStatus
-                        (data_type_id == 551); // Legacy GetNodeInfo
-
-    if (is_important) {
-        const char* msg_type = "UNKNOWN";
-        if (data_type_id == 1) {
-            if (source_node_id == 0) {
-                msg_type = "DNA";  // Only actual allocation from node 0
-            } else {
-                msg_type = "GETNODEINFO";  // GetNodeInfo from assigned nodes
-            }
-        } else if (data_type_id == 341) {
-            msg_type = "NODESTATUS";
-        } else if (data_type_id == 551) {
-            msg_type = "LEGACY_GETNODEINFO";
-        }
-
-        hal.console->printf("%s: shouldAccept dtid=%d from node %d, xfer_type=%d\n",
-                           msg_type, data_type_id, source_node_id, transfer_type);
-    }
 #endif
     
     bool accepted = iface->accept_message(data_type_id, transfer_type, *out_data_type_signature);
@@ -530,13 +371,6 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
         ESP_LOGD("CAN_RX", "shouldAccept stats: %d messages rejected in last 10s", reject_count);
         reject_count = 0;
         last_debug = now;
-    }
-#endif
-    
-#if 0  // Also disabled - too verbose
-    if (is_important) {
-        hal.console->printf("DNA: dtid=%d accepted=%d, signature=%llx\n", 
-                           data_type_id, accepted, (unsigned long long)*out_data_type_signature);
     }
 #endif
     
