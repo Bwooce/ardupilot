@@ -12,6 +12,7 @@ set(AP_COMPONENTS
     freertos fatfs spiffs nvs_flash esptool_py app_update esp_adc
     driver  # Monolithic in IDF 5.4, shim in 5.5+
     lwip esp_wifi esp_netif esp_system esp_rom esp_timer esp_psram espcoredump
+    efuse
 )
 
 # IDF 5.5+ split driver into individual esp_driver_* components
@@ -110,7 +111,7 @@ set(AP_LINK_LIBS
     idf::freertos idf::fatfs idf::spiffs idf::nvs_flash idf::spi_flash
     idf::app_update idf::esp_adc
     idf::driver idf::lwip idf::esp_wifi idf::esp_netif idf::esp_system idf::esp_rom
-    idf::esp_timer idf::esp_psram idf::espcoredump
+    idf::esp_timer idf::esp_psram idf::espcoredump idf::efuse
 )
 
 # IDF 5.5+ individual driver components (detected at configure time)

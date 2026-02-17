@@ -1,42 +1,76 @@
-# Additional debug configuration for ESP32-S3 with stack protection
+# Additional debug configuration for ESP32-S3
 # This file supplements sdkconfig.defaults when building with --debug
+# Compatible with ESP-IDF 5.5+ and 6.0+
 
-# Enable compiler stack protection (GCC -fstack-protector-strong)
-CONFIG_COMPILER_STACK_CHECK_MODE_STRONG=y
-
-# Enable FreeRTOS stack overflow detection using canary bytes
-CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
-
-# Enable hardware watchpoint for stack overflow detection
-CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
-
-# Enable heap poisoning to detect use-after-free and buffer overflows
+# -- Heap debugging --
+# Comprehensive poisoning: fills freed blocks with a pattern, catches writes to freed
+# memory AND buffer overflows. Overrides the light poisoning in sdkconfig.defaults.
 CONFIG_HEAP_POISONING_COMPREHENSIVE=y
+# Abort immediately on allocation failure (get a backtrace instead of silent NULL)
+CONFIG_HEAP_ABORT_WHEN_ALLOCATION_FAILS=y
+# Track which deleted tasks still have allocations (leak detection)
+CONFIG_HEAP_TRACK_DELETED_TASKS=y
 
-# Note: HEAP_CORRUPTION_DETECTION removed in ESP-IDF 5.x
-# Use heap poisoning instead for memory corruption detection
-
-# Note: FREERTOS_ASSERT options changed in ESP-IDF 5.x
-# Assertions are now controlled by CONFIG_FREERTOS_ASSERT_DISABLE
-
-# Enable memory debugging features
-CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=n
-CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
-
-# Hardware stack guard (ESP32-S3 specific)
+# -- Stack overflow detection (multiple layers) --
+# Canary bytes at stack end, checked on context switch
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+# Hardware watchpoint on last 32 bytes of stack -- catches overflow in real-time
+# between context switches. Costs 1 HW watchpoint + ~60 bytes usable stack per task.
+CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
+# Hardware stack guard (ESP32-S3 specific) -- triggers panic when SP leaves stack
 CONFIG_ESP_SYSTEM_HW_STACK_GUARD=y
 
-# Task watchdog configuration (ESP-IDF 5.x syntax)
+# -- Compiler stack protection --
+# -fstack-protector-strong: protects functions with arrays or frame address refs
+CONFIG_COMPILER_STACK_CHECK_MODE_STRONG=y
+
+# -- FreeRTOS integrity checks --
+# Adds check bytes to FreeRTOS internal linked lists; detects list corruption from
+# wild pointer writes. Moderate overhead.
+CONFIG_FREERTOS_USE_LIST_DATA_INTEGRITY_CHECK_BYTES=y
+# Assert that mutexes are released by their owning task
+CONFIG_FREERTOS_CHECK_MUTEX_GIVEN_BY_OWNER=y
+# Assert that critical section APIs are called from the correct context (ISR vs task)
+CONFIG_FREERTOS_CHECK_PORT_CRITICAL_COMPLIANCE=y
+
+# -- Task watchdog --
+# Enable and auto-initialize at startup
+CONFIG_ESP_TASK_WDT_EN=y
 CONFIG_ESP_TASK_WDT_INIT=y
+# Panic on watchdog timeout (get a core dump instead of just a log message)
+CONFIG_ESP_TASK_WDT_PANIC=y
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
 
-# Additional runtime checks
+# -- Interrupt watchdog --
+# Detects if the tick interrupt stops firing (priority inversion, deadlock)
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=800
+
+# -- Panic handler --
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+# Delay 3s before reboot so crash output can be read
+CONFIG_ESP_SYSTEM_PANIC_REBOOT_DELAY_SECONDS=3
+
+# -- Core dump enhancements --
+# Use a dedicated stack for the core dump handler so it works even when the
+# crashed task's stack is corrupted
+CONFIG_ESP_COREDUMP_STACK_SIZE=1792
+
+# -- Assertions --
+# Full assertions with file/line info
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
+
+# -- Hardware debug support --
+# Record last PC value for post-mortem analysis
+CONFIG_ESP_SYSTEM_HW_PC_RECORD=y
+# Panic handlers detect JTAG and break into debugger
+CONFIG_ESP_DEBUG_OCDAWARE=y
+
+# -- Runtime checks --
+# Interrupt level 4 check
 CONFIG_ESP_SYSTEM_CHECK_INT_LEVEL_4=y
 
-# Panic handler in IRAM -- disabled to save IRAM (not needed for ESP32-S3 with SPI flash auto-suspend)
-# CONFIG_ESP_PANIC_HANDLER_IRAM is not set
-
-# Enable undefined behavior sanitizer (if available in toolchain)
-# CONFIG_COMPILER_WARN_WRITE_STRINGS=y
+# -- Frame pointer for backtraces --
+CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
