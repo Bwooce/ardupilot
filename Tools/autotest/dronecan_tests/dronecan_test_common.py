@@ -9,7 +9,6 @@ Requires: MAVLINK20=1 environment variable for MAVLink2 message support.
 """
 
 import os
-import sys
 import time
 
 # Ensure MAVLink2 is enabled

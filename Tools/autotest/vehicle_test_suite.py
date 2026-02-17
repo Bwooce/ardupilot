@@ -5397,6 +5397,130 @@ class TestSuite(abc.ABC):
         self.progress("PARAM_EXT_REQUEST_LIST validated: %d params with sequential indices" % len(params))
         self.context_pop()
 
+    def DroneCAN_DNAPersistence(self):
+        '''test that DroneCAN DNA allocation persists across autopilot reboot'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        # Collect NODE_STATUS during reboot so we catch the first broadcast
+        self.context_collect('UAVCAN_NODE_STATUS')
+        self.reboot_sitl()
+
+        # Phase 1: Get initial node_id from DNA allocation
+        node_id_1 = self.wait_dronecan_node(timeout=60)
+        self.progress("Initial DNA allocation: node_id=%d" % node_id_1)
+
+        # Verify node_id is in valid range (1-127)
+        if node_id_1 < 1 or node_id_1 > 127:
+            raise NotAchievedException("Invalid node_id %d (expected 1-127)" % node_id_1)
+
+        # Verify NODE_STATUS arrives with matching source component
+        m = self.assert_receive_message('UAVCAN_NODE_STATUS', timeout=10,
+                                        check_context=True)
+        status_node = m.get_srcComponent()
+        if status_node != node_id_1:
+            raise NotAchievedException(
+                "NODE_STATUS srcComponent=%d != allocated node_id=%d" %
+                (status_node, node_id_1))
+        self.progress("NODE_STATUS srcComponent matches allocated node_id")
+        self.context_stop_collecting('UAVCAN_NODE_STATUS')
+
+        # Phase 2: Reboot autopilot (preserves DNA database), verify same node_id
+        self.progress("Rebooting SITL to test DNA database persistence")
+        self.reboot_sitl()
+
+        node_id_2 = self.wait_dronecan_node(timeout=60)
+        self.progress("Post-reboot DNA allocation: node_id=%d" % node_id_2)
+
+        if node_id_2 != node_id_1:
+            raise NotAchievedException(
+                "DNA not persistent: first=%d, after reboot=%d" %
+                (node_id_1, node_id_2))
+
+        self.progress("DNA persistence validated: node_id=%d stable across reboot" % node_id_1)
+        self.context_pop()
+
+    def DroneCAN_ParamExtInvalidNode(self):
+        '''test PARAM_EXT to non-existent node returns no response'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        # Wait for real node so CAN bus is active
+        self.wait_dronecan_node(timeout=60)
+        self.delay_sim_time(5)
+
+        # Send PARAM_EXT_REQUEST_READ to non-existent node (node_id=99)
+        fake_node = 99
+        param_id = "GPS1_TYPE".ljust(16, '\x00')
+        self.progress("Sending PARAM_EXT_REQUEST_READ to non-existent node %d" % fake_node)
+        self.mav.mav.param_ext_request_read_send(
+            self.sysid_thismav(),
+            fake_node,
+            param_id.encode('utf-8'),
+            -1
+        )
+
+        # Should get no response (3 second timeout is generous)
+        m = self.mav.recv_match(type='PARAM_EXT_VALUE', blocking=True, timeout=3)
+        if m is not None:
+            got_comp = m.get_srcComponent()
+            if got_comp == fake_node:
+                raise NotAchievedException(
+                    "Got PARAM_EXT_VALUE from non-existent node %d" % fake_node)
+            self.progress("Got PARAM_EXT_VALUE from node %d (not %d) -- OK, ignoring" %
+                          (got_comp, fake_node))
+
+        self.progress("No response from non-existent node %d -- correct" % fake_node)
+        self.context_pop()
+
+    def DroneCAN_ParamExtInvalidParam(self):
+        '''test PARAM_EXT read of nonexistent parameter'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        node_id = self.wait_dronecan_node(timeout=60)
+        self.delay_sim_time(5)
+
+        # Read a parameter that does not exist on the periph
+        fake_param = "NONEXIST_PARAM"
+        param_id = fake_param.ljust(16, '\x00')
+        self.progress("Sending PARAM_EXT_REQUEST_READ for '%s' to node %d" %
+                      (fake_param, node_id))
+        self.mav.mav.param_ext_request_read_send(
+            self.sysid_thismav(),
+            node_id,
+            param_id.encode('utf-8'),
+            -1
+        )
+
+        # Periph should either not respond or respond with empty/error
+        m = self.mav.recv_match(type='PARAM_EXT_VALUE', blocking=True, timeout=5)
+        if m is not None:
+            got_name = m.param_id.rstrip('\x00')
+            if got_name == fake_param:
+                raise NotAchievedException(
+                    "Got PARAM_EXT_VALUE for nonexistent param '%s'" % fake_param)
+            self.progress("Got PARAM_EXT_VALUE for '%s' (not '%s') -- stale response, OK" %
+                          (got_name, fake_param))
+        else:
+            self.progress("No response for nonexistent param '%s' -- correct" % fake_param)
+
+        self.progress("Invalid parameter handling validated")
+        self.context_pop()
+
     def show_gps_and_sim_positions(self, on_off):
         """Allow to display gps and actual position on map."""
         if on_off is True:

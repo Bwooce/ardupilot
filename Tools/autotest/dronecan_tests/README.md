@@ -76,11 +76,15 @@ MAVLINK20=1 python3 test_dronecan_param_ext.py udp:192.168.4.1:14550 42
 
 | Test | SITL Method | Standalone Script | What it tests |
 |------|------------|-------------------|---------------|
-| Node Status | `DroneCAN_NodeStatus` | `test_dronecan_node_status.py` | NODE_STATUS broadcasting, health/mode fields, maintenance mode transition |
+| Node Status | `DroneCAN_NodeStatus` | `test_dronecan_node_status.py` | NODE_STATUS broadcasting, health/mode fields |
 | Node Info | `DroneCAN_NodeInfo` | `test_dronecan_node_info.py` | NODE_INFO broadcasting, name, version, unique_id |
 | Param Read | `DroneCAN_ParamExtRead` | `test_dronecan_param_ext.py` | PARAM_EXT_REQUEST_READ for known parameters |
 | Param Set | `DroneCAN_ParamExtSet` | `test_dronecan_param_ext.py` | PARAM_EXT_SET with ACK, readback verification |
+| Param Set Float | `DroneCAN_ParamExtSetFloat` | `test_dronecan_param_ext.py` | PARAM_EXT_SET for float parameters (RNGFND1_MAX) |
+| Type Cross | `DroneCAN_ParamExtTypeCross` | `test_dronecan_param_ext.py` | SET with mismatched types (int-to-float, float-to-int) |
+| Save Persist | `DroneCAN_ParamExtSavePersist` | -- | Parameter persistence across periph reboot |
 | Param List | `DroneCAN_ParamExtList` | `test_dronecan_param_ext.py` | PARAM_EXT_REQUEST_LIST enumeration, sequential indices |
+| Node Disconnect | `DroneCAN_NodeDisconnect` | -- | Maintenance mode detection and node recovery |
 
 ## Adding a New SITL Test
 
@@ -105,8 +109,7 @@ def DroneCAN_MyNewTest(self):
     # Use self.mav.mav.<msg>_send() to send messages
     # Raise NotAchievedException("reason") on failure
 
-    self.context_pop()
-    self.reboot_sitl()
+    self.context_pop()  # implicit reboot restores parameters
 ```
 
 2. Register in `arducopter.py` `AutoTestDroneCAN.tests()`:

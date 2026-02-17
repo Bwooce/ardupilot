@@ -16049,5 +16049,8 @@ class AutoTestDroneCAN(AutoTestCopter):
             self.DroneCAN_ParamExtTypeCross,
             self.DroneCAN_ParamExtSavePersist,
             self.DroneCAN_ParamExtList,
+            self.DroneCAN_DNAPersistence,
+            self.DroneCAN_ParamExtInvalidNode,
+            self.DroneCAN_ParamExtInvalidParam,
             self.DroneCAN_NodeDisconnect,
         ]
