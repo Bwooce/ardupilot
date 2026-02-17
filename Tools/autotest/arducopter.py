@@ -16035,3 +16035,22 @@ class AutoTestBattCAN(AutoTestCopter):
 
     def tests(self):
         return self.testcanbatt()
+
+
+class AutoTestDroneCAN(AutoTestCopter):
+
+    def tests(self):
+        return [
+            self.DroneCAN_NodeStatus,
+            self.DroneCAN_NodeInfo,
+            self.DroneCAN_ParamExtRead,
+            self.DroneCAN_ParamExtSet,
+            self.DroneCAN_ParamExtSetFloat,
+            self.DroneCAN_ParamExtTypeCross,
+            self.DroneCAN_ParamExtSavePersist,
+            self.DroneCAN_ParamExtList,
+            self.DroneCAN_DNAPersistence,
+            self.DroneCAN_ParamExtInvalidNode,
+            self.DroneCAN_ParamExtInvalidParam,
+            self.DroneCAN_NodeDisconnect,
+        ]

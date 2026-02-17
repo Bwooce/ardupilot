@@ -267,34 +267,45 @@ void AP_Periph_FW::handle_param_getset(CanardInstance* canard_instance, CanardRx
         }
     }
     if (vp != nullptr && req.name.len != 0 && req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY) {
-        // param set
+        // param set -- convert between DroneCAN value types and AP_Param types
+        // as needed, since the requesting node may not know the native type
         switch (ptype) {
         case AP_PARAM_INT8:
-            if (req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
-                return;
+            if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
+                ((AP_Int8 *)vp)->set_and_save_ifchanged(req.value.integer_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
+                ((AP_Int8 *)vp)->set_and_save_ifchanged((int8_t)req.value.real_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
+                ((AP_Int8 *)vp)->set_and_save_ifchanged(req.value.boolean_value ? 1 : 0);
             }
-            ((AP_Int8 *)vp)->set_and_save_ifchanged(req.value.integer_value);
             break;
         case AP_PARAM_INT16:
-            if (req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
-                return;
+            if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
+                ((AP_Int16 *)vp)->set_and_save_ifchanged(req.value.integer_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
+                ((AP_Int16 *)vp)->set_and_save_ifchanged((int16_t)req.value.real_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
+                ((AP_Int16 *)vp)->set_and_save_ifchanged(req.value.boolean_value ? 1 : 0);
             }
-            ((AP_Int16 *)vp)->set_and_save_ifchanged(req.value.integer_value);
             break;
         case AP_PARAM_INT32:
-            if (req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
-                return;
+            if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
+                ((AP_Int32 *)vp)->set_and_save_ifchanged(req.value.integer_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
+                ((AP_Int32 *)vp)->set_and_save_ifchanged((int32_t)req.value.real_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
+                ((AP_Int32 *)vp)->set_and_save_ifchanged(req.value.boolean_value ? 1 : 0);
             }
-            ((AP_Int32 *)vp)->set_and_save_ifchanged(req.value.integer_value);
             break;
         case AP_PARAM_FLOAT:
-            if (req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
-                return;
+            if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
+                ((AP_Float *)vp)->set_and_save_ifchanged(req.value.real_value);
+            } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
+                ((AP_Float *)vp)->set_and_save_ifchanged((float)req.value.integer_value);
             }
-            ((AP_Float *)vp)->set_and_save_ifchanged(req.value.real_value);
             break;
         default:
-            return;
+            break;
         }
     }
     if (vp != nullptr) {
@@ -341,7 +352,9 @@ void AP_Periph_FW::handle_param_executeopcode(CanardInstance* canard_instance, C
     if (uavcan_protocol_param_ExecuteOpcodeRequest_decode(transfer, &req)) {
         return;
     }
-    if (req.opcode == UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_REQUEST_OPCODE_ERASE) {
+    if (req.opcode == UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_REQUEST_OPCODE_SAVE) {
+        AP_Param::flush();
+    } else if (req.opcode == UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_REQUEST_OPCODE_ERASE) {
         StorageManager::erase();
         AP_Param::erase_all();
         AP_Param::load_all();
@@ -383,26 +396,27 @@ void AP_Periph_FW::handle_param_executeopcode(CanardInstance* canard_instance, C
 
 void AP_Periph_FW::handle_begin_firmware_update(CanardInstance* canard_instance, CanardRxTransfer* transfer)
 {
-#if HAL_RAM_RESERVE_START >= 256
-    // setup information on firmware request at start of ram
-    auto *comms = (struct app_bootloader_comms *)HAL_RAM0_START;
-    if (comms->magic != APP_BOOTLOADER_COMMS_MAGIC) {
-        memset(comms, 0, sizeof(*comms));
-    }
-    comms->magic = APP_BOOTLOADER_COMMS_MAGIC;
-
     uavcan_protocol_file_BeginFirmwareUpdateRequest req;
     if (uavcan_protocol_file_BeginFirmwareUpdateRequest_decode(transfer, &req)) {
         return;
     }
 
+#if HAL_RAM_RESERVE_START >= 256
+    // setup bootloader communication in reserved RAM
+    auto *comms = (struct app_bootloader_comms *)HAL_RAM0_START;
+    if (comms->magic != APP_BOOTLOADER_COMMS_MAGIC) {
+        memset(comms, 0, sizeof(*comms));
+    }
+    comms->magic = APP_BOOTLOADER_COMMS_MAGIC;
     comms->server_node_id = req.source_node_id;
     if (comms->server_node_id == 0) {
         comms->server_node_id = transfer->source_node_id;
     }
     memcpy(comms->path, req.image_file_remote_path.path.data, req.image_file_remote_path.path.len);
     comms->my_node_id = canardGetLocalNodeID(canard_instance);
+#endif
 
+    // respond before rebooting
     uint8_t buffer[UAVCAN_PROTOCOL_FILE_BEGINFIRMWAREUPDATE_RESPONSE_MAX_SIZE];
     uavcan_protocol_file_BeginFirmwareUpdateResponse reply {};
     reply.error = UAVCAN_PROTOCOL_FILE_BEGINFIRMWAREUPDATE_RESPONSE_ERROR_OK;
@@ -419,14 +433,13 @@ void AP_Periph_FW::handle_begin_firmware_update(CanardInstance* canard_instance,
         processTx();
         hal.scheduler->delay(1);
     }
-#endif
 
-    // instant reboot, with backup register used to give bootloader
-    // the node_id
     prepare_reboot();
 #if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
     set_fast_reboot((rtc_boot_magic)(RTC_BOOT_CANBL | canardGetLocalNodeID(canard_instance)));
     NVIC_SystemReset();
+#else
+    hal.scheduler->reboot(true);
 #endif
 }
 

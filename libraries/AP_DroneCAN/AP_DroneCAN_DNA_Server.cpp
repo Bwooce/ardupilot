@@ -102,7 +102,7 @@ void AP_DroneCAN_DNA_Server::Database::init_server(uint8_t own_node_id, const ui
 }
 
 // handle processing the node info message. returns true if from a duplicate node
-bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, const uint8_t unique_id[])
+bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, const uint8_t unique_id[], const Bitmask<128> *healthy_mask)
 {
     WITH_SEMAPHORE(sem);
 
@@ -118,11 +118,11 @@ bool AP_DroneCAN_DNA_Server::Database::handle_node_info(uint8_t source_node_id, 
 }
 
 // handle the allocation message. returns the allocated node ID, or 0 if allocation failed
-uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique_id[])
+uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique_id[], uint8_t uid_len, const Bitmask<128> *seen_mask)
 {
     WITH_SEMAPHORE(sem);
 
-    uint8_t resp_node_id = find_node_id(unique_id, 16);
+    uint8_t resp_node_id = find_node_id(unique_id, uid_len);
     if (resp_node_id == 0) {
         // find free node ID, starting at the max as prescribed by the standard
         resp_node_id = MAX_NODE_ID;
@@ -134,7 +134,7 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
         }
 
         if (resp_node_id != 0) {
-            create_registration(resp_node_id, unique_id, 16);
+            create_registration(resp_node_id, unique_id, uid_len);
         }
     }
     return resp_node_id; // will be 0 if not found and not created
@@ -143,7 +143,23 @@ uint8_t AP_DroneCAN_DNA_Server::Database::handle_allocation(const uint8_t unique
 // retrieve node ID that matches the given unique ID. returns 0 if not found
 uint8_t AP_DroneCAN_DNA_Server::Database::find_node_id(const uint8_t unique_id[], uint8_t size)
 {
-    NodeRecord record, cmp_record;
+    NodeRecord record;
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Direct UID comparison (full 16-byte storage)
+    uint8_t search_len = (size > 16) ? 16 : size;
+
+    for (int i = MAX_NODE_ID; i > 0; i--) {
+        if (node_registered.get(i)) {
+            read_record(record, i);
+            if (memcmp(record.uid, unique_id, search_len) == 0) {
+                return i;
+            }
+        }
+    }
+#else
+    // Hash-based comparison (upstream format)
+    NodeRecord cmp_record;
     compute_uid_hash(cmp_record, unique_id, size);
 
     for (int i = MAX_NODE_ID; i > 0; i--) {
@@ -154,9 +170,11 @@ uint8_t AP_DroneCAN_DNA_Server::Database::find_node_id(const uint8_t unique_id[]
             }
         }
     }
+#endif
     return 0; // not found
 }
 
+#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
 // fill the given record with the hash of the given unique ID
 void AP_DroneCAN_DNA_Server::Database::compute_uid_hash(NodeRecord &record, const uint8_t unique_id[], uint8_t size) const
 {
@@ -171,6 +189,7 @@ void AP_DroneCAN_DNA_Server::Database::compute_uid_hash(NodeRecord &record, cons
         record.uid_hash[i] = (hash >> (8*i)) & 0xff;
     }
 }
+#endif
 
 // register a given unique ID to a given node ID, deleting any existing registration for the unique ID
 void AP_DroneCAN_DNA_Server::Database::register_uid(uint8_t node_id, const uint8_t unique_id[], uint8_t size)
@@ -187,12 +206,19 @@ void AP_DroneCAN_DNA_Server::Database::register_uid(uint8_t node_id, const uint8
 void AP_DroneCAN_DNA_Server::Database::create_registration(uint8_t node_id, const uint8_t unique_id[], uint8_t size)
 {
     NodeRecord record;
+    memset(&record, 0, sizeof(record));
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // Store full UID directly
+    uint8_t copy_size = (size > 16) ? 16 : size;
+    memcpy(record.uid, unique_id, copy_size);
+#else
+    // Compute hash and CRC (upstream format)
     compute_uid_hash(record, unique_id, size);
-    // compute and store CRC of the record's data to validate it
     record.crc = crc_crc8(record.uid_hash, sizeof(record.uid_hash));
+#endif
 
     write_record(record, node_id);
-
     node_registered.set(node_id);
 }
 
@@ -307,10 +333,7 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
     }
 
     if (!nodeInfo_resp_rcvd) {
-        /* Also notify GCS about this
-        Reason for this could be either the node was disconnected
-        Or a node with conflicting ID appeared and is sending response
-        at the same time. */
+        /* Node failed to respond - could be disconnected or conflicting ID */
         node_verified.clear(curr_verifying_node);
     }
 
@@ -321,14 +344,20 @@ void AP_DroneCAN_DNA_Server::verify_nodes()
         if ((curr_verifying_node == self_node_id) || (curr_verifying_node == 0)) {
             continue;
         }
-        if (node_seen.get(curr_verifying_node)) {
+        if (db.is_registered(curr_verifying_node)) {
             break;
         }
     }
     if (db.is_registered(curr_verifying_node)) {
-        uavcan_protocol_GetNodeInfoRequest request;
-        node_info_client.request(curr_verifying_node, request);
-        nodeInfo_resp_rcvd = false;
+        // Don't try to verify ourselves
+        if (curr_verifying_node == self_node_id) {
+            node_verified.set(curr_verifying_node);
+            node_healthy.set(curr_verifying_node);
+        } else {
+            uavcan_protocol_GetNodeInfoRequest request;
+            node_info_client.request(curr_verifying_node, request);
+            nodeInfo_resp_rcvd = false;
+        }
     }
 }
 
@@ -340,27 +369,201 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     if (transfer.source_node_id > MAX_NODE_ID || transfer.source_node_id == 0) {
         return;
     }
-    if ((msg.health != UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK ||
-        msg.mode != UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL) &&
-        !_ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_UNHEALTHY_NODE)) {
-        //if node is not healthy or operational, clear resp health mask, and set fault_node_id
+    
+    // Handle health state changes with severity-based reporting
+    const bool is_operational = (msg.mode == UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL);
+    const bool is_healthy = (msg.health == UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK);
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
+    const bool was_healthy = node_healthy.get(transfer.source_node_id);
+    const bool first_contact = !node_seen.get(transfer.source_node_id);
+
+    // Send UAVCAN_NODE_STATUS MAVLink message on first contact or health change only
+    // (not every heartbeat, which would flood MAVLink channels)
+    if (first_contact || (was_healthy != is_healthy)) {
+        send_node_status_mavlink(transfer.source_node_id, msg);
+    }
+#endif
+
+    if ((!is_healthy || !is_operational) && !_ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_UNHEALTHY_NODE)) {
+
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
+        if (was_healthy) {
+            report_node_health_change(transfer.source_node_id, msg.health, msg.mode, false);
+        }
+#endif
+
         fault_node_id = transfer.source_node_id;
         server_state = NODE_STATUS_UNHEALTHY;
         node_healthy.clear(transfer.source_node_id);
     } else {
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
+        // Report recovery only if previously seen (not first contact)
+        if (!was_healthy && is_healthy && is_operational && !first_contact) {
+            report_node_health_change(transfer.source_node_id, msg.health, msg.mode, true);
+        }
+#endif
+
         node_healthy.set(transfer.source_node_id);
         if (node_healthy == node_verified) {
             server_state = HEALTHY;
         }
     }
     if (!node_verified.get(transfer.source_node_id)) {
-        //immediately begin verification of the node_id
-        uavcan_protocol_GetNodeInfoRequest request;
-        node_info_client.request(transfer.source_node_id, request);
+        // Don't try to verify ourselves - we already know our own info
+        if (transfer.source_node_id == self_node_id) {
+            node_verified.set(transfer.source_node_id);
+            node_healthy.set(transfer.source_node_id);
+        } else {
+            //immediately begin verification of the node_id
+            uavcan_protocol_GetNodeInfoRequest request;
+            node_info_client.request(transfer.source_node_id, request);
+        }
     }
     //Add node to seen list if not seen before
     node_seen.set(transfer.source_node_id);
 }
+
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
+void AP_DroneCAN_DNA_Server::send_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg)
+{
+#if HAL_GCS_ENABLED
+    // Pack the message with the node ID as the component ID (per MAVLink UAVCAN spec)
+    mavlink_message_t mavlink_msg;
+    mavlink_msg_uavcan_node_status_pack(
+        mavlink_system.sysid,
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
+        &mavlink_msg,
+        AP_HAL::micros64(),
+        msg.uptime_sec,
+        msg.health,
+        msg.mode,
+        msg.sub_mode,
+        msg.vendor_specific_status_code
+    );
+
+    // Send to all active MAVLink channels using lock protocol
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &mavlink_msg);
+    for (uint8_t i=0; i<gcs().num_gcs(); i++) {
+        GCS_MAVLINK *c = gcs().chan(i);
+        if (c == nullptr || c->is_private() || !c->is_active()) {
+            continue;
+        }
+        comm_send_lock((mavlink_channel_t)i, len);
+        comm_send_buffer((mavlink_channel_t)i, (uint8_t*)buf, len);
+        comm_send_unlock((mavlink_channel_t)i);
+    }
+#endif
+}
+
+void AP_DroneCAN_DNA_Server::report_node_health_change(uint8_t node_id, uint8_t health, uint8_t mode, bool recovered)
+{
+#if AP_HAVE_GCS_SEND_TEXT
+    const char* health_str;
+    MAV_SEVERITY severity;
+    
+    // Map DroneCAN health states to MAVLink severity and text
+    switch (health) {
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK:
+            health_str = "OK";
+            severity = MAV_SEVERITY_INFO;
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_WARNING:
+            health_str = "WARNING";
+            severity = MAV_SEVERITY_WARNING;
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_ERROR:
+            health_str = "ERROR";
+            severity = MAV_SEVERITY_ERROR;
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_HEALTH_CRITICAL:
+            health_str = "CRITICAL";
+            severity = MAV_SEVERITY_CRITICAL;
+            break;
+        default:
+            health_str = "UNKNOWN";
+            severity = MAV_SEVERITY_WARNING;
+            break;
+    }
+    
+    const char* mode_str;
+    switch (mode) {
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL:
+            mode_str = "OPERATIONAL";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_INITIALIZATION:
+            mode_str = "INITIALIZING";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_MAINTENANCE:
+            mode_str = "MAINTENANCE";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_SOFTWARE_UPDATE:
+            mode_str = "UPDATING";
+            break;
+        case UAVCAN_PROTOCOL_NODESTATUS_MODE_OFFLINE:
+            mode_str = "OFFLINE";
+            break;
+        default:
+            mode_str = "UNKNOWN";
+            break;
+    }
+    
+    if (recovered) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN Node %d: %s (%s) - RECOVERED", 
+                      node_id, health_str, mode_str);
+    } else {
+        GCS_SEND_TEXT(severity, "DroneCAN Node %d: %s (%s)", 
+                      node_id, health_str, mode_str);
+    }
+#endif
+}
+
+void AP_DroneCAN_DNA_Server::send_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg)
+{
+#if HAL_GCS_ENABLED
+    // Prepare node name with null termination
+    char node_name[81];
+    size_t name_len = MIN(msg.name.len, sizeof(node_name) - 1);
+    memcpy(node_name, msg.name.data, name_len);
+    node_name[name_len] = '\0';
+
+    // Pack the message with the node ID as the component ID (per MAVLink UAVCAN spec)
+    mavlink_message_t mavlink_msg;
+    mavlink_msg_uavcan_node_info_pack(
+        mavlink_system.sysid,
+        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
+        &mavlink_msg,
+        AP_HAL::micros64(),
+        msg.status.uptime_sec,
+        node_name,
+        msg.hardware_version.major,
+        msg.hardware_version.minor,
+        msg.hardware_version.unique_id,
+        msg.software_version.major,
+        msg.software_version.minor,
+        msg.software_version.vcs_commit
+    );
+
+    // Send to all active MAVLink channels using lock protocol
+    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &mavlink_msg);
+    for (uint8_t i=0; i<gcs().num_gcs(); i++) {
+        GCS_MAVLINK *c = gcs().chan(i);
+        if (c == nullptr || c->is_private() || !c->is_active()) {
+            continue;
+        }
+        comm_send_lock((mavlink_channel_t)i, len);
+        comm_send_buffer((mavlink_channel_t)i, (uint8_t*)buf, len);
+        comm_send_unlock((mavlink_channel_t)i);
+    }
+
+    // Also send a text message for human-readable notification
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN Node %d: %s v%d.%d online",
+                  node_id, node_name,
+                  msg.software_version.major, msg.software_version.minor);
+#endif
+}
+#endif  // AP_DRONECAN_MAVLINK_REPORTING_ENABLED
 
 /* Node Info message handler
 Handle responses from GetNodeInfo Request. We verify the node info
@@ -372,6 +575,12 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
     if (transfer.source_node_id > MAX_NODE_ID || transfer.source_node_id == 0) {
         return;
     }
+    
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
+    // Send UAVCAN_NODE_INFO MAVLink message for node discovery
+    send_node_info_mavlink(transfer.source_node_id, rsp);
+#endif
+
     /*
       if we haven't logged this node then log it now
      */
@@ -404,7 +613,7 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
     }
 #endif
 
-    bool duplicate = db.handle_node_info(transfer.source_node_id, rsp.hardware_version.unique_id);
+    bool duplicate = db.handle_node_info(transfer.source_node_id, rsp.hardware_version.unique_id, &node_healthy);
     if (duplicate) {
         if (!_ap_dronecan.option_is_set(AP_DroneCAN::Options::DNA_IGNORE_DUPLICATE_NODE)) {
             /* This is a device with node_id already registered
@@ -412,6 +621,7 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
             server_state = DUPLICATE_NODES;
             fault_node_id = transfer.source_node_id;
             memcpy(fault_node_name, rsp.name.data, sizeof(fault_node_name));
+            debug_dronecan(AP_CANManager::LOG_ERROR, "DNA_SERVER ERROR: DUPLICATE NODE DETECTED on Node %d", transfer.source_node_id);
         }
     } else {
         //Verify as well
@@ -467,15 +677,31 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
     // respond with the message containing the received unique ID so far, or
     // with the node ID if we successfully allocated one
     uavcan_protocol_dynamic_node_id_Allocation rsp {};
+    
+    // Copy only the received bytes
     memcpy(rsp.unique_id.data, rcvd_unique_id, rcvd_unique_id_offset);
+    
+    // CRITICAL: Set the length to what we actually received, not the full array size
+    // The encoder will only encode rsp.unique_id.len bytes, not the entire array
     rsp.unique_id.len = rcvd_unique_id_offset;
+    
+    // Per DroneCAN spec: Echo the first_part flag from the request when responding to partial allocations
+    // Only set to 0 when we're sending the final response with allocated node_id
+    rsp.first_part_of_unique_id = msg.first_part_of_unique_id;
+    rsp.node_id = 0; // Will be set if allocation succeeds
 
     if (rcvd_unique_id_offset == sizeof(rcvd_unique_id)) { // full unique ID received, allocate it!
         // we ignore the preferred node ID as it seems nobody uses the feature
         // and we couldn't guarantee it anyway. we will always remember and
         // re-assign node IDs consistently, so the node could send a status
         // with a particular ID once then switch back to no preference for DNA
-        rsp.node_id = db.handle_allocation(rcvd_unique_id);
+        rsp.node_id = db.handle_allocation(rcvd_unique_id, rcvd_unique_id_offset, &node_seen);
+
+        // For the final allocation response with the echoed UID:
+        // Since we require 16 bytes, this is always a multi-frame transfer
+        // Set first_part=0 to indicate this is a continuation/final frame
+        rsp.first_part_of_unique_id = 0;
+        
         rcvd_unique_id_offset = 0; // reset state for next allocation
         if (rsp.node_id == 0) { // allocation failed
             GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "DroneCAN DNA allocation failed; database full");
@@ -486,7 +712,35 @@ void AP_DroneCAN_DNA_Server::handle_allocation(const CanardRxTransfer& transfer,
         }
     }
 
-    allocation_pub.broadcast(rsp, false); // never publish allocation message with CAN FD
+    // Make a defensive copy to ensure struct doesn't get modified during broadcast
+    struct uavcan_protocol_dynamic_node_id_Allocation rsp_copy;
+    memcpy(&rsp_copy, &rsp, sizeof(rsp_copy));
+
+    allocation_pub.broadcast(rsp_copy, false); // never publish allocation message with CAN FD
+}
+
+// Request node info for all seen nodes (for MAV_CMD_UAVCAN_GET_NODE_INFO)
+void AP_DroneCAN_DNA_Server::request_all_node_info()
+{
+    // NOTE: The Client class can only track ONE outstanding request at a time
+    // (it has a single server_node_id and transfer_id member). If we send multiple
+    // requests in rapid succession, only the LAST request's response will be accepted.
+    //
+    // Solution: Mark all nodes as unverified and trigger immediate verification.
+    // The verify_nodes() function will send ONE request per 5-second cycle.
+    // This ensures responses are properly tracked and UAVCAN_NODE_INFO messages
+    // are sent to the GCS as each response arrives.
+
+    // Mark all seen nodes as unverified to ensure fresh requests are sent
+    for (uint8_t i = 1; i <= MAX_NODE_ID; i++) {
+        if (node_seen.get(i) && i != self_node_id) {
+            node_verified.clear(i);
+        }
+    }
+
+    // Force immediate verification cycle by resetting the timer
+    // This will cause verify_nodes() to run on the next main loop iteration
+    last_verification_request = 0;
 }
 
 //report the server state, along with failure message if any

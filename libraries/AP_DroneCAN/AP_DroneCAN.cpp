@@ -52,6 +52,8 @@
 #include <string.h>
 #include <AP_Servo_Telem/AP_Servo_Telem.h>
 
+#include "AP_DroneCAN_config.h"
+
 #if AP_DRONECAN_SERIAL_ENABLED
 #include "AP_DroneCAN_serial.h"
 #endif
@@ -1804,7 +1806,8 @@ bool AP_DroneCAN::get_parameter_on_node(uint8_t node_id, const char *name, Param
     // fail if waiting for any previous get/set request
     if (param_int_cb != nullptr ||
         param_float_cb != nullptr ||
-        param_string_cb != nullptr) {
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
         return false;
     }
     param_getset_req.index = 0;
@@ -1817,22 +1820,232 @@ bool AP_DroneCAN::get_parameter_on_node(uint8_t node_id, const char *name, Param
     return true;
 }
 
+/*
+  get parameter by index on node for enumeration
+  index 0, 1, 2, ... with empty name to discover all parameters
+*/
+bool AP_DroneCAN::get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetFloatCb *cb)
+{
+    WITH_SEMAPHORE(_param_sem);
+
+    // fail if waiting for any previous get/set request
+    if (param_int_cb != nullptr ||
+        param_float_cb != nullptr ||
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
+        return false;
+    }
+    param_getset_req.index = index;
+    param_getset_req.name.len = 0;  // empty name for index-based enumeration
+    param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY;
+    param_float_cb = cb;
+    param_request_sent = false;
+    param_request_sent_ms = AP_HAL::millis();
+    param_request_node_id = node_id;
+    return true;
+}
+
+/*
+  get parameter by index on node for enumeration
+*/
+bool AP_DroneCAN::get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetIntCb *cb)
+{
+    WITH_SEMAPHORE(_param_sem);
+
+    // fail if waiting for any previous get/set request
+    if (param_int_cb != nullptr ||
+        param_float_cb != nullptr ||
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
+        return false;
+    }
+    param_getset_req.index = index;
+    param_getset_req.name.len = 0;  // empty name for index-based enumeration
+    param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY;
+    param_int_cb = cb;
+    param_request_sent = false;
+    param_request_sent_ms = AP_HAL::millis();
+    param_request_node_id = node_id;
+    return true;
+}
+
+/*
+  get parameter by index on node for enumeration
+*/
+bool AP_DroneCAN::get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetStringCb *cb)
+{
+    WITH_SEMAPHORE(_param_sem);
+
+    // fail if waiting for any previous get/set request
+    if (param_int_cb != nullptr ||
+        param_float_cb != nullptr ||
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
+        return false;
+    }
+    param_getset_req.index = index;
+    param_getset_req.name.len = 0;  // empty name for index-based enumeration
+    param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY;
+    param_string_cb = cb;
+    param_request_sent = false;
+    param_request_sent_ms = AP_HAL::millis();
+    param_request_node_id = node_id;
+    return true;
+}
+
+/*
+  set parameter on node using raw DroneCAN value (generic callback).
+  The value union is sent directly without type conversion.
+*/
+bool AP_DroneCAN::set_parameter_on_node(uint8_t node_id, const char *name,
+                                         const uavcan_protocol_param_Value &value, ParamGetSetGenericCb *cb)
+{
+    WITH_SEMAPHORE(_param_sem);
+
+    // fail if waiting for any previous get/set request
+    if (param_int_cb != nullptr ||
+        param_float_cb != nullptr ||
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
+        return false;
+    }
+    param_getset_req.index = 0;
+    param_getset_req.name.len = strncpy_noterm((char*)param_getset_req.name.data, name, sizeof(param_getset_req.name.data)-1);
+    param_getset_req.value = value;
+    param_generic_cb = cb;
+    param_request_sent = false;
+    param_request_sent_ms = AP_HAL::millis();
+    param_request_node_id = node_id;
+    return true;
+}
+
+/*
+  get named parameter on node (generic callback).
+  Response arrives with the actual DroneCAN type tag intact.
+*/
+bool AP_DroneCAN::get_parameter_on_node(uint8_t node_id, const char *name, ParamGetSetGenericCb *cb)
+{
+    WITH_SEMAPHORE(_param_sem);
+
+    // fail if waiting for any previous get/set request
+    if (param_int_cb != nullptr ||
+        param_float_cb != nullptr ||
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
+        return false;
+    }
+    param_getset_req.index = 0;
+    param_getset_req.name.len = strncpy_noterm((char*)param_getset_req.name.data, name, sizeof(param_getset_req.name.data));
+    param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY;
+    param_generic_cb = cb;
+    param_request_sent = false;
+    param_request_sent_ms = AP_HAL::millis();
+    param_request_node_id = node_id;
+    return true;
+}
+
+/*
+  get parameter by index on node for enumeration (generic callback)
+*/
+bool AP_DroneCAN::get_parameter_by_index_on_node(uint8_t node_id, uint16_t index, ParamGetSetGenericCb *cb)
+{
+    WITH_SEMAPHORE(_param_sem);
+
+    // fail if waiting for any previous get/set request
+    if (param_int_cb != nullptr ||
+        param_float_cb != nullptr ||
+        param_string_cb != nullptr ||
+        param_generic_cb != nullptr) {
+        return false;
+    }
+    param_getset_req.index = index;
+    param_getset_req.name.len = 0;  // empty name for index-based enumeration
+    param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY;
+    param_generic_cb = cb;
+    param_request_sent = false;
+    param_request_sent_ms = AP_HAL::millis();
+    param_request_node_id = node_id;
+    return true;
+}
+
 void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer, const uavcan_protocol_param_GetSetResponse& rsp)
 {
     WITH_SEMAPHORE(_param_sem);
     if (!param_int_cb &&
         !param_float_cb &&
-        !param_string_cb) {
+        !param_string_cb &&
+        !param_generic_cb) {
         return;
     }
-    if ((rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) && param_int_cb) {
-        int32_t val = rsp.value.integer_value;
+
+    // Generic callback handles all response types directly, including EMPTY.
+    // No type conversion needed - the callback receives the raw DroneCAN value.
+    if (param_generic_cb) {
+        const char* name = (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY)
+                           ? "" : (const char*)rsp.name.data;
+        (*param_generic_cb)(this, transfer.source_node_id, name, rsp.value);
+        param_request_sent_ms = 0;
+        param_generic_cb = nullptr;
+        return;
+    }
+
+    // Check for EMPTY response (end of parameter list)
+    // Per UAVCAN spec: when index is beyond valid range, response has union_tag=EMPTY and name.len=0
+    if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY) {
+        // Call whichever callback is registered with empty name as signal to stop enumeration
+        // Enumeration callbacks will detect empty name and stop immediately (no 30s timeout)
+        if (param_int_cb) {
+            int32_t val = 0;
+            (*param_int_cb)(this, transfer.source_node_id, "", val);
+        } else if (param_float_cb) {
+            float val = 0.0f;
+            (*param_float_cb)(this, transfer.source_node_id, "", val);
+        } else if (param_string_cb) {
+            string val = {};
+            (*param_string_cb)(this, transfer.source_node_id, "", val);
+        }
+        // Clear callbacks and complete request
+        param_request_sent_ms = 0;
+        param_int_cb = nullptr;
+        param_float_cb = nullptr;
+        param_string_cb = nullptr;
+        return;
+    }
+
+    // Check for protocol violation: typed value with empty name
+    // Per UAVCAN spec: typed responses MUST have a name
+    if (rsp.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY && rsp.name.len == 0) {
+        // Treat as type mismatch - clear callbacks and let retry logic try next type
+        param_request_sent_ms = 0;
+        param_int_cb = nullptr;
+        param_float_cb = nullptr;
+        param_string_cb = nullptr;
+        return;
+    }
+
+    if (((rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) ||
+         (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE)) && param_int_cb) {
+        // Handle both integers and booleans through the int callback
+        // Booleans are uint8 in the protocol, easily converted to int32
+        int32_t val;
+        if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
+            val = rsp.value.boolean_value ? 1 : 0;
+        } else {
+            val = rsp.value.integer_value;
+        }
+
         if ((*param_int_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val)) {
             // we want the parameter to be set with val
             param_getset_req.index = 0;
             memcpy(param_getset_req.name.data, rsp.name.data, rsp.name.len);
-            param_getset_req.value.integer_value = val;
-            param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE;
+            // Preserve the original type when setting back
+            if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
+                param_getset_req.value.boolean_value = val ? 1 : 0;
+                param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE;
+            } else {
+                param_getset_req.value.integer_value = val;
+                param_getset_req.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE;
+            }
             param_request_sent = false;
             param_request_sent_ms = AP_HAL::millis();
             param_request_node_id = transfer.source_node_id;
@@ -1864,6 +2077,31 @@ void AP_DroneCAN::handle_param_get_set_response(const CanardRxTransfer& transfer
             param_request_sent_ms = AP_HAL::millis();
             param_request_node_id = transfer.source_node_id;
             return;
+        }
+    } else if (param_float_cb || param_int_cb) {
+        // Type mismatch fallback: response type doesn't match the registered callback.
+        // This happens when e.g. a float callback was registered but the node returned
+        // an integer value. Convert the value and call whichever callback IS registered.
+        if (param_float_cb) {
+            float val;
+            if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
+                val = (float)rsp.value.integer_value;
+            } else if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE) {
+                val = rsp.value.boolean_value ? 1.0f : 0.0f;
+            } else {
+                val = 0.0f;
+            }
+            (*param_float_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val);
+        } else if (param_int_cb) {
+            int32_t val;
+            if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
+                val = (int32_t)rsp.value.real_value;
+            } else if (rsp.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_STRING_VALUE) {
+                val = 0;
+            } else {
+                val = 0;
+            }
+            (*param_int_cb)(this, transfer.source_node_id, (const char*)rsp.name.data, val);
         }
     }
 
@@ -1917,6 +2155,49 @@ void AP_DroneCAN::send_reboot_request(uint8_t node_id)
     uavcan_protocol_RestartNodeRequest request;
     request.magic_number = UAVCAN_PROTOCOL_RESTARTNODE_REQUEST_MAGIC_NUMBER;
     restart_node_client.request(node_id, request);
+}
+
+/*
+  begin actuator enumeration (for MAV_CMD_PREFLIGHT_UAVCAN)
+  sends enumeration Begin request to all active nodes
+ */
+void AP_DroneCAN::begin_actuator_enumeration()
+{
+    uavcan_protocol_enumeration_BeginRequest request {};
+
+    // Set timeout to 60 seconds (autodetect parameter name)
+    request.timeout_sec = 60;
+
+    // Leave parameter_name empty for autodetection (recommended practice)
+    request.parameter_name.len = 0;
+
+    // Broadcast to all nodes
+    // DroneCAN enumeration uses broadcast with node filtering on the receiving end
+    // Each node that supports enumeration will respond
+    for (uint8_t node_id = 1; node_id <= 127; node_id++) {
+        if (_dna_server.is_node_seen(node_id)) {
+            enumeration_begin_client.request(node_id, request);
+        }
+    }
+}
+
+/*
+  handle enumeration Begin response
+ */
+void AP_DroneCAN::handle_enumeration_begin_response(const CanardRxTransfer& transfer, const uavcan_protocol_enumeration_BeginResponse& msg)
+{
+    // Report status to GCS
+    if (msg.error == UAVCAN_PROTOCOL_ENUMERATION_BEGIN_RESPONSE_ERROR_OK) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN: Node %u enumeration started", transfer.source_node_id);
+    } else if (msg.error == UAVCAN_PROTOCOL_ENUMERATION_BEGIN_RESPONSE_ERROR_INVALID_MODE) {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "DroneCAN: Node %u cannot enumerate (invalid mode)", transfer.source_node_id);
+    } else if (msg.error == UAVCAN_PROTOCOL_ENUMERATION_BEGIN_RESPONSE_ERROR_INVALID_PARAMETER) {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "DroneCAN: Node %u cannot enumerate (invalid parameter)", transfer.source_node_id);
+    } else if (msg.error == UAVCAN_PROTOCOL_ENUMERATION_BEGIN_RESPONSE_ERROR_UNSUPPORTED) {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "DroneCAN: Node %u does not support enumeration", transfer.source_node_id);
+    } else {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "DroneCAN: Node %u enumeration error %u", transfer.source_node_id, msg.error);
+    }
 }
 
 // check if a option is set and if it is then reset it to 0.
