@@ -5507,6 +5507,83 @@ class TestSuite(abc.ABC):
         self.progress("Invalid parameter handling validated")
         self.context_pop()
 
+    def DroneCAN_FirmwareUpdate(self):
+        '''test DroneCAN BeginFirmwareUpdate via direct CAN service request'''
+        import dronecan
+        import threading
+
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        # Phase 1: Discover periph node
+        node_id = self.wait_dronecan_node(timeout=60)
+        self.delay_sim_time(5)
+        self.progress("Periph node %d online, sending BeginFirmwareUpdate" % node_id)
+
+        # Phase 2: Create pydronecan node on SITL multicast CAN bus
+        dc_node = dronecan.make_node('mcast:0', node_id=100)
+        response_received = threading.Event()
+        response_result = [None]  # mutable container for closure
+
+        def on_response(event):
+            if event is None:
+                self.progress("BeginFirmwareUpdate request timed out (no response)")
+            else:
+                resp = event.response
+                self.progress("BeginFirmwareUpdate response: error=%d" % resp.error)
+                response_result[0] = resp
+            response_received.set()
+
+        try:
+            # Send BeginFirmwareUpdate to periph node
+            req = dronecan.uavcan.protocol.file.BeginFirmwareUpdate.Request(
+                source_node_id=100,
+                image_file_remote_path=dronecan.uavcan.protocol.file.Path(
+                    path=list(b'/test/firmware.bin')
+                )
+            )
+            dc_node.request(req, node_id, on_response, timeout=5)
+
+            # Spin the dronecan node until we get a response (max 10s)
+            tstart = time.time()
+            while not response_received.is_set():
+                dc_node.spin(timeout=0.1)
+                if time.time() - tstart > 10:
+                    break
+        finally:
+            dc_node.close()
+
+        # Verify response
+        if not response_received.is_set():
+            raise NotAchievedException("No response to BeginFirmwareUpdate within 10s")
+
+        resp = response_result[0]
+        if resp is None:
+            raise NotAchievedException("BeginFirmwareUpdate callback received None (timeout)")
+
+        if resp.error != 0:
+            raise NotAchievedException(
+                "BeginFirmwareUpdate error=%d, expected 0 (OK)" % resp.error)
+
+        self.progress("BeginFirmwareUpdate accepted, waiting for periph to reboot")
+
+        # Phase 3: Wait for periph to reboot and reconnect via DNA
+        # On SITL, reboot(true) calls execv() which restarts the process
+        node_id_2 = self.wait_dronecan_node(timeout=60)
+        self.progress("Periph reconnected as node %d after firmware update reboot" % node_id_2)
+
+        if node_id_2 != node_id:
+            self.progress("Warning: node_id changed %d -> %d (DNA re-allocation)" %
+                          (node_id, node_id_2))
+
+        self.progress("DroneCAN BeginFirmwareUpdate validated: request accepted, periph rebooted and reconnected")
+        self.context_pop()
+
     def show_gps_and_sim_positions(self, on_off):
         """Allow to display gps and actual position on map."""
         if on_off is True:

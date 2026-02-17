@@ -16053,4 +16053,5 @@ class AutoTestDroneCAN(AutoTestCopter):
             self.DroneCAN_ParamExtInvalidNode,
             self.DroneCAN_ParamExtInvalidParam,
             self.DroneCAN_NodeDisconnect,
+            self.DroneCAN_FirmwareUpdate,
         ]
