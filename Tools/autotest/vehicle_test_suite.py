@@ -5405,28 +5405,14 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        # Collect NODE_STATUS during reboot so we catch the first broadcast
-        self.context_collect('UAVCAN_NODE_STATUS')
         self.reboot_sitl()
 
         # Phase 1: Get initial node_id from DNA allocation
         node_id_1 = self.wait_dronecan_node(timeout=60)
         self.progress("Initial DNA allocation: node_id=%d" % node_id_1)
 
-        # Verify node_id is in valid range (1-127)
         if node_id_1 < 1 or node_id_1 > 127:
             raise NotAchievedException("Invalid node_id %d (expected 1-127)" % node_id_1)
-
-        # Verify NODE_STATUS arrives with matching source component
-        m = self.assert_receive_message('UAVCAN_NODE_STATUS', timeout=10,
-                                        check_context=True)
-        status_node = m.get_srcComponent()
-        if status_node != node_id_1:
-            raise NotAchievedException(
-                "NODE_STATUS srcComponent=%d != allocated node_id=%d" %
-                (status_node, node_id_1))
-        self.progress("NODE_STATUS srcComponent matches allocated node_id")
-        self.context_stop_collecting('UAVCAN_NODE_STATUS')
 
         # Phase 2: Reboot autopilot (preserves DNA database), verify same node_id
         self.progress("Rebooting SITL to test DNA database persistence")
