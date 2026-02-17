@@ -211,7 +211,7 @@ class ESP32HWDef(hwdef.HWDef):
             parts = line.split()
             if len(parts) >= 2:
                 # Store the board ID as an integer define
-                self.intdefines['APJ_BOARD_ID'] = parts[1]
+                self.intdefines['APJ_BOARD_ID'] = int(parts[1])
                 self.progress("Found APJ_BOARD_ID: %s" % parts[1])
         elif line.startswith("PSRAM_SIZE"):
             parts = line.split()
