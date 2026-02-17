@@ -1,0 +1,1 @@
+/home/bruce/personal_scripts/ai-config/AGENTS.md
