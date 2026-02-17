@@ -182,9 +182,9 @@ bool WiFiDriver::read_data()
 
 bool WiFiDriver::write_data()
 {
+    _write_mutex.take_blocking();
     for (unsigned short i = 0; i < WIFI_MAX_CONNECTION && socket_list[i] > -1; ++i) {
         int count = 0;
-        _write_mutex.take_blocking();
         do {
             count = _writebuf.peekbytes(_buffer, sizeof(_buffer));
             if (count > 0) {

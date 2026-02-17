@@ -89,6 +89,7 @@ void Semaphore::take_blocking()
             const char* task_name = pcTaskGetName(current_task);
             ESP32_DEBUG_ERROR("RECURSION DETECTED! Thread %s (%p) already owns NON-RECURSIVE mutex %p", 
                      task_name, current_task, handle);
+            return;
         }
         
         result = xSemaphoreTake((QueueHandle_t)handle, portMAX_DELAY);
