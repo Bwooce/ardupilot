@@ -60,7 +60,7 @@ private:
     ConnectionState _state;
     short accept_socket;
     short socket_list[WIFI_MAX_CONNECTION];
-    tskTaskControlBlock* _wifi_task_handle;
+    tskTaskControlBlock* _wifi_task_handle = nullptr;
     void initialize_wifi();
     bool read_data();
     bool write_data();

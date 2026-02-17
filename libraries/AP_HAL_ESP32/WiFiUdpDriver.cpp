@@ -73,7 +73,20 @@ void WiFiUdpDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
 
 void WiFiUdpDriver::_end()
 {
-    //TODO
+    // Close the UDP socket
+    if (accept_socket != -1) {
+        close(accept_socket);
+        accept_socket = -1;
+    }
+    // Stop the WiFi thread
+    if (_wifi_task_handle != nullptr) {
+        vTaskDelete(_wifi_task_handle);
+        _wifi_task_handle = nullptr;
+    }
+    // Free ring buffers
+    _readbuf.set_size(0);
+    _writebuf.set_size(0);
+    _state = NOT_INITIALIZED;
 }
 
 void WiFiUdpDriver::_flush()

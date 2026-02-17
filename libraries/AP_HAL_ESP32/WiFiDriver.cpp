@@ -70,7 +70,28 @@ void WiFiDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
 
 void WiFiDriver::_end()
 {
-    //TODO
+    // Close all connected client sockets
+    for (unsigned short i = 0; i < WIFI_MAX_CONNECTION; ++i) {
+        if (socket_list[i] != -1) {
+            shutdown(socket_list[i], SHUT_RDWR);
+            close(socket_list[i]);
+            socket_list[i] = -1;
+        }
+    }
+    // Close the listening socket
+    if (accept_socket != -1) {
+        close(accept_socket);
+        accept_socket = -1;
+    }
+    // Stop the WiFi thread
+    if (_wifi_task_handle != nullptr) {
+        vTaskDelete(_wifi_task_handle);
+        _wifi_task_handle = nullptr;
+    }
+    // Free ring buffers
+    _readbuf.set_size(0);
+    _writebuf.set_size(0);
+    _state = NOT_INITIALIZED;
 }
 
 void WiFiDriver::_flush()
