@@ -442,7 +442,7 @@ void AP_DroneCAN_DNA_Server::send_node_status_mavlink(uint8_t node_id, const uav
     );
 
     // Send to all active MAVLink channels using lock protocol
-    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
     uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &mavlink_msg);
     for (uint8_t i=0; i<gcs().num_gcs(); i++) {
         GCS_MAVLINK *c = gcs().chan(i);
@@ -545,7 +545,7 @@ void AP_DroneCAN_DNA_Server::send_node_info_mavlink(uint8_t node_id, const uavca
     );
 
     // Send to all active MAVLink channels using lock protocol
-    MAVLINK_ALIGNED_BUF(buf, MAVLINK_MAX_PACKET_LEN);
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
     uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &mavlink_msg);
     for (uint8_t i=0; i<gcs().num_gcs(); i++) {
         GCS_MAVLINK *c = gcs().chan(i);
