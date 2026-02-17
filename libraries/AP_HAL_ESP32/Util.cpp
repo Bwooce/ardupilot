@@ -27,6 +27,8 @@
 #include <esp_timer.h>
 #include <multi_heap.h>
 #include <esp_heap_caps.h>
+#include <esp_efuse.h>
+#include <esp_efuse_table.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -183,9 +185,7 @@ bool Util::get_system_id(char buf[50])
 
     uint8_t base_mac_addr[6] = {0};
 
-// Custom MAC support temporarily disabled - requires esp_efuse.h
-// TODO: Fix ESP-IDF include paths and re-enable custom MAC support
-#if 0 && defined(ESP_EFUSE_USER_DATA_MAC_CUSTOM) && defined(HAL_ESP32_USE_CUSTOM_MAC)
+#if defined(ESP_EFUSE_USER_DATA_MAC_CUSTOM) && defined(HAL_ESP32_USE_CUSTOM_MAC)
     // Check if custom MAC exists before trying to read it (avoids error message)
     // Custom MACs are sometimes used for copy protection/licensing
     uint8_t custom_mac[6] = {0};
@@ -228,9 +228,7 @@ bool Util::get_system_id_unformatted(uint8_t buf[], uint8_t &len)
 {
     uint8_t base_mac_addr[6] = {0};
 
-// Custom MAC support temporarily disabled - requires esp_efuse.h
-// TODO: Fix ESP-IDF include paths and re-enable custom MAC support
-#if 0 && defined(ESP_EFUSE_USER_DATA_MAC_CUSTOM) && defined(HAL_ESP32_USE_CUSTOM_MAC)
+#if defined(ESP_EFUSE_USER_DATA_MAC_CUSTOM) && defined(HAL_ESP32_USE_CUSTOM_MAC)
     // Check if custom MAC exists before trying to read it (avoids error message)
     // Custom MACs are sometimes used for copy protection/licensing
     uint8_t custom_mac[6] = {0};

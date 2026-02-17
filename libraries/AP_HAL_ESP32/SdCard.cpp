@@ -211,7 +211,6 @@ void mount_sdcard_spi()
     };
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    //TODO change to sdspi_host_init_device for spi sharing
     spi_bus_config_t bus_cfg = {
         .mosi_io_num = bus_.mosi,
         .miso_io_num = bus_.miso,

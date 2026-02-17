@@ -3,11 +3,10 @@ name: ESP32 Build
 on:
   push:
     paths-ignore:
-      # remove non copter and plane vehicles
+      # remove non copter, plane, and rover vehicles
       - 'AntennaTracker/**'
       - 'ArduSub/**'
       - 'Blimp/**'
-      - 'Rover/**'
       # remove non esp32 HAL
       - 'libraries/AP_HAL_ChibiOS/**'
       - 'libraries/AP_HAL_SITL/**'
@@ -70,11 +69,10 @@ on:
 
   pull_request:
     paths-ignore:
-      # remove non copter and plane vehicles
+      # remove non copter, plane, and rover vehicles
       - 'AntennaTracker/**'
       - 'ArduSub/**'
       - 'Blimp/**'
-      - 'Rover/**'
       # remove non esp32 HAL
       - 'libraries/AP_HAL_ChibiOS/**'
       - 'libraries/AP_HAL_SITL/**'
@@ -239,6 +237,14 @@ jobs:
 
           cp build/${{matrix.config}}/esp-idf_build/ardupilot.bin ./ArduCopter.${{matrix.config}}.bin
           cp build/${{matrix.config}}/esp-idf_build/ardupilot.elf ./ArduCopter.${{matrix.config}}.elf
+          echo "### Build Rover ${{matrix.config}} :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo './waf rover' >> $GITHUB_STEP_SUMMARY
+          ./waf rover | tee >( grep -vE 'Compiling|Generat|includes.list|Parsing|Validation|Building|Linking|Detecting|linker|\*\*\*\*\*\*\*|Partition|SubType|Checking|esp-idf' --color=never --line-buffered > summary3.log)
+
+          cat summary3.log >> $GITHUB_STEP_SUMMARY
+
+          cp build/${{matrix.config}}/esp-idf_build/ardupilot.bin ./ArduRover.${{matrix.config}}.bin
+          cp build/${{matrix.config}}/esp-idf_build/ardupilot.elf ./ArduRover.${{matrix.config}}.elf
 
           cp build/${{matrix.config}}/esp-idf_build/bootloader/bootloader.bin ./bootloader.${{matrix.config}}.bin
           cp build/${{matrix.config}}/esp-idf_build/partition_table/partition-table.bin ./partition-table.${{matrix.config}}.bin
@@ -255,6 +261,8 @@ jobs:
               /home/runner/work/ardupilot/ardupilot/ArduPlane.${{matrix.config}}.elf
               /home/runner/work/ardupilot/ardupilot/ArduCopter.${{matrix.config}}.bin
               /home/runner/work/ardupilot/ardupilot/ArduCopter.${{matrix.config}}.elf
+              /home/runner/work/ardupilot/ardupilot/ArduRover.${{matrix.config}}.bin
+              /home/runner/work/ardupilot/ardupilot/ArduRover.${{matrix.config}}.elf
               /home/runner/work/ardupilot/ardupilot/bootloader.${{matrix.config}}.bin
               /home/runner/work/ardupilot/ardupilot/partition-table.${{matrix.config}}.bin
 

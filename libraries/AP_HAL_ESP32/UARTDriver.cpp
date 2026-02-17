@@ -67,21 +67,11 @@ static const UARTDesc uart_pins[] = {HAL_ESP32_UART_DEVICES};
 // Protocol-based mutex type selection - determines if a UART needs non-recursive mutexes
 // Non-recursive mutexes prevent deadlock during atomic packet transmission
 // for protocols that require strict serialization (MAVLink, CRSF)
-//
-// This replaces the previous hardcoded 'serial_num == 1' logic with proper protocol detection
+// Non-recursive mutexes are needed for MAVLink and other binary protocols
+// that use take_nonblocking() to detect re-entry. SERIAL0 (console) needs
+// recursive because vprintf() holds the mutex while calling _write().
 static bool needs_non_recursive_mutex(uint8_t serial_num) {
-    // During early initialization, SerialManager may not be ready yet
-    // Use conservative fallback to avoid crashes during startup
-    
-    // TODO: Implement deferred protocol detection after SerialManager initialization
-    // For now, fall back to the original logic that worked to prevent startup crashes
-    
-    // TEMPORARY: Use hardcoded logic as fallback until we can safely query SerialManager
-    // This matches the original working behavior
-    return (serial_num == 1);  // SERIAL1 typically used for MAVLink
-    
-    // The full protocol-based detection will be enabled once we resolve the
-    // initialization order dependency between UARTDriver and SerialManager
+    return (serial_num != 0);
 }
 
 UARTDriver::UARTDriver(uint8_t serial_num)
