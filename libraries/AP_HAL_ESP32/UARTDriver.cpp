@@ -107,13 +107,15 @@ UARTDriver::UARTDriver(uint8_t serial_num)
 
 void UARTDriver::vprintf(const char *fmt, va_list ap)
 {
-    // DISABLED: Console mutex causing complete system lockup during early boot
-    // The mutex was being initialized/taken before console was ready
-    // TODO: Implement proper console synchronization after system is fully initialized
-    
-    // Use standard ArduPilot vprintf implementation for all UARTs
-    // ESP-IDF logging is now handled separately at the system level
-    AP_HAL::UARTDriver::vprintf(fmt, ap);
+    // Serialize console output from multiple tasks, but only after _begin()
+    // has run -- before that the FreeRTOS scheduler may not be running yet
+    if (_initialized) {
+        _write_mutex.take_blocking();
+        AP_HAL::UARTDriver::vprintf(fmt, ap);
+        _write_mutex.give();
+    } else {
+        AP_HAL::UARTDriver::vprintf(fmt, ap);
+    }
 }
 
 void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
