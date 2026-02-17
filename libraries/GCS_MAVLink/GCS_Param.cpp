@@ -68,6 +68,7 @@ static uint8_t dronecan_union_tag_to_mav_type(uint8_t union_tag)
 {
     switch (union_tag) {
     case UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE:
+        return MAV_PARAM_EXT_TYPE_INT64;
     case UAVCAN_PROTOCOL_PARAM_VALUE_BOOLEAN_VALUE:
         return MAV_PARAM_EXT_TYPE_INT32;
     case UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE:
@@ -85,7 +86,7 @@ static void format_dronecan_value(const uavcan_protocol_param_Value &value,
 {
     switch (value.union_tag) {
     case UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE:
-        snprintf(buf, buf_size, "%ld", (long)value.integer_value);
+        snprintf(buf, buf_size, "%lld", (long long)value.integer_value);
         break;
     case UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE:
         snprintf(buf, buf_size, "%.6f", (double)value.real_value);
@@ -172,9 +173,9 @@ static bool dronecan_param_enum_generic_cb_wrapper(void* obj, AP_DroneCAN* ap_dr
         );
 
         uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-        uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+        uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
         comm_send_lock(GCS_MAVLINK::param_enum_state.chan, len);
-        comm_send_buffer(GCS_MAVLINK::param_enum_state.chan, buf, len);
+        comm_send_buffer(GCS_MAVLINK::param_enum_state.chan, (uint8_t*)buf, len);
         comm_send_unlock(GCS_MAVLINK::param_enum_state.chan);
     }
 
@@ -249,9 +250,9 @@ GCS_MAVLINK::queued_param_send()
             _queued_parameter_index
         );
         uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-        uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+        uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
         comm_send_lock(chan, len);
-        comm_send_buffer(chan, buf, len);
+        comm_send_buffer(chan, (uint8_t*)buf, len);
         comm_send_unlock(chan);
 
         _queued_parameter = AP_Param::next_scalar(&_queued_parameter_token, &_queued_parameter_type);
@@ -911,10 +912,12 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
     case MAV_PARAM_EXT_TYPE_INT8:
     case MAV_PARAM_EXT_TYPE_INT16:
     case MAV_PARAM_EXT_TYPE_INT32:
+    case MAV_PARAM_EXT_TYPE_INT64:
     case MAV_PARAM_EXT_TYPE_UINT8:
     case MAV_PARAM_EXT_TYPE_UINT16:
     case MAV_PARAM_EXT_TYPE_UINT32:
-        dc_value.integer_value = atol(param_value);
+    case MAV_PARAM_EXT_TYPE_UINT64:
+        dc_value.integer_value = atoll(param_value);
         dc_value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE;
         break;
     case MAV_PARAM_EXT_TYPE_REAL32:
@@ -932,7 +935,7 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
         break;
     default:
         // Unknown type -- try as integer (most common DroneCAN type)
-        dc_value.integer_value = atol(param_value);
+        dc_value.integer_value = atoll(param_value);
         dc_value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE;
         break;
     }
@@ -965,9 +968,9 @@ void GCS_MAVLINK::send_param_ext_value(const char *param_name, const char *param
     );
 
     uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-    uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
     comm_send_lock(chan, len);
-    comm_send_buffer(chan, buf, len);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
     comm_send_unlock(chan);
 }
 
@@ -986,9 +989,9 @@ void GCS_MAVLINK::send_param_ext_ack(const char *param_name, const char *param_v
     );
 
     uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-    uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+    uint16_t len = mavlink_msg_to_send_buffer((uint8_t*)buf, &msg);
     comm_send_lock(chan, len);
-    comm_send_buffer(chan, buf, len);
+    comm_send_buffer(chan, (uint8_t*)buf, len);
     comm_send_unlock(chan);
 }
 
