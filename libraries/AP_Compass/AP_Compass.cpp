@@ -1016,11 +1016,9 @@ bool Compass::register_compass(int32_t dev_id, uint8_t& instance)
 #endif
 
 #if COMPASS_MAX_UNREG_DEV
-    // Set extra dev id
-    if (_unreg_compass_count >= COMPASS_MAX_UNREG_DEV) {
-        AP_HAL::panic("Too many compass instances");
-    }
-
+    // Check if this dev_id is already tracked as unregistered (e.g. DroneCAN
+    // compass retry). Must be checked before the count limit to avoid a
+    // spurious panic when a known compass is re-probed.
     for (uint8_t i=0; i<COMPASS_MAX_UNREG_DEV; i++) {
         if (extra_dev_id[i] == dev_id) {
             if (i >= _unreg_compass_count) {
@@ -1028,7 +1026,16 @@ bool Compass::register_compass(int32_t dev_id, uint8_t& instance)
             }
             instance = i+COMPASS_MAX_INSTANCES;
             return false;
-        } else if (extra_dev_id[i] == 0) {
+        }
+    }
+
+    // Set extra dev id
+    if (_unreg_compass_count >= COMPASS_MAX_UNREG_DEV) {
+        AP_HAL::panic("Too many compass instances");
+    }
+
+    for (uint8_t i=0; i<COMPASS_MAX_UNREG_DEV; i++) {
+        if (extra_dev_id[i] == 0) {
             extra_dev_id[_unreg_compass_count++].set(dev_id);
             instance = i+COMPASS_MAX_INSTANCES;
             return false;
