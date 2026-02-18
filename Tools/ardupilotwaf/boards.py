@@ -1028,27 +1028,18 @@ class esp32(Board):
                         key, value = line.split('=', 1)
                         if key.startswith(('IDF_', 'PATH', 'PYTHON')) or 'esp' in key.lower():
                             os.environ[key] = value
+                            if hasattr(cfg, 'environ'):
+                                cfg.environ[key] = value
             except Exception as e:
                 print(f"Warning: Failed to source ESP-IDF environment: {e}")
-
-        # Now call parent configure with ESP-IDF environment available
-        super(esp32, self).configure(cfg)
-
-        # Handle toolchain configuration like upstream
-        if cfg.env.TOOLCHAIN:
-            self.toolchain = cfg.env.TOOLCHAIN
-        else:
-            # default tool-chain for esp32-based boards:
-            self.toolchain = 'xtensa-esp32-elf'
-
-    def configure_env(self, cfg, env):
-        env.BOARD_CLASS = "ESP32"
 
         # run hwdef to get MCU
         sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../libraries/AP_HAL_ESP32/hwdef/scripts'))
         import esp32_hwdef
         hwdef_dir = os.path.join(cfg.srcnode.abspath(), 'libraries/AP_HAL_ESP32/hwdef')
         hwdef_dat = os.path.join(hwdef_dir, self.name, 'hwdef.dat')
+        if not os.path.exists(cfg.bldnode.abspath()):
+            os.makedirs(cfg.bldnode.abspath())
         eh = esp32_hwdef.ESP32HWDef(
             outdir=cfg.bldnode.abspath(),
             hwdef=[hwdef_dat],
@@ -1057,7 +1048,17 @@ class esp32(Board):
         eh.run()
         mcu = eh.mcu
         cfg.env.MCU = mcu
-        self.toolchain = 'xtensa-%s-elf' % mcu
+        self.toolchain = 'xtensa-%s-elf' % mcu.lower()
+
+        # Now call parent configure with ESP-IDF environment available
+        super(esp32, self).configure(cfg)
+
+        # Handle toolchain configuration like upstream
+        if cfg.env.TOOLCHAIN:
+            self.toolchain = cfg.env.TOOLCHAIN
+
+    def configure_env(self, cfg, env):
+        env.BOARD_CLASS = "ESP32"
 
         def expand_path(p):
             print("USING EXPRESSIF IDF:"+str(env.idf))
