@@ -2804,6 +2804,13 @@ void GCS::update_send()
 
     service_statustext();
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
+    // Drain DroneCAN node status/info messages queued by the DroneCAN thread
+    AP_DroneCAN_DNA_Server::service_pending_mavlink();
+#endif
+#endif
+
     first_backend_to_send++;
     if (first_backend_to_send >= num_gcs()) {
         first_backend_to_send = 0;

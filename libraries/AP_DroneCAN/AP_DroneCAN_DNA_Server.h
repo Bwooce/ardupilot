@@ -185,11 +185,51 @@ public:
     // Request node info for all seen nodes (for MAV_CMD_UAVCAN_GET_NODE_INFO)
     void request_all_node_info();
 
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
+    // Drain pending MAVLink messages queued by the DroneCAN thread.
+    // Must be called from the main thread (e.g. GCS::update_send).
+    static void service_pending_mavlink();
+#endif
+
 private:
 #if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
-    void send_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg);
+    // Queue node data for deferred MAVLink sending from the main thread.
+    // These are called from the DroneCAN thread callbacks.
+    void queue_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg);
     void report_node_health_change(uint8_t node_id, uint8_t health, uint8_t mode, bool recovered);
-    void send_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg);
+    void queue_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg);
+
+    // Pending node status data (DroneCAN thread writes, main thread reads)
+    struct PendingNodeStatus {
+        uint32_t uptime_sec;
+        uint16_t vendor_specific_status_code;
+        uint8_t node_id;
+        uint8_t health;
+        uint8_t mode;
+        uint8_t sub_mode;
+    };
+
+    // Pending node info data (DroneCAN thread writes, main thread reads)
+    struct PendingNodeInfo {
+        uint32_t uptime_sec;
+        uint32_t sw_vcs_commit;
+        uint8_t node_id;
+        uint8_t hw_version_major;
+        uint8_t hw_version_minor;
+        uint8_t unique_id[16];
+        uint8_t sw_version_major;
+        uint8_t sw_version_minor;
+        char name[81];
+    };
+
+    static constexpr uint8_t PENDING_MAVLINK_MAX = 4;
+    static struct PendingMavlink {
+        PendingNodeStatus status[PENDING_MAVLINK_MAX];
+        PendingNodeInfo info[PENDING_MAVLINK_MAX];
+        uint8_t status_count;
+        uint8_t info_count;
+        HAL_Semaphore sem;
+    } _pending_mavlink;
 #endif
 };
 

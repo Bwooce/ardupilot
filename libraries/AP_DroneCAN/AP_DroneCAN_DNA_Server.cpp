@@ -42,6 +42,11 @@ extern const AP_HAL::HAL& hal;
 // database is currently shared by all DNA servers
 AP_DroneCAN_DNA_Server::Database AP_DroneCAN_DNA_Server::db;
 
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
+// pending MAVLink message queue shared by all DNA servers
+AP_DroneCAN_DNA_Server::PendingMavlink AP_DroneCAN_DNA_Server::_pending_mavlink;
+#endif
+
 // initialize database (storage accessor is always replaced with the one supplied)
 void AP_DroneCAN_DNA_Server::Database::init(StorageAccess *storage_)
 {
@@ -336,7 +341,7 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
     // Send UAVCAN_NODE_STATUS MAVLink message on first contact or health change only
     // (not every heartbeat, which would flood MAVLink channels)
     if (first_contact || (was_healthy != is_healthy)) {
-        send_node_status_mavlink(transfer.source_node_id, msg);
+        queue_node_status_mavlink(transfer.source_node_id, msg);
     }
 #endif
 
@@ -380,36 +385,21 @@ void AP_DroneCAN_DNA_Server::handleNodeStatus(const CanardRxTransfer& transfer, 
 }
 
 #if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
-void AP_DroneCAN_DNA_Server::send_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg)
-{
-#if HAL_GCS_ENABLED
-    // Pack the message with the node ID as the component ID (per MAVLink UAVCAN spec)
-    mavlink_message_t mavlink_msg;
-    mavlink_msg_uavcan_node_status_pack(
-        mavlink_system.sysid,
-        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
-        &mavlink_msg,
-        AP_HAL::micros64(),
-        msg.uptime_sec,
-        msg.health,
-        msg.mode,
-        msg.sub_mode,
-        msg.vendor_specific_status_code
-    );
 
-    // Send to all active MAVLink channels using lock protocol
-    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-    uint16_t len = mavlink_msg_to_send_buffer(buf, &mavlink_msg);
-    for (uint8_t i=0; i<gcs().num_gcs(); i++) {
-        GCS_MAVLINK *c = gcs().chan(i);
-        if (c == nullptr || c->is_private() || !c->is_active()) {
-            continue;
-        }
-        comm_send_lock((mavlink_channel_t)i, len);
-        comm_send_buffer((mavlink_channel_t)i, buf, len);
-        comm_send_unlock((mavlink_channel_t)i);
+// Queue a node status for deferred MAVLink sending (called from DroneCAN thread)
+void AP_DroneCAN_DNA_Server::queue_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg)
+{
+    WITH_SEMAPHORE(_pending_mavlink.sem);
+    if (_pending_mavlink.status_count >= PENDING_MAVLINK_MAX) {
+        return;  // queue full, drop oldest-unsent
     }
-#endif
+    auto &entry = _pending_mavlink.status[_pending_mavlink.status_count++];
+    entry.node_id = node_id;
+    entry.uptime_sec = msg.uptime_sec;
+    entry.health = msg.health;
+    entry.mode = msg.mode;
+    entry.sub_mode = msg.sub_mode;
+    entry.vendor_specific_status_code = msg.vendor_specific_status_code;
 }
 
 void AP_DroneCAN_DNA_Server::report_node_health_change(uint8_t node_id, uint8_t health, uint8_t mode, bool recovered)
@@ -474,49 +464,100 @@ void AP_DroneCAN_DNA_Server::report_node_health_change(uint8_t node_id, uint8_t 
 #endif
 }
 
-void AP_DroneCAN_DNA_Server::send_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg)
+// Queue node info for deferred MAVLink sending (called from DroneCAN thread)
+void AP_DroneCAN_DNA_Server::queue_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg)
+{
+    WITH_SEMAPHORE(_pending_mavlink.sem);
+    if (_pending_mavlink.info_count >= PENDING_MAVLINK_MAX) {
+        return;  // queue full, drop
+    }
+    auto &entry = _pending_mavlink.info[_pending_mavlink.info_count++];
+    entry.node_id = node_id;
+    entry.uptime_sec = msg.status.uptime_sec;
+    entry.hw_version_major = msg.hardware_version.major;
+    entry.hw_version_minor = msg.hardware_version.minor;
+    memcpy(entry.unique_id, msg.hardware_version.unique_id, 16);
+    entry.sw_version_major = msg.software_version.major;
+    entry.sw_version_minor = msg.software_version.minor;
+    entry.sw_vcs_commit = msg.software_version.vcs_commit;
+    size_t name_len = MIN((size_t)msg.name.len, sizeof(entry.name) - 1);
+    memcpy(entry.name, msg.name.data, name_len);
+    entry.name[name_len] = '\0';
+
+    // Thread-safe text notification via GCS_SEND_TEXT
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN Node %d: %s v%d.%d online",
+                  node_id, entry.name,
+                  msg.software_version.major, msg.software_version.minor);
+}
+
+// Drain pending MAVLink messages - called from main thread (GCS::update_send)
+void AP_DroneCAN_DNA_Server::service_pending_mavlink()
 {
 #if HAL_GCS_ENABLED
-    // Prepare node name with null termination
-    char node_name[81];
-    size_t name_len = MIN(msg.name.len, sizeof(node_name) - 1);
-    memcpy(node_name, msg.name.data, name_len);
-    node_name[name_len] = '\0';
+    WITH_SEMAPHORE(_pending_mavlink.sem);
 
-    // Pack the message with the node ID as the component ID (per MAVLink UAVCAN spec)
-    mavlink_message_t mavlink_msg;
-    mavlink_msg_uavcan_node_info_pack(
-        mavlink_system.sysid,
-        node_id,  // Source component = node ID (1:1 per MAVLink UAVCAN spec)
-        &mavlink_msg,
-        AP_HAL::micros64(),
-        msg.status.uptime_sec,
-        node_name,
-        msg.hardware_version.major,
-        msg.hardware_version.minor,
-        msg.hardware_version.unique_id,
-        msg.software_version.major,
-        msg.software_version.minor,
-        msg.software_version.vcs_commit
-    );
+    // Send queued UAVCAN_NODE_STATUS messages
+    for (uint8_t i = 0; i < _pending_mavlink.status_count; i++) {
+        const auto &s = _pending_mavlink.status[i];
+        mavlink_message_t mavlink_msg;
+        mavlink_msg_uavcan_node_status_pack(
+            mavlink_system.sysid,
+            s.node_id,
+            &mavlink_msg,
+            AP_HAL::micros64(),
+            s.uptime_sec,
+            s.health,
+            s.mode,
+            s.sub_mode,
+            s.vendor_specific_status_code
+        );
 
-    // Send to all active MAVLink channels using lock protocol
-    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-    uint16_t len = mavlink_msg_to_send_buffer(buf, &mavlink_msg);
-    for (uint8_t i=0; i<gcs().num_gcs(); i++) {
-        GCS_MAVLINK *c = gcs().chan(i);
-        if (c == nullptr || c->is_private() || !c->is_active()) {
-            continue;
+        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+        uint16_t len = mavlink_msg_to_send_buffer(buf, &mavlink_msg);
+        for (uint8_t c = 0; c < gcs().num_gcs(); c++) {
+            GCS_MAVLINK *ch = gcs().chan(c);
+            if (ch == nullptr || ch->is_private() || !ch->is_active()) {
+                continue;
+            }
+            comm_send_lock((mavlink_channel_t)c, len);
+            comm_send_buffer((mavlink_channel_t)c, buf, len);
+            comm_send_unlock((mavlink_channel_t)c);
         }
-        comm_send_lock((mavlink_channel_t)i, len);
-        comm_send_buffer((mavlink_channel_t)i, buf, len);
-        comm_send_unlock((mavlink_channel_t)i);
     }
+    _pending_mavlink.status_count = 0;
 
-    // Also send a text message for human-readable notification
-    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "DroneCAN Node %d: %s v%d.%d online",
-                  node_id, node_name,
-                  msg.software_version.major, msg.software_version.minor);
+    // Send queued UAVCAN_NODE_INFO messages
+    for (uint8_t i = 0; i < _pending_mavlink.info_count; i++) {
+        const auto &n = _pending_mavlink.info[i];
+        mavlink_message_t mavlink_msg;
+        mavlink_msg_uavcan_node_info_pack(
+            mavlink_system.sysid,
+            n.node_id,
+            &mavlink_msg,
+            AP_HAL::micros64(),
+            n.uptime_sec,
+            n.name,
+            n.hw_version_major,
+            n.hw_version_minor,
+            n.unique_id,
+            n.sw_version_major,
+            n.sw_version_minor,
+            n.sw_vcs_commit
+        );
+
+        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+        uint16_t len = mavlink_msg_to_send_buffer(buf, &mavlink_msg);
+        for (uint8_t c = 0; c < gcs().num_gcs(); c++) {
+            GCS_MAVLINK *ch = gcs().chan(c);
+            if (ch == nullptr || ch->is_private() || !ch->is_active()) {
+                continue;
+            }
+            comm_send_lock((mavlink_channel_t)c, len);
+            comm_send_buffer((mavlink_channel_t)c, buf, len);
+            comm_send_unlock((mavlink_channel_t)c);
+        }
+    }
+    _pending_mavlink.info_count = 0;
 #endif
 }
 #endif  // AP_DRONECAN_MAVLINK_REPORTING_ENABLED
@@ -533,8 +574,11 @@ void AP_DroneCAN_DNA_Server::handleNodeInfo(const CanardRxTransfer& transfer, co
     }
 
 #if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
-    // Send UAVCAN_NODE_INFO MAVLink message for node discovery
-    send_node_info_mavlink(transfer.source_node_id, rsp);
+    // Send UAVCAN_NODE_INFO MAVLink message on first verification only
+    // (not on every re-verification cycle, which would flood the channel)
+    if (!node_verified.get(transfer.source_node_id)) {
+        queue_node_info_mavlink(transfer.source_node_id, rsp);
+    }
 #endif
 
     /*
