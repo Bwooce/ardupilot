@@ -3890,6 +3890,21 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             "SIM_MAG3_DEVID" : 0,
             "COMPASS_USE2"   : 0,
             "COMPASS_USE3"   : 0,
+            # Compass device IDs encode the CAN node ID (see
+            # AP_Compass_DroneCAN.cpp make_bus_id). The default
+            # SIM_MAG1_DEVID=97539 encodes BUS_TYPE_UAVCAN node 125,
+            # matching the DNA server MAX_NODE_ID=125 on master. If a
+            # branch changes MAX_NODE_ID the periph allocates a different
+            # node ID, producing a different devid. The stale SITL devids
+            # from the pre-CAN boot fill all 3 priority slots, blocking
+            # DroneCAN compass registration. Clear them so the DroneCAN
+            # compass can register regardless of DNA allocation policy.
+            "COMPASS_PRIO1_ID": 0,
+            "COMPASS_PRIO2_ID": 0,
+            "COMPASS_PRIO3_ID": 0,
+            "COMPASS_DEV_ID"  : 0,
+            "COMPASS_DEV_ID2" : 0,
+            "COMPASS_DEV_ID3" : 0,
             # use DroneCAN rangefinder
             "RNGFND1_TYPE" : 24,
             "RNGFND1_MAX" : 110.00,

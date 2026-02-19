@@ -448,12 +448,8 @@ class ESP32HWDef(hwdef.HWDef):
         # Write string defines (hwdef.h should override defaults)
         if hasattr(self, 'strdefines'):
             for name in sorted(self.strdefines.keys()):
-<<<<<<< HEAD
-                f.write("#undef %s\n" % name)  # Undefine any previous definition
-=======
                 undef_name = name.split('(')[0]
                 f.write("#undef %s\n" % undef_name)  # Undefine any previous definition
->>>>>>> feature/esp32-hwdef-refactor
                 f.write("#define %s %s\n" % (name, self.strdefines[name]))
         
         # Automatically handle ADC configuration if not explicitly defined
