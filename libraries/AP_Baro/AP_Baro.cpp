@@ -62,6 +62,14 @@
 
 #define INTERNAL_TEMPERATURE_CLAMP 35.0f
 
+#ifndef ADD_BACKEND
+#define ADD_BACKEND(probe) _add_backend(probe)
+#endif
+
+#ifndef GET_I2C_DEVICE
+#define GET_I2C_DEVICE(bus, address) hal.i2c_mgr->get_device(bus, address)
+#endif
+
 #ifndef HAL_BARO_FILTER_DEFAULT
  #define HAL_BARO_FILTER_DEFAULT 0 // turned off by default
 #endif

@@ -448,7 +448,12 @@ class ESP32HWDef(hwdef.HWDef):
         # Write string defines (hwdef.h should override defaults)
         if hasattr(self, 'strdefines'):
             for name in sorted(self.strdefines.keys()):
+<<<<<<< HEAD
                 f.write("#undef %s\n" % name)  # Undefine any previous definition
+=======
+                undef_name = name.split('(')[0]
+                f.write("#undef %s\n" % undef_name)  # Undefine any previous definition
+>>>>>>> feature/esp32-hwdef-refactor
                 f.write("#define %s %s\n" % (name, self.strdefines[name]))
         
         # Automatically handle ADC configuration if not explicitly defined
@@ -967,7 +972,7 @@ class ESP32HWDef(hwdef.HWDef):
         
         # Also handle string defines like HAL_BOARD_LOG_DIRECTORY "/APM/LOGS"
         import re
-        result = re.match(r'define\s+([A-Z_0-9]+)\s+(.+)', line)
+        result = re.match(r'define\s+([A-Z_0-9_]+(?:\([^)]*\))?)\s+(.+)', line)
         if result:
             name = result.group(1)
             value = result.group(2)

@@ -1470,6 +1470,10 @@ void Compass::_detect_backends(void)
     }
 }
 
+#ifndef ADD_BACKEND
+#define ADD_BACKEND(driver_type, backend) add_backend(driver_type, backend)
+#endif
+
 /*
   probe i2c and SPI compasses
  */

@@ -100,11 +100,13 @@ def configure(cfg):
             result = subprocess.run(['bash', '-c', f'source {export_script} && env'],
                                   capture_output=True, text=True, check=True)
             # Update current environment with ESP-IDF variables
+            env.ESP32_ENV = {}
             for line in result.stdout.splitlines():
                 if '=' in line and not line.startswith('_'):
                     key, value = line.split('=', 1)
                     if key.startswith(('IDF_', 'PATH', 'PYTHON')) or 'esp' in key.lower():
                         os.environ[key] = value
+                        env.ESP32_ENV[key] = value
         except Exception as e:
             print(f"Warning: Failed to source ESP-IDF environment: {e}")
 
@@ -249,6 +251,12 @@ def pre_build(self):
     lib_vars['WAF_BUILD_TARGET'] = self.targets
     lib_vars['ARDUPILOT_LIB'] = self.bldnode.find_or_declare('lib/').abspath()
     lib_vars['ARDUPILOT_BIN'] = self.bldnode.find_or_declare('lib/bin').abspath()
+    
+    # Restore ESP-IDF environment variables captured during configure
+    if self.env.ESP32_ENV:
+        for key, value in self.env.ESP32_ENV.items():
+            os.environ[key] = value
+            
     target = self.env.ESP32_TARGET
     esp_idf = self.cmake(
             name='esp-idf',

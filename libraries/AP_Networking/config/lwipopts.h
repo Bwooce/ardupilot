@@ -348,9 +348,11 @@ a lot of data that needs to be copied, this should be set high. */
 #define LWIP_NETBIOS_RESPOND_NAME_QUERY 0
 
 /* routing hook */
+#if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
 #define LWIP_HOOK_IP4_ROUTE ap_networking_routing_hook
 struct ip4_addr;
 struct netif *ap_networking_routing_hook(const struct ip4_addr *dest);
+#endif
 
 /* ---------- PPP options ---------- */
 
