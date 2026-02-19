@@ -4896,11 +4896,30 @@ class TestSuite(abc.ABC):
         self.set_parameters({
             "CAN_P1_DRIVER": 1,
             "LOG_DISARMED": 1,
+            # Enable DroneCAN GPS to discover periph node IDs.
+            # DNA allocates from MAX_NODE_ID downward; instance 0
+            # (whose SERIAL4 is at port 15550) gets the highest.
+            "GPS1_TYPE": 9,
+            "GPS2_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+            "SIM_GPS2_ENABLE": 0,
             })
+        self.context_collect('STATUSTEXT')
         self.reboot_sitl()
+        # Discover periph node IDs from GPS detection messages
+        gps1_text = self.wait_text("GPS 1: specified as DroneCAN.*",
+                                   regex=True, check_context=True, timeout=60)
+        gps2_text = self.wait_text("GPS 2: specified as DroneCAN.*",
+                                   regex=True, check_context=True, timeout=60)
+        self.context_stop_collecting('STATUSTEXT')
+        gps1_node = int(gps1_text.split('-')[1])
+        gps2_node = int(gps2_text.split('-')[1])
+        # Instance 0 (port 15550) gets the highest node ID
+        periph_node = max(gps1_node, gps2_node)
+        self.progress("Using periph node %d for CAN serial tunnel" % periph_node)
         self.set_parameters({
             "CAN_D1_UC_SER_EN": 1,
-            "CAN_D1_UC_S1_NOD": 125,
+            "CAN_D1_UC_S1_NOD": periph_node,
             "CAN_D1_UC_S1_IDX": 4,
             "CAN_D1_UC_S1_BD": 57600,
             "CAN_D1_UC_S1_PRO": 2,
