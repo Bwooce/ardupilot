@@ -14,15 +14,18 @@
 #include <dronecan_msgs.h>
 
 class AP_DroneCAN;
+
+// Maximum DroneCAN node ID supported by the DNA database.
+// Reduced from 125 to 62 to store full 16-byte unique IDs (vs 7-byte
+// FNV-1a hashes) within the 1KB storage area.  62 nodes is well beyond
+// any practical CAN bus deployment.
+#define MAX_NODE_ID 62
+
 //Forward declaring classes
 class AP_DroneCAN_DNA_Server
 {
     StorageAccess storage;
 
-    // Store full 16-byte unique IDs for lossless node identification.
-    // This uses 16 bytes/node vs the previous 7-byte FNV-1a hash format,
-    // reducing MAX_NODE_ID from 125 to 62 in the 1KB storage area.
-    // 62 nodes is well beyond any practical CAN bus deployment.
     struct PACKED NodeRecord {
         uint8_t uid[16];
     };

@@ -735,8 +735,7 @@ void GCS_MAVLINK::handle_param_ext_request_list(const mavlink_message_t &msg)
     debug_param_ext(AP_CANManager::LOG_DEBUG, "PARAM_EXT_REQUEST_LIST for component %d", packet.target_component);
 
     // Per MAVLink UAVCAN spec: Component ID = Node ID (1:1 mapping)
-    // Valid DroneCAN node IDs are 1-127
-    if (packet.target_component < 1 || packet.target_component > 127) {
+    if (packet.target_component < 1 || packet.target_component > MAX_NODE_ID) {
         // Not a valid DroneCAN node ID
         return;
     }
@@ -785,8 +784,7 @@ void GCS_MAVLINK::handle_param_ext_request_read(const mavlink_message_t &msg)
     debug_param_ext(AP_CANManager::LOG_DEBUG, "PARAM_EXT_REQUEST_READ node=%d param='%s'", packet.target_component, param_id);
 
     // Per MAVLink UAVCAN spec: Component ID = Node ID (1:1 mapping)
-    // Valid DroneCAN node IDs are 1-127
-    if (packet.target_component < 1 || packet.target_component > 127) {
+    if (packet.target_component < 1 || packet.target_component > MAX_NODE_ID) {
         // Not a valid DroneCAN node ID
         return;
     }
@@ -850,8 +848,7 @@ void GCS_MAVLINK::handle_param_ext_set(const mavlink_message_t &msg)
     mavlink_msg_param_ext_set_decode(&msg, &packet);
 
     // Per MAVLink UAVCAN spec: Component ID = Node ID (1:1 mapping)
-    // Valid DroneCAN node IDs are 1-127
-    if (packet.target_component < 1 || packet.target_component > 127) {
+    if (packet.target_component < 1 || packet.target_component > MAX_NODE_ID) {
         // Not a valid DroneCAN node ID
         return;
     }

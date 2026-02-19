@@ -34,7 +34,7 @@ extern const AP_HAL::HAL& hal;
 // Existing databases are automatically reset on upgrade; nodes re-allocate on next boot.
 #define NODERECORD_MAGIC 0xAC02
 #define NODERECORD_MAGIC_LEN 2 // uint16_t
-#define MAX_NODE_ID    62
+// MAX_NODE_ID is defined in AP_DroneCAN_DNA_Server.h
 #define NODERECORD_LOC(node_id) ((node_id * sizeof(NodeRecord)) + NODERECORD_MAGIC_LEN)
 
 #define debug_dronecan(level_debug, fmt, args...) do { AP::can().log_text(level_debug, "DroneCAN", fmt, ##args); } while (0)

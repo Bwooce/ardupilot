@@ -107,7 +107,7 @@ const AP_Param::GroupInfo AP_DroneCAN::var_info[] = {
     // @Param: NODE
     // @DisplayName: Own node ID
     // @Description: DroneCAN node ID used by the driver itself on this network
-    // @Range: 1 125
+    // @Range: 1 62
     // @User: Advanced
     AP_GROUPINFO("NODE", 1, AP_DroneCAN, _dronecan_node, AP_DRONECAN_DEFAULT_NODE),
 
@@ -196,7 +196,7 @@ const AP_Param::GroupInfo AP_DroneCAN::var_info[] = {
     // @Param: S1_NOD
     // @DisplayName: Serial CAN remote node number
     // @Description: CAN remote node number for serial port
-    // @Range: 0 127
+    // @Range: 0 62
     // @RebootRequired: True
     // @User: Advanced
     AP_GROUPINFO("S1_NOD", 11,  AP_DroneCAN, serial.ports[0].node, 0),
@@ -337,7 +337,7 @@ void AP_DroneCAN::init(uint8_t driver_index)
         return;
     }
     uint8_t node = _dronecan_node;
-    if (node < 1 || node > 125) { // reset to default if invalid
+    if (node < 1 || node > MAX_NODE_ID) { // reset to default if invalid
         _dronecan_node.set(AP_DRONECAN_DEFAULT_NODE);
         node = AP_DRONECAN_DEFAULT_NODE;
     }
@@ -2263,7 +2263,7 @@ void AP_DroneCAN::begin_actuator_enumeration()
     // Broadcast to all nodes
     // DroneCAN enumeration uses broadcast with node filtering on the receiving end
     // Each node that supports enumeration will respond
-    for (uint8_t node_id = 1; node_id <= 127; node_id++) {
+    for (uint8_t node_id = 1; node_id <= MAX_NODE_ID; node_id++) {
         if (_dna_server.is_node_seen(node_id)) {
             enumeration_begin_client.request(node_id, request);
             debug_dronecan(AP_CANManager::LOG_DEBUG, "Sent enumeration Begin to node %u", node_id);

@@ -15427,11 +15427,11 @@ RTL_ALT_M 111
             self.set_parameters({
                 "CAN_D1_UC_SER_EN": 1, # enable serial
                 "CAN_D1_UC_S1_IDX": 1,  # serial port number on CAN device
-                "CAN_D1_UC_S1_NOD": 125,  # FIXME: set this explicitly
+                "CAN_D1_UC_S1_NOD": 62,  # Must match MAX_NODE_ID (AP_DroneCAN_DNA_Server.h); single periph always gets highest
                 "CAN_D1_UC_S1_PRO": 2,  # protocol to set on remote node
 
                 "CAN_D1_UC_S2_IDX": 2,  # serial port number on CAN device
-                "CAN_D1_UC_S2_NOD": 125,  # FIXME: set this explicitly
+                "CAN_D1_UC_S2_NOD": 62,  # Must match MAX_NODE_ID (AP_DroneCAN_DNA_Server.h); single periph always gets highest
                 "CAN_D1_UC_S2_PRO": 2,  # protocol to set on remote node
             })
 
