@@ -1,4 +1,24 @@
+# ArduPilot Hardware Definition for ESP32-S3 M5StampFly Board
+# Compact ESP32-S3 board with BMI270 IMU, BMP280 baro, and Grove connectors
+# Features: BMI270 SPI IMU, BMP280 I2C barometer, INA3221 battery monitor, 2x Grove connectors
 # https://shop.m5stack.com/products/m5stamp-fly-with-m5stamps3
+
+MCU ESP32S3
+
+# Board identification
+define CONFIG_HAL_BOARD_SUBTYPE 6009
+define HAL_ESP32_BOARD_NAME "esp32s3m5stampfly"
+
+# Sensor probe helper macros for easier configuration
+define PROBE_IMU_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_IMU_SPI(driver, devname, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))
+define PROBE_IMU_SPI2(driver, devname1, devname2, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname1),hal.spi->get_device(devname2),##args))
+define PROBE_BARO_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(GET_I2C_DEVICE(bus, addr)),##args))
+define PROBE_BARO_SPI(driver, devname, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(hal.spi->get_device(devname)),##args))
+define PROBE_MAG_I2C(driver, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_MAG_SPI(driver, devname, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(hal.spi->get_device(devname),##args))
+define PROBE_MAG_IMU(driver, imudev, imu_instance, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe_ ## imudev(imu_instance,##args))
+define PROBE_MAG_IMU_I2C(driver, imudev, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe_ ## imudev(GET_I2C_DEVICE(bus,addr),##args))
 
 # GROVE EXPANSION
 #
@@ -15,7 +35,7 @@
 #
 # Grove Black (SERIAL3)
 # 1 (toward rear) : GPIO_NUM_1, RX
-# 2               : GPIO_NUM_2, TX
+# 2               : GPIO_NUM_3, TX
 # 3               : +V (+5V if plugged into USB, else +Vbat)
 # 4 (toward front): GND
 
@@ -33,14 +53,14 @@ ESP32_SPIDEV bmi270              0     0       GPIO_NUM_46  3    10*MHZ  10*MHZ
 ESP32_SPIDEV pixartflow_disabled 0     1       GPIO_NUM_12  3     2*MHZ   2*MHZ
 
 # i2c Buses
-#             Port       SDA         SCL         SPEED    INTERNAL SOFT
-ESP32_I2CBUS  I2C_NUM_0  GPIO_NUM_3  GPIO_NUM_4  400*KHZ  true     false
-ESP32_I2CBUS  I2C_NUM_1  GPIO_NUM_13 GPIO_NUM_15 400*KHZ  false    false
+#             Port       SDA         SCL         SPEED    INTERNAL
+ESP32_I2CBUS  I2C_NUM_0  GPIO_NUM_3  GPIO_NUM_4  400*KHZ  true
+ESP32_I2CBUS  I2C_NUM_1  GPIO_NUM_13 GPIO_NUM_15 400*KHZ  false
 
-# one IMU:
+# IMU Configuration - BMI270 via SPI (default for M5StampFly)
 IMU BMI270 SPI:bmi270 ROTATION_ROLL_180_YAW_90
 
-# one Baro:
+# Barometer Configuration - BMP280 via I2C at address 0x76
 BARO BMP280 I2C:0:0x76
 
 # HARDWARE UARTS. UART 0 apparently goes over USB? so we assign it to pins we
@@ -48,7 +68,7 @@ BARO BMP280 I2C:0:0x76
 # UART 1 (SERIAL3) is the black grove connector
 #             PORT        RXPIN        TXPIN
 ESP32_SERIAL  UART_NUM_0  GPIO_NUM_18  GPIO_NUM_17
-ESP32_SERIAL  UART_NUM_1  GPIO_NUM_1   GPIO_NUM_2
+ESP32_SERIAL  UART_NUM_1  GPIO_NUM_1   GPIO_NUM_3
 
 # RC Output (r-up, l-down, l-up, r-down (quad X order))
 ESP32_RCOUT GPIO_NUM_42
@@ -59,22 +79,24 @@ ESP32_RCOUT GPIO_NUM_41
 # the stampfly does not have an Airspeed sensor:
 define AP_AIRSPEED_ENABLED 0
 
-define HAL_ESP32_BOARD_NAME "esp32s3m5stampfly"
-
+# Compass Configuration - disabled by default (no onboard compass)
 define AP_COMPASS_ENABLE_DEFAULT 0
-define ALLOW_ARM_NO_COMPASS
+define ALLOW_ARM_NO_COMPASS 1
 
-# no ADC
+# ADC Configuration - disabled (no ADC pins used on this compact board)
+define HAL_DISABLE_ADC_DRIVER 1
+define HAL_USE_ADC 0
 
+# Battery monitoring - INA3221 I2C power monitor configuration
 define AP_BATTERY_INA3221_ENABLED 1
 define HAL_BATTMON_INA3221_SHUNT_OHMS 0.01
 define HAL_BATTMON_INA3221_SHUNT_CONV_TIME_SEL HAL_BATTMON_INA3221_CONV_TIME_4156US
 define HAL_BATTMON_INA3221_BUS_CONV_TIME_SEL HAL_BATTMON_INA3221_CONV_TIME_4156US
 define HAL_BATTMON_INA3221_AVG_MODE_SEL HAL_BATTMON_INA3221_AVG_MODE_16
 
-# 2 use udp, 1 use tcp...  for udp,client needs to connect as UDPCL in missionplanner etc to 192.168.4.1 port 14550
+# WiFi Configuration - UDP mode (2 = UDP, 1 = TCP)
+# For UDP: client connects as UDPCL in MissionPlanner to 192.168.4.1 port 14550
 define HAL_ESP32_WIFI 2
-
 define WIFI_SSID "ardupilot123"
 define WIFI_PWD "ardupilot123"
 
@@ -83,15 +105,16 @@ define WIFI_PWD "ardupilot123"
 # define HAL_ESP32_RCIN GPIO_NUM_16
 define HAL_ESP32_RMT_RX_PIN_NUMBER GPIO_NUM_16
 
+# RC Protocol - disabled
+define AP_RCPROTOCOL_ENABLED 0
 
-# log over MAVLink by default
+# Storage Configuration - MAVLink logging only (log over MAVLink by default)
 define HAL_LOGGING_FILESYSTEM_ENABLED 0
 define HAL_LOGGING_DATAFLASH_ENABLED 0
 define HAL_LOGGING_MAVLINK_ENABLED 1
 define HAL_LOGGING_BACKENDS_DEFAULT 2
 
-define AP_RCPROTOCOL_ENABLED 0
-
+# Filesystem and scripting - disabled for space
 define AP_FILESYSTEM_ESP32_ENABLED 0
 define AP_SCRIPTING_ENABLED 0
 
