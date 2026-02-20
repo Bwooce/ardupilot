@@ -1,4 +1,6 @@
+#ifndef AP_MATH_ALLOW_DOUBLE_FUNCTIONS
 #define AP_MATH_ALLOW_DOUBLE_FUNCTIONS 1
+#endif
 
 #include "AP_GSOF_config.h"
 #include "AP_GSOF.h"

@@ -206,7 +206,10 @@ class HWDef:
                 raise e
             self.error("Unable to open file %s" % filename)
         for line in f.readlines():
+            # handle token pasting ##
+            line = line.replace('##', '__TOKEN_PASTE__')
             line = line.split('#')[0] # ensure we discard the comments
+            line = line.replace('__TOKEN_PASTE__', '##')
             line = line.strip()
             if len(line) == 0 or line[0] == '#':
                 continue

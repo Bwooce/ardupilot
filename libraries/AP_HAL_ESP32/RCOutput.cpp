@@ -115,6 +115,10 @@ void RCOutput::init()
 
     _initialized = true; // assume we are initialized, any error will call abort()
 
+    if (MAX_CHANNELS == 0) {
+        return;
+    }
+
     RCOutput::pwm_group *curr_group = &pwm_group_list[0];
     RCOutput::pwm_chan *curr_ch = &pwm_chan_list[0];
     int chan = 0;
