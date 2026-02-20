@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+
 #include <hwdef.h>
 
 #ifndef HAL_BOARD_STATE_DIRECTORY
