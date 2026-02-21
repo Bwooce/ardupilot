@@ -1,10 +1,58 @@
 import os
 import sys
+import re
+import shlex
 
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../../../libraries/AP_HAL/hwdef/scripts'))
 import hwdef
 
 class ESP32HWDef(hwdef.HWDef):
+    # Hardware capability database for ESP32 variants
+    CHIP_DATA = {
+        'ESP32': {
+            'reserved': {6, 7, 8, 9, 10, 11},
+            'adc': {0, 2, 4, 12, 13, 14, 15, 25, 26, 27, 32, 33, 34, 35, 36, 37, 38, 39},
+            'input_only': {34, 35, 36, 37, 38, 39},
+            'strapping': {0, 2, 12, 15},
+            'features': ['HAL_ESP32_HAS_MCPWM', 'HAL_ESP32_HAS_DAC']
+        },
+        'ESP32S2': {
+            'reserved': {26, 27, 28, 29, 30, 31, 32},
+            'adc': set(range(1, 21)),
+            'input_only': {46},
+            'strapping': {0, 45, 46},
+            'features': ['HAL_ESP32_HAS_USB_OTG']
+        },
+        'ESP32S3': {
+            'reserved': {26, 27, 28, 29, 30, 31, 32},
+            'adc': set(range(1, 21)),
+            'input_only': set(),
+            'strapping': {0, 3, 45, 46},
+            'features': ['HAL_ESP32_HAS_MCPWM', 'HAL_ESP32_HAS_USB_SERIAL_JTAG', 'HAL_ESP32_LARGE_BUFFERS']
+        },
+        'ESP32C3': {
+            'reserved': {12, 13, 14, 15, 16, 17},
+            'adc': {0, 1, 2, 3, 4, 5},
+            'input_only': set(),
+            'strapping': {2, 8, 9},
+            'features': ['HAL_ESP32_HAS_USB_SERIAL_JTAG']
+        },
+        'ESP32C6': {
+            'reserved': set(),
+            'adc': set(),
+            'input_only': set(),
+            'strapping': set(),
+            'features': ['HAL_ESP32_HAS_USB_SERIAL_JTAG', 'HAL_ESP32_HAS_MCPWM']
+        },
+        'ESP32P4': {
+            'reserved': set(),
+            'adc': set(),
+            'input_only': set(),
+            'strapping': set(),
+            'features': ['HAL_ESP32_HAS_MCPWM', 'HAL_ESP32_HAS_MIPI', 'HAL_ESP32_HAS_USB_SERIAL_JTAG', 'HAL_ESP32_LARGE_BUFFERS']
+        }
+    }
+
     def __init__(self, outdir, hwdef, quiet=False, **kwargs):
         super(ESP32HWDef, self).__init__(outdir=outdir, hwdef=hwdef, quiet=quiet, **kwargs)
         self.generate_defines = True
@@ -31,48 +79,17 @@ class ESP32HWDef(hwdef.HWDef):
         # Note: init_hardware_constraints() called after MCU is determined
 
     def init_hardware_constraints(self):
-        '''Initialize chip-specific pin constraints and capabilities'''
-        self.input_only_pins = set()
-        self.adc_capable_pins = set()
-        self.high_speed_pins = set()
-        self.pwm_capable_pins = set()
-        
-        # ESP32-S3 chip-specific pin capabilities
-        if self.mcu.upper() == 'ESP32S3':
-            # Reserved pins (Flash, PSRAM, USB, etc.)
-            self.reserved_pins.update({26, 27, 28, 29, 30, 31, 32})  # Flash/PSRAM OPI mode
-            # USB pins (conditionally reserved - comment for now as many boards don't use USB)
-            # self.reserved_pins.update({19, 20})  # USB D+/D-
-            
-            # ESP32-S3 pin capabilities (from ESP32-S3 datasheet)
-            self.adc_capable_pins = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}  # ADC1 & ADC2
-            self.high_speed_pins = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}  # High-speed capable
-            self.pwm_capable_pins = set(range(0, 49))  # Most GPIO pins support PWM on ESP32-S3
-            
-            # Strapping pins: GPIO0, GPIO3, GPIO45, GPIO46 - warn but don't block
-            self.strapping_pins = {0, 3, 45, 46}
-            self.progress("ESP32-S3 pin capabilities loaded: ADC(1-20), High-speed(0-21), PWM(0-48)")
-            
-        elif self.mcu.upper() == 'ESP32':
-            # ESP32 Classic reserved pins
-            self.reserved_pins.update({6, 7, 8, 9, 10, 11})  # Standard SPI Flash pins
-            
-            # ESP32 Classic pin capabilities
-            self.input_only_pins = {34, 35, 36, 37, 38, 39}  # Hall sensor pins
-            self.adc_capable_pins = {32, 33, 34, 35, 36, 37, 38, 39, 4, 0, 2, 15, 13, 12, 14, 27, 25, 26}  # ADC1 & ADC2
-            self.high_speed_pins = set(range(0, 40))  # Most pins are high-speed capable
-            self.pwm_capable_pins = set(range(0, 40)) - self.input_only_pins  # PWM except input-only
-            
-            # Strapping pins: GPIO0, GPIO2, GPIO12, GPIO15 - warn but don't block  
-            self.strapping_pins = {0, 2, 12, 15}
-            self.progress("ESP32 Classic pin capabilities loaded: ADC(0,2,4,12-15,25-27,32-39), Input-only(34-39)")
-            
+        '''Initialize chip-specific pin constraints from CHIP_DATA'''
+        chip = self.CHIP_DATA.get(self.mcu.upper())
+        if chip:
+            self.reserved_pins.update(chip.get('reserved', set()))
+            self.adc_capable_pins = chip.get('adc', set())
+            self.input_only_pins = chip.get('input_only', set())
+            self.strapping_pins = chip.get('strapping', set())
+            self.progress(f"{self.mcu.upper()} constraints loaded")
         else:
             self.progress(f"Unknown MCU '{self.mcu}' - using minimal constraints")
-            # Fallback for unknown chips
             self.adc_capable_pins = set()
-            self.high_speed_pins = set() 
-            self.pwm_capable_pins = set()
 
     def validate_pin_assignment(self, pin_num, function, pin_name):
         '''Validate a pin assignment using chip-specific capabilities'''
@@ -477,7 +494,14 @@ class ESP32HWDef(hwdef.HWDef):
         f.write("#undef FALSE\n")
         f.write("#define FALSE 0\n")
         f.write("\n")
-        
+
+        # Emit chip feature defines from CHIP_DATA
+        chip = self.CHIP_DATA.get(self.mcu.upper())
+        if chip:
+            for feat in chip.get('features', []):
+                if feat not in self.intdefines:
+                    f.write("#ifndef %s\n#define %s 1\n#endif\n" % (feat, feat))
+
         # Write IMU probe list from IMU directives (generates HAL_INS_PROBE_LIST)
         self.write_IMU_config(f)
 

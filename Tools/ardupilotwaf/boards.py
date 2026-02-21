@@ -1000,11 +1000,14 @@ class esp32(Board):
         self.with_can = True
 
     def configure(self, cfg):
-        # Set up ESP-IDF environment
+        # Set up ESP-IDF environment before toolchain detection.
+        # Respect IDF_PATH if already set (e.g. by agent_build_wrapper.sh),
+        # otherwise prefer IDF 6.0 if installed, fall back to submodule.
         import subprocess
         import glob
         idf_path = os.environ.get('IDF_PATH', '')
         if not idf_path or not os.path.exists(idf_path):
+            # Look for IDF 6.x installations in standard location
             idf6_candidates = sorted(glob.glob('/opt/espressif/esp-idf-v6*'), reverse=True)
             if idf6_candidates:
                 idf_path = idf6_candidates[0]
@@ -1012,12 +1015,14 @@ class esp32(Board):
                 idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
         os.environ['IDF_PATH'] = idf_path
 
-        # Source ESP-IDF environment
+        # Source ESP-IDF environment to set up all necessary variables
         export_script = os.path.join(idf_path, 'export.sh')
         if os.path.exists(export_script):
             try:
+                # Run export.sh and capture environment changes
                 result = subprocess.run(['bash', '-c', f'source {export_script} && env'],
                                       capture_output=True, text=True, check=True)
+                # Update current environment with ESP-IDF variables
                 for line in result.stdout.splitlines():
                     if '=' in line and not line.startswith('_'):
                         key, value = line.split('=', 1)
@@ -1028,32 +1033,33 @@ class esp32(Board):
             except Exception as e:
                 print(f"Warning: Failed to source ESP-IDF environment: {e}")
 
-        # Determine MCU and Toolchain
-        hwdef_dat = getattr(self, 'dynamic_hwdef', None)
-        mcu = 'esp32'
-        if hwdef_dat:
-            sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../libraries/AP_HAL_ESP32/hwdef/scripts'))
-            import esp32_hwdef
-            eh = esp32_hwdef.ESP32HWDef(outdir=cfg.bldnode.abspath(), hwdef=[hwdef_dat], quiet=True)
-            eh.run()
-            mcu = eh.mcu
-            # Compatibility logic: if MCU wasn't explicitly set in hwdef.dat, 
-            # fall back to name-based detection for legacy boards.
-            if mcu == 'esp32' and 'esp32s3' in self.name:
-                mcu = 'esp32s3'
-        elif 'esp32s3' in self.name:
-            mcu = 'esp32s3'
-        
+        # run hwdef to get MCU
+        sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../libraries/AP_HAL_ESP32/hwdef/scripts'))
+        import esp32_hwdef
+        hwdef_dir = os.path.join(cfg.srcnode.abspath(), 'libraries/AP_HAL_ESP32/hwdef')
+        hwdef_dat = os.path.join(hwdef_dir, self.name, 'hwdef.dat')
+        if not os.path.exists(cfg.bldnode.abspath()):
+            os.makedirs(cfg.bldnode.abspath())
+        eh = esp32_hwdef.ESP32HWDef(
+            outdir=cfg.bldnode.abspath(),
+            hwdef=[hwdef_dat],
+            quiet=True,
+        )
+        eh.run()
+        mcu = eh.mcu
         cfg.env.MCU = mcu
-        
-        # Select toolchain
+
+        # Select toolchain based on MCU architecture (Xtensa vs RISC-V)
         mcu_lower = mcu.lower()
         if mcu_lower in ['esp32c3', 'esp32c6', 'esp32h2', 'esp32p4']:
             self.toolchain = 'riscv32-esp-elf'
         else:
             self.toolchain = 'xtensa-%s-elf' % mcu_lower
 
+        # Now call parent configure with ESP-IDF environment available
         super(esp32, self).configure(cfg)
+
+        # Handle toolchain configuration like upstream
         if cfg.env.TOOLCHAIN:
             self.toolchain = cfg.env.TOOLCHAIN
 
