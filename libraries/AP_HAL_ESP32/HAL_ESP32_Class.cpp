@@ -76,7 +76,8 @@ static Empty::UARTDriver serial8Driver;
 static Empty::UARTDriver serial9Driver;
 
 #if HAL_WITH_DSP
-static Empty::DSP dspDriver;
+#include "DSP.h"
+static ESP32::DSP dspDriver;
 #endif
 
 static ESP32::I2CDeviceManager i2cDeviceManager;

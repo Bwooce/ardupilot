@@ -21,4 +21,5 @@ class DigitalSource;
 class Storage;
 class RmtSigReader;
 class CANIface;
+class DSP;
 }  // namespace ESP32

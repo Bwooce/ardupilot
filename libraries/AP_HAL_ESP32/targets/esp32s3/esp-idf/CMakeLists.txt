@@ -27,6 +27,11 @@ if(EXISTS "$ENV{IDF_PATH}/components/esp_hal_wdt")
     list(APPEND AP_COMPONENTS esp_hal_wdt)
 endif()
 
+# esp-dsp for FFT/DSP support (managed component from idf_component.yml)
+if(EXISTS "${CMAKE_SOURCE_DIR}/managed_components/espressif__esp-dsp")
+    list(APPEND AP_COMPONENTS espressif__esp-dsp)
+endif()
+
 # Create idf::esp32 and idf::freertos static libraries
 idf_build_process(esp32s3
     COMPONENTS ${AP_COMPONENTS}
@@ -124,6 +129,11 @@ endforeach()
 # IDF 6.0 split HAL components
 if(TARGET idf::esp_hal_wdt)
     list(APPEND AP_LINK_LIBS idf::esp_hal_wdt)
+endif()
+
+# esp-dsp for FFT/DSP support
+if(TARGET idf::espressif__esp-dsp)
+    list(APPEND AP_LINK_LIBS idf::espressif__esp-dsp)
 endif()
 
 target_link_libraries(${elf_file} ${AP_LINK_LIBS})
