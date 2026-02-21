@@ -116,7 +116,8 @@
 #define HAL_MEM_CLASS HAL_MEM_CLASS_300
 #endif
 #endif
-// disable uncommon stuff that we'd otherwise get 
+
+// disable uncommon stuff that we'd otherwise get
 #ifndef AP_EXTERNAL_AHRS_ENABLED
 #define AP_EXTERNAL_AHRS_ENABLED 0
 #endif
@@ -206,7 +207,7 @@
 //#define CONFIG_ESP32_WIFI_RX_BA_WIN 0
 
 
-// turn off all the compasses by default.. 
+// turn off all the compasses by default..
 #ifndef AP_COMPASS_BACKEND_DEFAULT_ENABLED
 #define AP_COMPASS_BACKEND_DEFAULT_ENABLED 0
 #endif
