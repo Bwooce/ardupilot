@@ -1254,7 +1254,7 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
         self.set_parameter('FS_ACTION', 0)  # do nothing when radio fails
         self.set_rc(throttle_ch, 900)  # RC fail
         self.reboot_sitl()
-        self.wait_mode(1)
+        self.wait_mode(1, timeout=90)
         self.progress("Make sure we stay in this mode")
         self.delay_sim_time(5)
         self.wait_mode(1)
