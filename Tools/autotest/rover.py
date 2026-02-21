@@ -204,6 +204,10 @@ class AutoTestRover(vehicle_test_suite.TestSuite):
 
     def PARAM_ERROR(self):
         '''test PARAM_ERROR mavlink message'''
+        if not hasattr(mavutil.mavlink, 'MAV_PARAM_ERROR_DOES_NOT_EXIST'):
+            raise NotAchievedException(
+                "pymavlink too old - rebuild from modules/mavlink/pymavlink"
+            )
         self.start_subtest("Non-existent parameter (get)")
         self.context_push()
         self.context_collect('PARAM_ERROR')
