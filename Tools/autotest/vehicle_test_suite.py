@@ -9541,7 +9541,7 @@ Also, ignores heartbeats not from our target system'''
         source = os.path.join(self.rootdir(), "libraries", "AP_Scripting", "tests", "modules", "test")
         dest = os.path.join("scripts", "modules", "test")
         self.progress("Copying (%s) to (%s)" % (source, dest))
-        shutil.copytree(source, dest)
+        shutil.copytree(source, dest, dirs_exist_ok=True)
 
     def install_mavlink_module(self):
         dest = os.path.join("scripts", "modules", "mavlink")
