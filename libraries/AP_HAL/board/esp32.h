@@ -96,8 +96,16 @@
 #define HAL_NUM_CAN_IFACES 0
 #endif
 #ifndef HAL_MEM_CLASS
+// Set memory class based on chip variant's internal DRAM (not PSRAM)
+// ESP32: 520KB SRAM, ~280-300KB usable DRAM
+// ESP32-S3: 512KB SRAM, ~320-370KB usable DRAM
+// ESP32-S2: 320KB SRAM, ~200-230KB usable DRAM
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32)
+#define HAL_MEM_CLASS HAL_MEM_CLASS_300
+#else
 #define HAL_MEM_CLASS HAL_MEM_CLASS_192
-#endif 
+#endif
+#endif
 // disable uncommon stuff that we'd otherwise get 
 #define AP_EXTERNAL_AHRS_ENABLED 0
 #ifndef HAL_GENERATOR_ENABLED
@@ -204,7 +212,9 @@
 #endif
 #define AP_CAMERA_ENABLED 0
 #define HAL_SOARING_ENABLED 0
+#ifndef AP_TERRAIN_AVAILABLE
 #define AP_TERRAIN_AVAILABLE 0
+#endif
 #define HAL_ADSB_ENABLED 0
 #ifndef HAL_BUTTON_ENABLED
 #define HAL_BUTTON_ENABLED 0
@@ -214,17 +224,29 @@
 #endif
 #define AP_LANDINGGEAR_ENABLED 0
 
-// disable avoid-fence-follow in copter, these all kinda need each other, so its all or none.
+// disable avoid-fence-follow by default, these all kinda need each other, so its all or none.
+// per-board override via hwdef.dat: define AP_FENCE_ENABLED 1
+#ifndef AP_AVOIDANCE_ENABLED
 #define AP_AVOIDANCE_ENABLED 0
+#endif
+#ifndef AP_FENCE_ENABLED
 #define AP_FENCE_ENABLED 0
+#endif
+#ifndef MODE_FOLLOW_ENABLED
 #define MODE_FOLLOW_ENABLED 0
+#endif
+#ifndef AP_OAPATHPLANNER_ENABLED
 #define AP_OAPATHPLANNER_ENABLED 0
+#endif
 
 
 // other big things..
 #define HAL_QUADPLANE_ENABLED 0
 #ifndef HAL_GYROFFT_ENABLED
 #define HAL_GYROFFT_ENABLED 0
+#endif
+#ifndef FFT_DEFAULT_WINDOW_SIZE
+#define FFT_DEFAULT_WINDOW_SIZE 32
 #endif
 
 // remove once ESP32 isn't so chronically slow

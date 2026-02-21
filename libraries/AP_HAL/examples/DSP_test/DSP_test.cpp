@@ -5,7 +5,14 @@
 #include <AP_SerialManager/AP_SerialManager.h>
 #include <AP_Logger/AP_Logger.h>
 #include <AP_InertialSensor/AP_InertialSensor.h>
+
+#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
 #include "GyroFrame.h"
+#else
+// ESP32: GyroFrame data is 220KB, too large for flash.
+// Define SAMPLE_RATE locally (matches GyroFrame.cpp value).
+static const uint16_t SAMPLE_RATE = 999;
+#endif
 
 #if HAL_WITH_DSP
 const AP_HAL::HAL &hal = AP_HAL::get_HAL();
@@ -26,8 +33,11 @@ static AP_HAL::DSP::FFTWindowState* fft;
 
 void setup();
 void loop();
+void run_synthetic_fft_tests();
+#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
 void update();
 void do_fft(const float* data);
+#endif
 
 static AP_SerialManager serial_manager;
 static AP_BoardConfig board_config;
@@ -57,12 +67,14 @@ public:
 // create fake gcs object
 GCS_Dummy _gcs;
 
+#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
 uint32_t frame_num = 0;
+#endif
 
 void setup()
 {
     hal.console->printf("DSP test\n");
-    board_config.init();   
+    board_config.init();
     serial_manager.init();
     fft = hal.dsp->fft_init(WINDOW_SIZE, SAMPLE_RATE);
     attenuation_cutoff = powf(10.0f, -attenuation_power_db / 10.0f);
@@ -75,12 +87,12 @@ void setup()
     }
 
     dsptest.run_tests();
-
+    run_synthetic_fft_tests();
 }
 
 void DSPTest::run_tests() {
     float vals[] = {1, 1, 1, 10, 10, 10, 1, 1, 1, 1};
-    fastsmooth(vals, 10, 3); 
+    fastsmooth(vals, 10, 3);
     for (int i=0; i < 10; i++) {
         hal.console->printf("%.f ", vals[i]);
     }
@@ -88,7 +100,84 @@ void DSPTest::run_tests() {
     // fastsmooth([1 1 1 10 10 10 1 1 1 1],3) => [0 1 4 7 10 7 4 1 1 0]
 }
 
+// Synthetic signal FFT validation tests
+// These work on all platforms including ESP32 (no GyroFrame dependency)
+void run_synthetic_fft_tests()
+{
+    if (fft == nullptr) {
+        hal.console->printf("DSP_test: FFT init failed, skipping tests\n");
+        return;
+    }
 
+    hal.console->printf("DSP_test: Running synthetic FFT tests\n");
+    const float bin_resolution = (float)SAMPLE_RATE / WINDOW_SIZE;
+    uint16_t pass_count = 0;
+    uint16_t fail_count = 0;
+
+    // Test A: Single frequency detection (120Hz)
+    {
+        FloatBuffer test_buf{WINDOW_SIZE};
+        for (uint16_t i = 0; i < WINDOW_SIZE; i++) {
+            float sample = sinf(2.0f * M_PI * frequency1 * i / SAMPLE_RATE) * radians(20) * 2000;
+            test_buf.push(sample);
+        }
+        hal.dsp->fft_start(fft, test_buf, WINDOW_SIZE);
+        hal.dsp->fft_analyse(fft, 1, last_bin, attenuation_cutoff);
+        float detected = fft->_peak_data[AP_HAL::DSP::CENTER]._freq_hz;
+        bool ok = fabsf(detected - frequency1) < bin_resolution;
+        hal.console->printf("DSP_test: Single freq %.0fHz -> detected %.1fHz [%s]\n",
+                           frequency1, detected, ok ? "PASS" : "FAIL");
+        if (ok) { pass_count++; } else { fail_count++; }
+    }
+
+    // Test B: Multi-frequency peak detection (120Hz dominant)
+    {
+        // Use the buffer already filled in setup() with 3 frequencies
+        FloatBuffer test_buf{WINDOW_SIZE};
+        for (uint16_t i = 0; i < WINDOW_SIZE; i++) {
+            float sample = sinf(2.0f * M_PI * frequency1 * i / SAMPLE_RATE) * radians(20) * 2000;
+            sample += sinf(2.0f * M_PI * frequency2 * i / SAMPLE_RATE) * radians(10) * 2000;
+            sample += sinf(2.0f * M_PI * frequency3 * i / SAMPLE_RATE) * radians(10) * 2000;
+            test_buf.push(sample);
+        }
+        hal.dsp->fft_start(fft, test_buf, WINDOW_SIZE);
+        hal.dsp->fft_analyse(fft, 1, last_bin, attenuation_cutoff);
+        float detected = fft->_peak_data[AP_HAL::DSP::CENTER]._freq_hz;
+        bool ok = fabsf(detected - frequency1) < bin_resolution;
+        hal.console->printf("DSP_test: Multi freq peak -> detected %.1fHz (expect ~%.0fHz) [%s]\n",
+                           detected, frequency1, ok ? "PASS" : "FAIL");
+        if (ok) { pass_count++; } else { fail_count++; }
+    }
+
+    // Test C: FFT timing measurement
+    {
+        FloatBuffer test_buf{WINDOW_SIZE};
+        for (uint16_t i = 0; i < WINDOW_SIZE; i++) {
+            float sample = sinf(2.0f * M_PI * frequency1 * i / SAMPLE_RATE) * radians(20) * 2000;
+            test_buf.push(sample);
+        }
+        const uint16_t iterations = 100;
+        uint32_t start_us = AP_HAL::micros();
+        for (uint16_t n = 0; n < iterations; n++) {
+            // refill buffer each iteration (fft_start consumes via advance)
+            test_buf.clear();
+            for (uint16_t i = 0; i < WINDOW_SIZE; i++) {
+                float sample = sinf(2.0f * M_PI * frequency1 * i / SAMPLE_RATE) * radians(20) * 2000;
+                test_buf.push(sample);
+            }
+            hal.dsp->fft_start(fft, test_buf, WINDOW_SIZE);
+            hal.dsp->fft_analyse(fft, 1, last_bin, attenuation_cutoff);
+        }
+        uint32_t elapsed_us = AP_HAL::micros() - start_us;
+        hal.console->printf("DSP_test: FFT timing: %lu us avg over %u iterations\n",
+                           (unsigned long)(elapsed_us / iterations), (unsigned)iterations);
+    }
+
+    hal.console->printf("DSP_test: Results: %u passed, %u failed\n", (unsigned)pass_count, (unsigned)fail_count);
+}
+
+
+#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
 void do_fft(const float* data)
 {
     fft_window.push(data, WINDOW_SIZE);
@@ -134,12 +223,15 @@ void update()
         exit(0);
     };
 }
+#endif // CONFIG_HAL_BOARD != HAL_BOARD_ESP32
 
 void loop()
 {
     if (!hal.console->is_initialized()) {
         return;
     }
+
+#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
     uint32_t reference_time, run_time;
 
     hal.console->printf("--------------------\n");
@@ -153,6 +245,10 @@ void loop()
 
     // delay before next display
     hal.scheduler->delay(1e3); // 1 second
+#else
+    // ESP32: synthetic tests run once in setup(), just idle here
+    hal.scheduler->delay(10000);
+#endif
 }
 
 AP_HAL_MAIN();
