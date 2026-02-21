@@ -2,6 +2,10 @@
 
 #include <AP_HAL/AP_HAL_Boards.h>
 
+#ifndef HAL_WITH_DRONECAN
+#define HAL_WITH_DRONECAN 1
+#endif
+
 // DroneCAN node status/info MAVLink broadcasting (messages 310, 311)
 #ifndef AP_DRONECAN_MAVLINK_REPORTING_ENABLED
 #define AP_DRONECAN_MAVLINK_REPORTING_ENABLED HAL_WITH_DRONECAN
