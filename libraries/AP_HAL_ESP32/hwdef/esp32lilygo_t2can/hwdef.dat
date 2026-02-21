@@ -5,6 +5,13 @@
 
 MCU ESP32S3
 
+# ESP-IDF RTC watchdog definitions (missing from some ESP-IDF versions)
+define RTC_WDT_STG_SEL_OFF 0
+define RTC_WDT_STG_SEL_INT 1
+define RTC_WDT_STG_SEL_RESET_CPU 2
+define RTC_WDT_STG_SEL_RESET_SYSTEM 3
+define RTC_WDT_STG_SEL_RESET_RTC 4
+
 # Board identification
 define HAL_ESP32_BOARD_NAME "esp32lilygo_t2can"
 define CONFIG_HAL_BOARD_SUBTYPE 6007
@@ -14,10 +21,10 @@ define HAL_USE_OTG 1
 define HAL_MEM_CLASS HAL_MEM_CLASS_1000 
 
 # Sensor probe helper macros for easier configuration
-define PROBE_IMU_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
-define PROBE_IMU_SPI(driver, devname, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))
-define PROBE_BARO_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(GET_I2C_DEVICE(bus, addr)),##args))
-define PROBE_MAG_I2C(driver, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_IMU_I2C(driver, bus, addr, args...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_IMU_SPI(driver, devname, args...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))
+define PROBE_BARO_I2C(driver, bus, addr, args...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,*GET_I2C_DEVICE(bus, addr).leak(),##args))
+define PROBE_MAG_I2C(driver, bus, addr, args...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(GET_I2C_DEVICE(bus, addr),##args))
 
 
 # PSRAM Configuration - T-2CAN has OPI PSRAM
@@ -37,8 +44,8 @@ define CAN2_PROTOCOL DRONECAN
 
 # CAN Interface 1: Native ESP32-S3 TWAI (built-in CAN controller)
 # VERIFIED WORKING PINS - these pins have been tested and confirmed working for CAN communication
-CAN_TX_1=7
-CAN_RX_1=6
+CAN_TX_1 7
+CAN_RX_1 6
 
 # CAN Interface 2: MCP2515 SPI-based CAN controller
 define MCP2515_CS_PIN 10

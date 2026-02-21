@@ -101,13 +101,19 @@
 #endif
 #ifndef HAL_MEM_CLASS
 // Set memory class based on chip variant's internal DRAM (not PSRAM)
-// ESP32: 520KB SRAM, ~280-300KB usable DRAM
-// ESP32-S3: 512KB SRAM, ~320-370KB usable DRAM
-// ESP32-S2: 320KB SRAM, ~200-230KB usable DRAM
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32)
-#define HAL_MEM_CLASS HAL_MEM_CLASS_300
-#else
+// ESP32:    520KB SRAM, ~280-300KB usable DRAM -> MEM_CLASS_300
+// ESP32-S3: 512KB SRAM, ~320-370KB usable DRAM -> MEM_CLASS_300
+// ESP32-C6: 512KB SRAM, ~420KB usable DRAM    -> MEM_CLASS_300
+// ESP32-C3: 400KB SRAM, ~320KB usable DRAM    -> MEM_CLASS_300
+// ESP32-P4: 768KB SRAM, ~650KB usable DRAM    -> MEM_CLASS_500
+// ESP32-S2: 320KB SRAM, ~200-230KB usable DRAM -> MEM_CLASS_192
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+#define HAL_MEM_CLASS HAL_MEM_CLASS_500
+#elif defined(CONFIG_IDF_TARGET_ESP32S2)
 #define HAL_MEM_CLASS HAL_MEM_CLASS_192
+#else
+// ESP32, S3, C3, C6 all have 400KB+ usable DRAM
+#define HAL_MEM_CLASS HAL_MEM_CLASS_300
 #endif
 #endif
 // disable uncommon stuff that we'd otherwise get 

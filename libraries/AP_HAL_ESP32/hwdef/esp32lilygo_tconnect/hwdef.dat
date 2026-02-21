@@ -5,6 +5,13 @@
 
 MCU ESP32S3
 
+# ESP-IDF RTC watchdog definitions (missing from some ESP-IDF versions)
+define RTC_WDT_STG_SEL_OFF 0
+define RTC_WDT_STG_SEL_INT 1
+define RTC_WDT_STG_SEL_RESET_CPU 2
+define RTC_WDT_STG_SEL_RESET_SYSTEM 3
+define RTC_WDT_STG_SEL_RESET_RTC 4
+
 # Flash and OTA Configuration - T-Connect has 16MB flash with OTA support
 FLASH_SIZE_MB 16
 PARTITION_TABLE_CUSTOM_FILENAME partitions.csv
@@ -16,10 +23,10 @@ define HAL_ESP32_BOARD_NAME "esp32lilygo_tconnect"
 define HAL_MEM_CLASS HAL_MEM_CLASS_1000 
 
 # Sensor probe helper macros for easier configuration
-define PROBE_IMU_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
-define PROBE_IMU_SPI(driver, devname, args ...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))
-define PROBE_BARO_I2C(driver, bus, addr, args ...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,std::move(GET_I2C_DEVICE(bus, addr)),##args))
-define PROBE_MAG_I2C(driver, bus, addr, args ...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_IMU_I2C(driver, bus, addr, args...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,GET_I2C_DEVICE(bus, addr),##args))
+define PROBE_IMU_SPI(driver, devname, args...) ADD_BACKEND(AP_InertialSensor_ ## driver::probe(*this,hal.spi->get_device(devname),##args))
+define PROBE_BARO_I2C(driver, bus, addr, args...) ADD_BACKEND(AP_Baro_ ## driver::probe(*this,*GET_I2C_DEVICE(bus, addr).leak(),##args))
+define PROBE_MAG_I2C(driver, bus, addr, args...) ADD_BACKEND(DRIVER_ ##driver, AP_Compass_ ## driver::probe(GET_I2C_DEVICE(bus, addr),##args))
 
 
 # PSRAM Configuration - T-Connect has 8MB OPI PSRAM
@@ -112,13 +119,13 @@ define HAL_OS_FATFS_IO 0
 # T-Connect Board Pin Configuration
 # CAN Interface (primary function) - VERIFIED WORKING PINS
 # These pins have been tested and confirmed working for CAN communication
-CAN_TX_1=9
-CAN_RX_1=10
+CAN_TX_1 9
+CAN_RX_1 10
 
 # APA102 LED pins
 define HAL_APA102_ENABLED 1
-APA102_DATA_PIN=8
-APA102_CLOCK_PIN=3
+APA102_DATA_PIN 8
+APA102_CLOCK_PIN 3
 
 # RCOUT Configuration - Rover motor outputs
 RCOUT1_PIN 13  # Right motor
