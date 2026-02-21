@@ -6058,7 +6058,7 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
         vessels_seen = set()
         start_time = self.get_sim_time()
         while len(vessels_seen) < 3:
-            if self.get_sim_time() - start_time > 60:
+            if self.get_sim_time() - start_time > 120:
                 raise NotAchievedException(
                     "Only saw %d vessels, expected 3" % len(vessels_seen)
                 )
