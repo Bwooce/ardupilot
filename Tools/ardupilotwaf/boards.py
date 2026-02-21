@@ -1049,6 +1049,7 @@ class esp32(Board):
         mcu = eh.mcu
         cfg.env.MCU = mcu
 
+
         # Select toolchain based on MCU architecture (Xtensa vs RISC-V)
         mcu_lower = mcu.lower()
         if mcu_lower in ['esp32c3', 'esp32c6', 'esp32h2', 'esp32p4']:

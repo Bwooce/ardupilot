@@ -10,11 +10,12 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+
+#define ALLOW_DOUBLE_TRIG_FUNCTIONS
+
 /*
   support for MicroStrain MIP parsing
  */
-
-#define ALLOW_DOUBLE_TRIG_FUNCTIONS
 
 #include "AP_ExternalAHRS_config.h"
 #include <AP_GPS/AP_GPS.h>
