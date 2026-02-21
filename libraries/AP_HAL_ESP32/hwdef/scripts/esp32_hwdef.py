@@ -5,8 +5,8 @@ sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../..
 import hwdef
 
 class ESP32HWDef(hwdef.HWDef):
-    def __init__(self, outdir, hwdef, **kwargs):
-        super(ESP32HWDef, self).__init__(outdir=outdir, hwdef=hwdef, **kwargs)
+    def __init__(self, outdir, hwdef, quiet=False, **kwargs):
+        super(ESP32HWDef, self).__init__(outdir=outdir, hwdef=hwdef, quiet=quiet, **kwargs)
         self.generate_defines = True
         self.board = os.path.basename(os.path.dirname(hwdef[0]))
         self.mcu = 'esp32'
@@ -994,8 +994,9 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='ESP32 hwdef processor')
     parser.add_argument('-D', '--outdir', required=True, help='output directory')
+    parser.add_argument('--quiet', action='store_true', help='quiet operation')
     parser.add_argument('hwdef', nargs='+', help='hwdef files')
     args = parser.parse_args()
 
-    eh = ESP32HWDef(args.outdir, args.hwdef)
+    eh = ESP32HWDef(args.outdir, args.hwdef, quiet=args.quiet)
     sys.exit(eh.run())

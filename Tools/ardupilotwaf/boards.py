@@ -684,15 +684,15 @@ def add_dynamic_boards_esp32():
     '''add boards based on existence of hwdef.dat in subdirectories for ESP32'''
     dirname, dirlist, filenames = next(os.walk('libraries/AP_HAL_ESP32/hwdef'))
     for d in dirlist:
-        if d in _board_classes.keys():
+        if d in _board_classes.keys() or d == 'scripts':
             continue
-        hwdef = os.path.join(dirname, d, 'hwdef.dat')
-        if os.path.exists(hwdef):
+        hwdef_path = os.path.join(dirname, d, 'hwdef.dat')
+        if os.path.exists(hwdef_path):
             mcu_esp32s3 = True if (d[0:7] == "esp32s3") else False
             if mcu_esp32s3:
-                newclass = type(d, (esp32s3,), {'name': d})
+                newclass = type(d, (esp32s3,), {'name': d, 'dynamic_hwdef': hwdef_path})
             else:
-                newclass = type(d, (esp32,), {'name': d})
+                newclass = type(d, (esp32,), {'name': d, 'dynamic_hwdef': hwdef_path})
 
 def get_boards_names():
     add_dynamic_boards_chibios()
@@ -995,13 +995,67 @@ class esp32(Board):
     abstract = True
     toolchain = 'xtensa-esp32-elf'
 
+    def __init__(self):
+        super().__init__()
+        self.with_can = True
+
     def configure(self, cfg):
+        # Set up ESP-IDF environment
+        import subprocess
+        import glob
+        idf_path = os.environ.get('IDF_PATH', '')
+        if not idf_path or not os.path.exists(idf_path):
+            idf6_candidates = sorted(glob.glob('/opt/espressif/esp-idf-v6*'), reverse=True)
+            if idf6_candidates:
+                idf_path = idf6_candidates[0]
+            else:
+                idf_path = cfg.srcnode.abspath()+"/modules/esp_idf"
+        os.environ['IDF_PATH'] = idf_path
+
+        # Source ESP-IDF environment
+        export_script = os.path.join(idf_path, 'export.sh')
+        if os.path.exists(export_script):
+            try:
+                result = subprocess.run(['bash', '-c', f'source {export_script} && env'],
+                                      capture_output=True, text=True, check=True)
+                for line in result.stdout.splitlines():
+                    if '=' in line and not line.startswith('_'):
+                        key, value = line.split('=', 1)
+                        if key.startswith(('IDF_', 'PATH', 'PYTHON')) or 'esp' in key.lower():
+                            os.environ[key] = value
+                            if hasattr(cfg, 'environ'):
+                                cfg.environ[key] = value
+            except Exception as e:
+                print(f"Warning: Failed to source ESP-IDF environment: {e}")
+
+        # Determine MCU and Toolchain
+        hwdef_dat = getattr(self, 'dynamic_hwdef', None)
+        mcu = 'esp32'
+        if hwdef_dat:
+            sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../libraries/AP_HAL_ESP32/hwdef/scripts'))
+            import esp32_hwdef
+            eh = esp32_hwdef.ESP32HWDef(outdir=cfg.bldnode.abspath(), hwdef=[hwdef_dat], quiet=True)
+            eh.run()
+            mcu = eh.mcu
+            # Compatibility logic: if MCU wasn't explicitly set in hwdef.dat, 
+            # fall back to name-based detection for legacy boards.
+            if mcu == 'esp32' and 'esp32s3' in self.name:
+                mcu = 'esp32s3'
+        elif 'esp32s3' in self.name:
+            mcu = 'esp32s3'
+        
+        cfg.env.MCU = mcu
+        
+        # Select toolchain
+        mcu_lower = mcu.lower()
+        if mcu_lower in ['esp32c3', 'esp32c6', 'esp32h2', 'esp32p4']:
+            self.toolchain = 'riscv32-esp-elf'
+        else:
+            self.toolchain = 'xtensa-%s-elf' % mcu_lower
+
         super(esp32, self).configure(cfg)
         if cfg.env.TOOLCHAIN:
             self.toolchain = cfg.env.TOOLCHAIN
-        else:
-            # default tool-chain for esp32-based boards:
-            self.toolchain = 'xtensa-esp32-elf'
 
     def configure_env(self, cfg, env):
         env.BOARD_CLASS = "ESP32"
@@ -1057,13 +1111,33 @@ class esp32(Board):
                          '-fdata-sections',
                          '-fno-exceptions',
                          '-fno-rtti',
-                         '-nostdlib',
                          '-fstrict-volatile-bitfields',
                          '-Wno-sign-compare',
                          '-fno-inline-functions',
                          '-mlongcalls',
-                         '-fsingle-precision-constant', # force const vals to be float , not double. so 100.0 means 100.0f 
+                         '-fsingle-precision-constant', # force const vals to be float , not double. so 100.0 means 100.0f
                          '-fno-threadsafe-statics']
+        # Detect IDF version from the IDF_PATH set during configure()
+        idf_major = 5
+        idf_version_h = os.path.join(os.environ.get('IDF_PATH', ''),
+                                     'components/esp_common/include/esp_idf_version.h')
+        if os.path.exists(idf_version_h):
+            with open(idf_version_h, 'r') as f:
+                for line in f:
+                    m = re.match(r'#define\s+ESP_IDF_VERSION_MAJOR\s+(\d+)', line)
+                    if m:
+                        idf_major = int(m.group(1))
+                        break
+        if idf_major >= 6:
+            # IDF 6.0 uses PicoLibC which is incompatible with -nostdlib.
+            # The -specs=picolibc.specs flag is needed so the compiler finds
+            # PicoLibC headers. The cmath std:: namespace fix is handled in
+            # libraries/AP_Common/missing/cmath via ESP_PLATFORM guard.
+            env.CFLAGS += ['-specs=picolibc.specs']
+            env.CXXFLAGS += ['-specs=picolibc.specs']
+        else:
+            # IDF 5.x uses Newlib which works with -nostdlib
+            env.CXXFLAGS += ['-nostdlib']
         env.CXXFLAGS.remove('-Werror=undef')
         env.CXXFLAGS.remove('-Werror=shadow')
 
@@ -1078,6 +1152,29 @@ class esp32(Board):
             env.DEFINES.update(
                 HAL_PARAM_DEFAULTS_PATH='"@ROMFS/defaults.parm"',
             )
+
+        # Use generated board headers instead of static ones
+        env.INCLUDES += [
+                cfg.bldnode.find_or_declare('boards').abspath(),
+            ]
+
+        # Include hwdef.h in compilation for ESP32 builds
+        hwdef_h = cfg.bldnode.find_or_declare('hwdef.h').abspath()
+        env.CFLAGS += ['-include', hwdef_h]
+        env.CXXFLAGS += ['-include', hwdef_h]
+
+        # Parse hwdef.dat for APA102 pins to set environment variables
+        hwdef_path = 'libraries/AP_HAL_ESP32/hwdef/%s/hwdef.dat' % self.get_name()
+        if os.path.exists(hwdef_path):
+            with open(hwdef_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('APA102_DATA_PIN='):
+                        pin_num = line.split('=')[1]
+                        env.APA102_DATA = pin_num
+                    elif line.startswith('APA102_CLOCK_PIN='):
+                        pin_num = line.split('=')[1]
+                        env.APA102_CLOCK = pin_num
 
         env.AP_PROGRAM_AS_STLIB = True
         #if cfg.options.enable_profile:

@@ -14,7 +14,7 @@
 
 #include <ff.h>
 // FatFS compatibility: ESP-IDF FatFS uses FF_DIR, ChibiOS FatFS uses DIR
-#ifndef FF_DIR
+#if !defined(FF_DIR) && !defined(ESP_PLATFORM)
 #define FF_DIR DIR
 #endif
 #ifdef HAL_OS_CHIBIOS

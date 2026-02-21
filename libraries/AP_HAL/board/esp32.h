@@ -36,6 +36,14 @@
 // Generated during build process by esp32_hwdef.py
 #include <hwdef.h>
 
+#ifndef HAL_PROGRAM_SIZE_LIMIT_KB
+#define HAL_PROGRAM_SIZE_LIMIT_KB 2048
+#endif
+
+#ifndef HAL_BOARD_NAME
+#define HAL_BOARD_NAME "ESP32"
+#endif
+
 #ifndef HAL_BOARD_STATE_DIRECTORY
 #define HAL_BOARD_STATE_DIRECTORY "/SDCARD/APM"
 #endif
@@ -51,7 +59,7 @@
 #ifndef HAL_BOARD_STORAGE_DIRECTORY
 #define HAL_BOARD_STORAGE_DIRECTORY HAL_BOARD_STATE_DIRECTORY "/STORAGE"
 #endif
-#define HAL_BOARD_NAME "ESP32"
+
 #define HAL_CPU_CLASS HAL_CPU_CLASS_150
 #ifndef HAL_WITH_DRONECAN
 #define HAL_WITH_DRONECAN 0
@@ -71,10 +79,6 @@
 #define O_CLOEXEC 0
 #ifndef HAL_STORAGE_SIZE
 #define HAL_STORAGE_SIZE (16384)
-#endif
-
-#ifndef HAL_PROGRAM_SIZE_LIMIT_KB
-#define HAL_PROGRAM_SIZE_LIMIT_KB 2048
 #endif
 
 #ifdef __cplusplus
@@ -107,13 +111,19 @@
 #endif
 #endif
 // disable uncommon stuff that we'd otherwise get 
+#ifndef AP_EXTERNAL_AHRS_ENABLED
 #define AP_EXTERNAL_AHRS_ENABLED 0
+#endif
 #ifndef HAL_GENERATOR_ENABLED
 #define HAL_GENERATOR_ENABLED 0
 #endif
 
+#ifndef __LITTLE_ENDIAN
 #define __LITTLE_ENDIAN  1234
+#endif
+#ifndef __BYTE_ORDER
 #define __BYTE_ORDER     __LITTLE_ENDIAN
+#endif
 
 // ArduPilot uses __RAMFUNC__ to place functions in fast instruction RAM
 #ifndef __RAMFUNC__
@@ -204,8 +214,12 @@
 //turn off a bunch of advanced plane scheduler table things. see Plane.cpp
 #define AP_ADVANCEDFAILSAFE_ENABLED 0
 #define AP_ICENGINE_ENABLED 0
+#ifndef AP_OPTICALFLOW_ENABLED
 #define AP_OPTICALFLOW_ENABLED 0
+#endif
+#ifndef AP_RPM_ENABLED
 #define AP_RPM_ENABLED 0
+#endif
 #define AP_AIRSPEED_AUTOCAL_ENABLE 0
 #ifndef HAL_MOUNT_ENABLED
 #define HAL_MOUNT_ENABLED 0
@@ -215,7 +229,9 @@
 #ifndef AP_TERRAIN_AVAILABLE
 #define AP_TERRAIN_AVAILABLE 0
 #endif
+#ifndef HAL_ADSB_ENABLED
 #define HAL_ADSB_ENABLED 0
+#endif
 #ifndef HAL_BUTTON_ENABLED
 #define HAL_BUTTON_ENABLED 0
 #endif
@@ -265,4 +281,12 @@ extern "C" {
 #include <stdarg.h>
 #ifdef __cplusplus
 }
+#endif
+
+#ifndef HAL_OS_POSIX_IO
+#define HAL_OS_POSIX_IO 1
+#endif
+
+#ifndef HAVE_FILESYSTEM_SUPPORT
+#define HAVE_FILESYSTEM_SUPPORT 1
 #endif
