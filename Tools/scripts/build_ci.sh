@@ -169,6 +169,14 @@ for t in $CI_BUILD_TARGET; do
         run_autotest "Copter" "build.SITLPeriphUniversal" "test.CAN"
         continue
     fi
+    if [ "$t" == "sitltest-dronecan" ]; then
+        echo "Building SITL DroneCAN Tests"
+        pip install --progress-bar off dronecan 2>/dev/null || true
+        $waf configure --board sitl
+        $waf copter
+        run_autotest "Copter" "build.SITLPeriphUniversal" "test.DroneCAN"
+        continue
+    fi
     if [ "$t" == "sitltest-plane-tests1a" ]; then
         run_autotest "Plane" "build.Plane" "test.PlaneTests1a"
         continue

@@ -47,6 +47,16 @@
 # define NEED_CMATH_ISNAN_STD_NAMESPACE
 #endif
 #endif
+#if defined(ESP_PLATFORM)
+// ESP32 with PicoLibC (IDF 6.0+): configure checks fail due to
+// -include hwdef.h referencing headers not on the check include path.
+// PicoLibC provides isinf/isnan in global namespace via math.h but
+// isfinite and isgreaterequal are only in std:: from <cmath>.
+#ifndef HAVE_CMATH_ISFINITE
+# define HAVE_CMATH_ISFINITE
+# define NEED_CMATH_ISFINITE_STD_NAMESPACE
+#endif
+#endif
 #endif
 
 #if defined(HAVE_CMATH_ISFINITE) && defined(NEED_CMATH_ISFINITE_STD_NAMESPACE)
@@ -59,4 +69,9 @@ using std::isinf;
 
 #if defined(HAVE_CMATH_ISNAN) && defined(NEED_CMATH_ISNAN_STD_NAMESPACE)
 using std::isnan;
+#endif
+
+#if defined(ESP_PLATFORM)
+// PicoLibC (IDF 6.0+) only has isgreaterequal in std:: namespace
+using std::isgreaterequal;
 #endif

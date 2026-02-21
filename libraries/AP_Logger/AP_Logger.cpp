@@ -5,6 +5,7 @@
 #include "AP_Logger_Backend.h"
 
 #include "AP_Logger_File.h"
+#include "AP_Logger_ESP32_PSRAM.h"
 #include "AP_Logger_Flash_JEDEC.h"
 #include "AP_Logger_W25NXX.h"
 #include "AP_Logger_MAVLink.h"
@@ -18,6 +19,7 @@
 #if HAL_LOGGER_FENCE_ENABLED
     #include <AC_Fence/AC_Fence.h>
 #endif
+
 
 AP_Logger *AP_Logger::_singleton;
 
@@ -242,7 +244,12 @@ void AP_Logger::init(const AP_Int32 &log_bitmask, const struct LogStructure *str
         Backend_Type type;
         AP_Logger_Backend* (*probe_fn)(AP_Logger&, LoggerMessageWriter_DFLogStart*);
     } backend_configs[] {
-#if HAL_LOGGING_FILESYSTEM_ENABLED
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32 && defined(HAL_ESP32_USE_PSRAM_LOGGING)
+        { Backend_Type::FILESYSTEM, AP_Logger_ESP32_PSRAM::probe },
+        // File backend disabled on ESP32 - SPIFFS causes SPI flash cache deadlocks
+        // Every SPIFFS write requires disabling cache on both CPUs which fails
+        // when other tasks don't yield quickly enough, causing watchdog timeouts
+#elif HAL_LOGGING_FILESYSTEM_ENABLED
         { Backend_Type::FILESYSTEM, AP_Logger_File::probe },
 #endif
 #if HAL_LOGGING_DATAFLASH_ENABLED
@@ -260,6 +267,7 @@ void AP_Logger::init(const AP_Int32 &log_bitmask, const struct LogStructure *str
             continue; // skip if not enabled
         }
         remaining_types &= ~type; // remember that we processed this type
+
         if (_next_backend == LOGGER_MAX_BACKENDS) {
             AP_BoardConfig::config_error("Too many logger backends");
             return;
@@ -272,8 +280,19 @@ void AP_Logger::init(const AP_Int32 &log_bitmask, const struct LogStructure *str
         }
         backends[_next_backend] = backend_config.probe_fn(*this, message_writer);
         if (backends[_next_backend] == nullptr) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+            // ESP32: Don't panic if specific backend not available, try next one
+            // This allows fallback from PSRAM -> File -> MAVLink
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Logger backend %d not available",
+                         (int)backend_config.type);
+            // Don't delete message_writer here - let backend handle cleanup
+            // Some backends may still use it even if probe returns nullptr
+            continue;
+#else
             AP_BoardConfig::allocation_error("logger backend");
+#endif
         }
+
         _next_backend++;
     }
 
@@ -281,6 +300,13 @@ void AP_Logger::init(const AP_Int32 &log_bitmask, const struct LogStructure *str
         AP_BoardConfig::config_error("Unknown logger backend");
         return;
     }
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32: Ensure we have at least one backend (MAVLink should always work)
+    if (_next_backend == 0) {
+        GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "No logger backends available");
+    }
+#endif
 
     for (uint8_t i=0; i<_next_backend; i++) {
         backends[i]->Init();
@@ -853,6 +879,7 @@ uint16_t AP_Logger::get_num_logs(void) {
     if (_next_backend == 0) {
         return 0;
     }
+// Removed verbose debug to prevent logging overflow
     return backends[0]->get_num_logs();
 }
 
@@ -1460,13 +1487,23 @@ void AP_Logger::io_thread(void)
     bool done_crash_dump_save = false;
 
     while (true) {
+        // Pat watchdog for this thread
+        hal.scheduler->watchdog_pat();
+
         uint32_t now = AP_HAL::micros();
 
-        uint32_t delay = 250U; // always have some delay
+        uint32_t delay_us = 250U; // always have some delay
         if (now - last_run_us < 1000) {
-            delay = MAX(1000 - (now - last_run_us), delay);
+            delay_us = MAX(1000 - (now - last_run_us), delay_us);
         }
-        hal.scheduler->delay_microseconds(delay);
+
+        // Use delay() for delays >= 1ms to properly yield and feed watchdog
+        // Use delay_microseconds() only for sub-millisecond delays
+        if (delay_us >= 1000) {
+            hal.scheduler->delay(delay_us / 1000);
+        } else {
+            hal.scheduler->delay_microseconds(delay_us);
+        }
 
         last_run_us = AP_HAL::micros();
 

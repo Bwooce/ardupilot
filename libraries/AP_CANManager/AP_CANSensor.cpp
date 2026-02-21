@@ -26,6 +26,7 @@
 extern const AP_HAL::HAL& hal;
 
 #if HAL_CANMANAGER_ENABLED
+#include "AP_CANManager.h"
 #define debug_can(level_debug, fmt, args...) do { AP::can().log_text(level_debug, _driver_name, fmt, ##args); } while (0)
 #else
 #define debug_can(level_debug, fmt, args...)

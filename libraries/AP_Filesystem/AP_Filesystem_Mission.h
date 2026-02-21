@@ -44,14 +44,15 @@ private:
         NO_CLEAR = (1U<<0), // don't clear the old mission
     };
 
-    // header at front of the file
-    struct header {
+    // header at front of the file (wire protocol, must be packed)
+    struct PACKED header {
         uint16_t magic = mission_magic;
         uint16_t data_type; // MAV_MISSION_TYPE_*
         uint16_t options; // optional features
         uint16_t start; // first WP num, 0 for full upload
         uint16_t num_items;
     };
+    static_assert(sizeof(header) == 10, "mission header size mismatch");
 
     struct rfile {
         bool open;

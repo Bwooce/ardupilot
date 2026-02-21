@@ -764,7 +764,11 @@ void AP_Vehicle::send_watchdog_reset_statustext()
     }
     const AP_HAL::Util::PersistentData &pd = hal.util->last_persistent_data;
     (void)pd;  // in case !HAL_GCS_ENABLED
-    GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,
+    // Use WARNING if all fault data is zero (clean watchdog reset),
+    // CRITICAL if there's actual fault information
+    const bool has_fault_data = pd.fault_line != 0 || pd.fault_type != 0 ||
+                                pd.fault_addr != 0 || pd.fault_lr != 0;
+    GCS_SEND_TEXT(has_fault_data ? MAV_SEVERITY_CRITICAL : MAV_SEVERITY_WARNING,
                     "WDG: T%d SL%u FL%u FT%u FA%x FTP%u FLR%x FICSR%u MM%u MC%u IE%u IEC%u TN:%.4s",
                     pd.scheduler_task,
                     pd.semaphore_line,

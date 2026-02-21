@@ -29,6 +29,7 @@
 #include <AP_HAL/utility/sparse-endian.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
 
+
 extern const AP_HAL::HAL& hal;
 
 GCS_FTP *GCS_FTP::ftp;
@@ -154,7 +155,7 @@ void GCS_FTP::Session::push_reply(Transaction &reply)
     }
 }
 
-// calculates how much string length is needed to fit this in a list response
+
 int GCS_FTP::Session::gen_dir_entry(char *dest, size_t space, const char *path, const struct dirent * entry)
 {
 #if AP_FILESYSTEM_HAVE_DIRENT_DTYPE

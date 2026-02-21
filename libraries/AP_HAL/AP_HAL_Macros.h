@@ -12,15 +12,15 @@
 
 #ifndef AP_MATH_ALLOW_DOUBLE_FUNCTIONS
 /*
-  allow double maths on Linux and SITL to avoid problems with system headers
+  allow double maths on Linux, SITL, and ESP32 to avoid problems with system headers
  */
-#define AP_MATH_ALLOW_DOUBLE_FUNCTIONS (CONFIG_HAL_BOARD == HAL_BOARD_SITL || CONFIG_HAL_BOARD == HAL_BOARD_LINUX || HAL_WITH_EKF_DOUBLE || AP_SIM_ENABLED)
+#define AP_MATH_ALLOW_DOUBLE_FUNCTIONS (CONFIG_HAL_BOARD == HAL_BOARD_SITL || CONFIG_HAL_BOARD == HAL_BOARD_LINUX || CONFIG_HAL_BOARD == HAL_BOARD_ESP32 || HAL_WITH_EKF_DOUBLE || AP_SIM_ENABLED)
 #endif  // AP_MATH_ALLOW_DOUBLE_FUNCTIONS
 
 // we need to include math.h here for newer compilers (eg. g++ 7.3.1 for stm32)
 #include <math.h>
 
-#if !AP_MATH_ALLOW_DOUBLE_FUNCTIONS
+#if !AP_MATH_ALLOW_DOUBLE_FUNCTIONS && !defined(ALLOW_DOUBLE_TRIG_FUNCTIONS)
 /* give warnings if we use double precision maths functions without
    specifying ALLOW_DOUBLE_TRIG_FUNCTIONS. Code should use the
    equivalent f function instead (eg. use cosf() instead of

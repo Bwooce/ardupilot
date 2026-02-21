@@ -23,7 +23,7 @@
 #include "Scheduler.h"
 #include "DeviceBus.h"
 
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "i2c_sw.h"
 
 namespace ESP32
@@ -44,6 +44,7 @@ public:
     I2CBus():DeviceBus(Scheduler::I2C_PRIORITY) {};
     i2c_port_t port;
     uint32_t bus_clock;
+    i2c_master_bus_handle_t bus_handle;
     _i2c_bus_t sw_handle;
     bool soft;
 };
@@ -62,7 +63,10 @@ public:
     /* See AP_HAL::I2CDevice::set_address() */
     void set_address(uint8_t address) override
     {
-        _address = address;
+        if (_address != address) {
+            _invalidate_dev_handle();
+            _address = address;
+        }
     }
 
     /* See AP_HAL::I2CDevice::set_retries() */
@@ -106,6 +110,11 @@ protected:
     uint8_t _address;
     char *pname;
     uint32_t _timeout_ms;
+
+private:
+    i2c_master_dev_handle_t _dev_handle = nullptr;
+    bool _ensure_dev_handle();
+    void _invalidate_dev_handle();
 };
 
 class I2CDeviceManager : public AP_HAL::I2CDeviceManager

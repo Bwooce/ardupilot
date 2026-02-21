@@ -4896,11 +4896,30 @@ class TestSuite(abc.ABC):
         self.set_parameters({
             "CAN_P1_DRIVER": 1,
             "LOG_DISARMED": 1,
+            # Enable DroneCAN GPS to discover periph node IDs.
+            # DNA allocates from MAX_NODE_ID downward; instance 0
+            # (whose SERIAL4 is at port 15550) gets the highest.
+            "GPS1_TYPE": 9,
+            "GPS2_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+            "SIM_GPS2_ENABLE": 0,
             })
+        self.context_collect('STATUSTEXT')
         self.reboot_sitl()
+        # Discover periph node IDs from GPS detection messages
+        gps1_text = self.wait_text("GPS 1: specified as DroneCAN.*",
+                                   regex=True, check_context=True, timeout=60)
+        gps2_text = self.wait_text("GPS 2: specified as DroneCAN.*",
+                                   regex=True, check_context=True, timeout=60)
+        self.context_stop_collecting('STATUSTEXT')
+        gps1_node = int(gps1_text.split('-')[1])
+        gps2_node = int(gps2_text.split('-')[1])
+        # Instance 0 (port 15550) gets the highest node ID
+        periph_node = max(gps1_node, gps2_node)
+        self.progress("Using periph node %d for CAN serial tunnel" % periph_node)
         self.set_parameters({
             "CAN_D1_UC_SER_EN": 1,
-            "CAN_D1_UC_S1_NOD": 125,
+            "CAN_D1_UC_S1_NOD": periph_node,
             "CAN_D1_UC_S1_IDX": 4,
             "CAN_D1_UC_S1_BD": 57600,
             "CAN_D1_UC_S1_PRO": 2,
@@ -4924,6 +4943,668 @@ class TestSuite(abc.ABC):
         mavproxy.expect("Finished downloading", timeout=120)
         self.mavproxy_unload_module(mavproxy, 'log')
         self.stop_mavproxy(mavproxy)
+        self.context_pop()
+
+    def wait_dronecan_node(self, timeout=60):
+        '''wait for a DroneCAN node to come online via statustext, return node_id'''
+        import re
+        self.progress("Waiting for DroneCAN node via statustext...")
+        self.context_collect('STATUSTEXT')
+        try:
+            text = self.wait_text("DroneCAN Node (\\d+):", regex=True,
+                                  check_context=True, timeout=timeout)
+            match = re.search(r"DroneCAN Node (\d+):", text)
+            if match:
+                node_id = int(match.group(1))
+                self.progress("Found DroneCAN node %d" % node_id)
+                return node_id
+        finally:
+            self.context_stop_collecting('STATUSTEXT')
+        raise AutoTestTimeoutException("Could not parse DroneCAN node ID")
+
+    def DroneCAN_NodeStatus(self):
+        '''test UAVCAN_NODE_STATUS MAVLink broadcasting'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        # Collect NODE_STATUS messages during reboot (they arrive on first contact)
+        self.context_collect('UAVCAN_NODE_STATUS')
+        self.reboot_sitl()
+
+        # Wait for node to appear (detected via statustext)
+        self.wait_dronecan_node(timeout=60)
+
+        # Check collected NODE_STATUS from initial contact
+        m = self.assert_receive_message('UAVCAN_NODE_STATUS', timeout=5,
+                                        check_context=True)
+        self.progress("NODE_STATUS: health=%d mode=%d uptime=%d" %
+                      (m.health, m.mode, m.uptime_sec))
+
+        # Verify healthy OPERATIONAL state
+        if m.health != 0:  # HEALTH_OK = 0
+            raise NotAchievedException("Expected health OK (0), got %d" % m.health)
+        if m.mode != 0:  # MODE_OPERATIONAL = 0
+            raise NotAchievedException("Expected mode OPERATIONAL (0), got %d" % m.mode)
+        if m.uptime_sec == 0:
+            raise NotAchievedException("Expected uptime > 0")
+
+        self.context_stop_collecting('UAVCAN_NODE_STATUS')
+        self.progress("UAVCAN_NODE_STATUS initial contact validated")
+        self.context_pop()
+
+    def DroneCAN_NodeInfo(self):
+        '''test UAVCAN_NODE_INFO MAVLink broadcasting'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        # Collect NODE_INFO during reboot (sent when node info response arrives)
+        self.context_collect('UAVCAN_NODE_INFO')
+        self.reboot_sitl()
+
+        # Wait for node to appear
+        self.wait_dronecan_node(timeout=60)
+
+        # Check collected NODE_INFO
+        m = self.assert_receive_message('UAVCAN_NODE_INFO', timeout=5,
+                                        check_context=True)
+        self.progress("NODE_INFO: name='%s' hw=%d.%d sw=%d.%d vcs=%d" %
+                      (m.name, m.hw_version_major, m.hw_version_minor,
+                       m.sw_version_major, m.sw_version_minor, m.sw_vcs_commit))
+        self.context_stop_collecting('UAVCAN_NODE_INFO')
+
+        # Verify non-empty name
+        name = m.name.rstrip('\x00')
+        if len(name) == 0:
+            raise NotAchievedException("Node name is empty")
+
+        # Verify valid uptime
+        if m.uptime_sec == 0:
+            raise NotAchievedException("uptime_sec should be > 0")
+
+        # Verify unique_id is not all zeros
+        uid = m.hw_unique_id
+        if all(b == 0 for b in uid):
+            raise NotAchievedException("hw_unique_id is all zeros")
+
+        self.progress("NODE_INFO validated successfully")
+        self.context_pop()
+
+    def send_param_ext_read_with_retry(self, node_id, param_name, retries=5):
+        '''send PARAM_EXT_REQUEST_READ with retries, return message or raise'''
+        param_id = param_name.ljust(16, '\x00')
+        for attempt in range(retries):
+            self.progress("PARAM_EXT_REQUEST_READ '%s' node %d (attempt %d)" %
+                          (param_name, node_id, attempt + 1))
+            self.mav.mav.param_ext_request_read_send(
+                self.sysid_thismav(),
+                node_id,
+                param_id.encode('utf-8') if isinstance(param_id, str) else param_id,
+                -1
+            )
+            m = self.mav.recv_match(type='PARAM_EXT_VALUE', blocking=True, timeout=5)
+            if m is not None:
+                return m
+            self.progress("No response, retrying...")
+        raise NotAchievedException("Did not get PARAM_EXT_VALUE for '%s' after %d attempts" %
+                                   (param_name, retries))
+
+    def send_param_ext_set_with_retry(self, node_id, param_name, value_str, param_type, retries=5):
+        '''send PARAM_EXT_SET with retries, return ACK message or raise'''
+        param_id = param_name.ljust(16, '\x00')
+        param_value = value_str.ljust(128, '\x00')
+        for attempt in range(retries):
+            self.progress("PARAM_EXT_SET '%s'='%s' node %d (attempt %d)" %
+                          (param_name, value_str, node_id, attempt + 1))
+            self.mav.mav.param_ext_set_send(
+                self.sysid_thismav(),
+                node_id,
+                param_id.encode('utf-8') if isinstance(param_id, str) else param_id,
+                param_value.encode('utf-8') if isinstance(param_value, str) else param_value,
+                param_type
+            )
+            m = self.mav.recv_match(type='PARAM_EXT_ACK', blocking=True, timeout=5)
+            if m is not None:
+                return m
+            self.progress("No response, retrying...")
+        raise NotAchievedException("Did not get PARAM_EXT_ACK for '%s' after %d attempts" %
+                                   (param_name, retries))
+
+    def DroneCAN_ParamExtRead(self):
+        '''test PARAM_EXT_REQUEST_READ for DroneCAN node parameters'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        # Discover node and wait for startup param queries to complete
+        node_id = self.wait_dronecan_node(timeout=60)
+        self.delay_sim_time(5)
+
+        # Read GPS1_TYPE (known to be 1 from periph.parm)
+        param_name = "GPS1_TYPE"
+        m = self.send_param_ext_read_with_retry(node_id, param_name)
+        got_name = m.param_id.rstrip('\x00')
+        self.progress("PARAM_EXT_VALUE: param_id='%s' value='%s' type=%d" %
+                      (got_name, m.param_value, m.param_type))
+
+        if got_name != param_name:
+            raise NotAchievedException("Expected param_id '%s', got '%s'" % (param_name, got_name))
+
+        # Value should be "1" or "1.0" for GPS1_TYPE=1
+        value_str = m.param_value.rstrip('\x00')
+        try:
+            value = float(value_str)
+        except ValueError:
+            raise NotAchievedException("Could not parse param value '%s' as float" % value_str)
+
+        if abs(value - 1.0) > 0.01:
+            raise NotAchievedException("Expected GPS1_TYPE=1, got %f" % value)
+
+        self.progress("PARAM_EXT_REQUEST_READ validated: %s=%s" % (got_name, value_str))
+        self.context_pop()
+
+    def DroneCAN_ParamExtSet(self):
+        '''test PARAM_EXT_SET for DroneCAN node parameters'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        # Discover node and wait for startup param queries to complete
+        node_id = self.wait_dronecan_node(timeout=60)
+        self.delay_sim_time(5)
+
+        # Read current BARO_ENABLE value (should be 1)
+        param_name = "BARO_ENABLE"
+        m = self.send_param_ext_read_with_retry(node_id, param_name)
+        original_value = m.param_value.rstrip('\x00')
+        param_type = m.param_type
+        self.progress("Current %s=%s (type=%d)" % (param_name, original_value, param_type))
+
+        # Set to 0
+        m = self.send_param_ext_set_with_retry(node_id, param_name, "0", param_type)
+        self.progress("PARAM_EXT_ACK: result=%d" % m.param_result)
+        if m.param_result != 0:
+            raise NotAchievedException("PARAM_EXT_SET failed with result=%d" % m.param_result)
+
+        # Read back to verify
+        m = self.send_param_ext_read_with_retry(node_id, param_name)
+        readback = m.param_value.rstrip('\x00')
+        self.progress("Readback: %s=%s" % (param_name, readback))
+        try:
+            if abs(float(readback) - 0.0) > 0.01:
+                raise NotAchievedException("Readback value %s != 0" % readback)
+        except ValueError:
+            raise NotAchievedException("Could not parse readback '%s' as float" % readback)
+
+        # Restore original value
+        m = self.send_param_ext_set_with_retry(node_id, param_name, original_value, param_type)
+        if m.param_result != 0:
+            raise NotAchievedException("PARAM_EXT_SET restore failed with result=%d" % m.param_result)
+
+        self.progress("PARAM_EXT_SET validated successfully")
+        self.context_pop()
+
+    def DroneCAN_ParamExtSetFloat(self):
+        '''test PARAM_EXT_SET for DroneCAN float parameters'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        node_id = self.wait_dronecan_node(timeout=60)
+        self.delay_sim_time(5)
+
+        # Read current RNGFND1_MAX value (should be 120.0, a float param)
+        param_name = "RNGFND1_MAX"
+        m = self.send_param_ext_read_with_retry(node_id, param_name)
+        original_value = m.param_value.rstrip('\x00')
+        param_type = m.param_type
+        self.progress("Current %s=%s (type=%d)" % (param_name, original_value, param_type))
+
+        # Verify it reads as a float near 120.0
+        try:
+            orig_float = float(original_value)
+        except ValueError:
+            raise NotAchievedException("Could not parse '%s' as float" % original_value)
+        if abs(orig_float - 120.0) > 0.1:
+            raise NotAchievedException("Expected RNGFND1_MAX near 120.0, got %f" % orig_float)
+
+        # Set to 100.5 (a non-integer float to confirm float handling)
+        new_value = "100.5"
+        m = self.send_param_ext_set_with_retry(node_id, param_name, new_value, param_type)
+        self.progress("PARAM_EXT_ACK: result=%d" % m.param_result)
+        if m.param_result != 0:
+            raise NotAchievedException("PARAM_EXT_SET to %s failed with result=%d" %
+                                       (new_value, m.param_result))
+
+        # Read back to verify
+        m = self.send_param_ext_read_with_retry(node_id, param_name)
+        readback = m.param_value.rstrip('\x00')
+        self.progress("Readback: %s=%s" % (param_name, readback))
+        try:
+            readback_float = float(readback)
+        except ValueError:
+            raise NotAchievedException("Could not parse readback '%s' as float" % readback)
+        if abs(readback_float - 100.5) > 0.01:
+            raise NotAchievedException("Readback value %f != 100.5" % readback_float)
+
+        # Restore original value
+        m = self.send_param_ext_set_with_retry(node_id, param_name, original_value, param_type)
+        if m.param_result != 0:
+            raise NotAchievedException("Restore failed with result=%d" % m.param_result)
+
+        self.progress("PARAM_EXT_SET float validated: %s set to %s and restored" %
+                      (param_name, new_value))
+        self.context_pop()
+
+    def DroneCAN_ParamExtTypeCross(self):
+        '''test PARAM_EXT_SET with mismatched types (int value to float param and vice versa)'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        node_id = self.wait_dronecan_node(timeout=60)
+        self.delay_sim_time(5)
+
+        # --- Phase 1: Send integer-typed SET to a float parameter ---
+        float_param = "RNGFND1_MAX"
+        m = self.send_param_ext_read_with_retry(node_id, float_param)
+        orig_float_value = m.param_value.rstrip('\x00')
+        orig_float_type = m.param_type
+        self.progress("%s: original value=%s type=%d" % (float_param, orig_float_value, orig_float_type))
+
+        # Set using INT32 type (6) -- periph must convert integer to float
+        int32_type = 6  # MAV_PARAM_EXT_TYPE_INT32
+        m = self.send_param_ext_set_with_retry(node_id, float_param, "100", int32_type)
+        self.progress("Cross-type SET (int->float): result=%d" % m.param_result)
+        if m.param_result != 0:
+            raise NotAchievedException("Cross-type SET int->float failed: result=%d" % m.param_result)
+
+        # Read back -- should be 100.0
+        m = self.send_param_ext_read_with_retry(node_id, float_param)
+        readback = float(m.param_value.rstrip('\x00'))
+        if abs(readback - 100.0) > 0.1:
+            raise NotAchievedException("Expected 100.0 after int->float SET, got %f" % readback)
+        self.progress("Cross-type int->float verified: %s=%f" % (float_param, readback))
+
+        # Restore
+        self.send_param_ext_set_with_retry(node_id, float_param, orig_float_value, orig_float_type)
+
+        # --- Phase 2: Send float-typed SET to an integer parameter ---
+        int_param = "GPS1_TYPE"
+        m = self.send_param_ext_read_with_retry(node_id, int_param)
+        orig_int_value = m.param_value.rstrip('\x00')
+        orig_int_type = m.param_type
+        self.progress("%s: original value=%s type=%d" % (int_param, orig_int_value, orig_int_type))
+
+        # Set using REAL32 type (9) -- periph must convert float to integer
+        real32_type = 9  # MAV_PARAM_EXT_TYPE_REAL32
+        m = self.send_param_ext_set_with_retry(node_id, int_param, "2.0", real32_type)
+        self.progress("Cross-type SET (float->int): result=%d" % m.param_result)
+        if m.param_result != 0:
+            raise NotAchievedException("Cross-type SET float->int failed: result=%d" % m.param_result)
+
+        # Read back -- should be 2
+        m = self.send_param_ext_read_with_retry(node_id, int_param)
+        readback = float(m.param_value.rstrip('\x00'))
+        if abs(readback - 2.0) > 0.01:
+            raise NotAchievedException("Expected 2.0 after float->int SET, got %f" % readback)
+        self.progress("Cross-type float->int verified: %s=%f" % (int_param, readback))
+
+        # Restore
+        self.send_param_ext_set_with_retry(node_id, int_param, orig_int_value, orig_int_type)
+
+        self.progress("PARAM_EXT_SET cross-type validated: int->float and float->int both work")
+        self.context_pop()
+
+    def DroneCAN_NodeDisconnect(self):
+        '''test DroneCAN node disconnect detection and reconnection'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        # Phase 1: Verify node is online
+        self.wait_dronecan_node(timeout=60)
+        self.progress("Node is online")
+
+        # Phase 2: Restart periph in maintenance mode, verify unhealthy report
+        self.context_collect('STATUSTEXT')
+        self.stop_sup_program(instance=0)
+        self.start_sup_program(instance=0, args="-M")
+        self.wait_statustext(".*Node .* unhealthy", check_context=True,
+                             regex=True, timeout=30)
+        self.progress("Maintenance mode detected via statustext")
+        self.context_stop_collecting('STATUSTEXT')
+
+        # Phase 3: Restart periph normally, verify recovery
+        self.stop_sup_program(instance=0)
+        self.start_sup_program(instance=0)
+        self.wait_dronecan_node(timeout=60)
+        self.progress("Node recovered after maintenance mode restart")
+
+        self.context_pop()
+
+    def DroneCAN_ParamExtSavePersist(self):
+        '''test that DroneCAN parameter changes persist across periph reboot'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        node_id = self.wait_dronecan_node(timeout=60)
+        self.delay_sim_time(5)
+
+        # Read current RNGFND1_MAX (default 120.0)
+        param_name = "RNGFND1_MAX"
+        m = self.send_param_ext_read_with_retry(node_id, param_name)
+        original_value = m.param_value.rstrip('\x00')
+        param_type = m.param_type
+        self.progress("Original %s=%s" % (param_name, original_value))
+
+        # Set to a distinctive value
+        test_value = "77.5"
+        m = self.send_param_ext_set_with_retry(node_id, param_name, test_value, param_type)
+        if m.param_result != 0:
+            raise NotAchievedException("SET failed: result=%d" % m.param_result)
+        self.progress("Set %s=%s" % (param_name, test_value))
+
+        # Reboot the periph (stop and restart)
+        self.progress("Rebooting periph to test persistence")
+        self.stop_sup_program(instance=0)
+        self.delay_sim_time(2)
+        self.start_sup_program(instance=0)
+
+        # Wait for node to reconnect
+        new_node_id = self.wait_dronecan_node(timeout=60)
+        self.delay_sim_time(5)
+        self.progress("Periph reconnected as node %d" % new_node_id)
+
+        # Read back after reboot -- should still be 77.5
+        m = self.send_param_ext_read_with_retry(new_node_id, param_name)
+        readback = m.param_value.rstrip('\x00')
+        self.progress("Post-reboot %s=%s" % (param_name, readback))
+        try:
+            readback_float = float(readback)
+        except ValueError:
+            raise NotAchievedException("Could not parse readback '%s'" % readback)
+        if abs(readback_float - 77.5) > 0.1:
+            raise NotAchievedException("Value did not persist: expected 77.5, got %f" % readback_float)
+
+        # Restore original value
+        self.send_param_ext_set_with_retry(new_node_id, param_name, original_value, param_type)
+
+        self.progress("Parameter persistence validated: %s=%s survived periph reboot" %
+                      (param_name, test_value))
+        self.context_pop()
+
+    def DroneCAN_ParamExtList(self):
+        '''test PARAM_EXT_REQUEST_LIST for DroneCAN node parameter enumeration'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        # Discover node
+        node_id = self.wait_dronecan_node(timeout=60)
+        self.delay_sim_time(2)
+
+        # Request parameter list
+        self.progress("Sending PARAM_EXT_REQUEST_LIST to node %d" % node_id)
+        self.mav.mav.param_ext_request_list_send(
+            self.sysid_thismav(),
+            node_id
+        )
+
+        # Collect PARAM_EXT_VALUE responses
+        params = {}
+        last_receive_time = self.get_sim_time_cached()
+        while True:
+            m = self.mav.recv_match(type='PARAM_EXT_VALUE', blocking=True, timeout=1)
+            if m is not None:
+                name = m.param_id.rstrip('\x00')
+                value = m.param_value.rstrip('\x00')
+                params[m.param_index] = (name, value)
+                last_receive_time = self.get_sim_time_cached()
+                self.progress("Param[%d]: %s=%s (total so far: %d/%d)" %
+                              (m.param_index, name, value, len(params), m.param_count))
+            now = self.get_sim_time_cached()
+            if now - last_receive_time > 5:
+                break
+
+        self.progress("Received %d parameters" % len(params))
+
+        # Verify we got a reasonable number of parameters
+        if len(params) < 5:
+            raise NotAchievedException("Expected at least 5 params, got %d" % len(params))
+
+        # Verify sequential indices starting from 0
+        indices = sorted(params.keys())
+        for i, idx in enumerate(indices):
+            if idx != i:
+                raise NotAchievedException("Non-sequential param index: expected %d, got %d" % (i, idx))
+
+        self.progress("PARAM_EXT_REQUEST_LIST validated: %d params with sequential indices" % len(params))
+        self.context_pop()
+
+    def DroneCAN_DNAPersistence(self):
+        '''test that DroneCAN DNA allocation persists across autopilot reboot'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        # Phase 1: Get initial node_id from DNA allocation
+        node_id_1 = self.wait_dronecan_node(timeout=60)
+        self.progress("Initial DNA allocation: node_id=%d" % node_id_1)
+
+        if node_id_1 < 1 or node_id_1 > 127:
+            raise NotAchievedException("Invalid node_id %d (expected 1-127)" % node_id_1)
+
+        # Phase 2: Reboot autopilot (preserves DNA database), verify same node_id
+        self.progress("Rebooting SITL to test DNA database persistence")
+        self.reboot_sitl()
+
+        node_id_2 = self.wait_dronecan_node(timeout=60)
+        self.progress("Post-reboot DNA allocation: node_id=%d" % node_id_2)
+
+        if node_id_2 != node_id_1:
+            raise NotAchievedException(
+                "DNA not persistent: first=%d, after reboot=%d" %
+                (node_id_1, node_id_2))
+
+        self.progress("DNA persistence validated: node_id=%d stable across reboot" % node_id_1)
+        self.context_pop()
+
+    def DroneCAN_ParamExtInvalidNode(self):
+        '''test PARAM_EXT to non-existent node returns no response'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        # Wait for real node so CAN bus is active
+        self.wait_dronecan_node(timeout=60)
+        self.delay_sim_time(5)
+
+        # Send PARAM_EXT_REQUEST_READ to non-existent node (node_id=99)
+        fake_node = 99
+        param_id = "GPS1_TYPE".ljust(16, '\x00')
+        self.progress("Sending PARAM_EXT_REQUEST_READ to non-existent node %d" % fake_node)
+        self.mav.mav.param_ext_request_read_send(
+            self.sysid_thismav(),
+            fake_node,
+            param_id.encode('utf-8'),
+            -1
+        )
+
+        # Should get no response (3 second timeout is generous)
+        m = self.mav.recv_match(type='PARAM_EXT_VALUE', blocking=True, timeout=3)
+        if m is not None:
+            got_comp = m.get_srcComponent()
+            if got_comp == fake_node:
+                raise NotAchievedException(
+                    "Got PARAM_EXT_VALUE from non-existent node %d" % fake_node)
+            self.progress("Got PARAM_EXT_VALUE from node %d (not %d) -- OK, ignoring" %
+                          (got_comp, fake_node))
+
+        self.progress("No response from non-existent node %d -- correct" % fake_node)
+        self.context_pop()
+
+    def DroneCAN_ParamExtInvalidParam(self):
+        '''test PARAM_EXT read of nonexistent parameter'''
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        node_id = self.wait_dronecan_node(timeout=60)
+        self.delay_sim_time(5)
+
+        # Read a parameter that does not exist on the periph
+        fake_param = "NONEXIST_PARAM"
+        param_id = fake_param.ljust(16, '\x00')
+        self.progress("Sending PARAM_EXT_REQUEST_READ for '%s' to node %d" %
+                      (fake_param, node_id))
+        self.mav.mav.param_ext_request_read_send(
+            self.sysid_thismav(),
+            node_id,
+            param_id.encode('utf-8'),
+            -1
+        )
+
+        # Periph should either not respond or respond with empty/error
+        m = self.mav.recv_match(type='PARAM_EXT_VALUE', blocking=True, timeout=5)
+        if m is not None:
+            got_name = m.param_id.rstrip('\x00')
+            if got_name == fake_param:
+                raise NotAchievedException(
+                    "Got PARAM_EXT_VALUE for nonexistent param '%s'" % fake_param)
+            self.progress("Got PARAM_EXT_VALUE for '%s' (not '%s') -- stale response, OK" %
+                          (got_name, fake_param))
+        else:
+            self.progress("No response for nonexistent param '%s' -- correct" % fake_param)
+
+        self.progress("Invalid parameter handling validated")
+        self.context_pop()
+
+    def DroneCAN_FirmwareUpdate(self):
+        '''test DroneCAN BeginFirmwareUpdate via direct CAN service request'''
+        try:
+            import dronecan
+        except ImportError:
+            self.progress("dronecan module not available, skipping test")
+            return
+        import threading
+
+        self.context_push()
+        self.set_parameters({
+            "CAN_P1_DRIVER": 1,
+            "GPS1_TYPE": 9,
+            "SIM_GPS1_ENABLE": 0,
+        })
+        self.reboot_sitl()
+
+        # Phase 1: Discover periph node
+        node_id = self.wait_dronecan_node(timeout=60)
+        self.delay_sim_time(5)
+        self.progress("Periph node %d online, sending BeginFirmwareUpdate" % node_id)
+
+        # Phase 2: Create pydronecan node on SITL multicast CAN bus
+        dc_node = dronecan.make_node('mcast:0', node_id=100)
+        response_received = threading.Event()
+        response_result = [None]  # mutable container for closure
+
+        def on_response(event):
+            if event is None:
+                self.progress("BeginFirmwareUpdate request timed out (no response)")
+            else:
+                resp = event.response
+                self.progress("BeginFirmwareUpdate response: error=%d" % resp.error)
+                response_result[0] = resp
+            response_received.set()
+
+        try:
+            # Send BeginFirmwareUpdate to periph node
+            req = dronecan.uavcan.protocol.file.BeginFirmwareUpdate.Request(
+                source_node_id=100,
+                image_file_remote_path=dronecan.uavcan.protocol.file.Path(
+                    path=list(b'/test/firmware.bin')
+                )
+            )
+            dc_node.request(req, node_id, on_response, timeout=5)
+
+            # Spin the dronecan node until we get a response (max 10s)
+            tstart = time.time()
+            while not response_received.is_set():
+                dc_node.spin(timeout=0.1)
+                if time.time() - tstart > 10:
+                    break
+        finally:
+            dc_node.close()
+
+        # Verify response
+        if not response_received.is_set():
+            raise NotAchievedException("No response to BeginFirmwareUpdate within 10s")
+
+        resp = response_result[0]
+        if resp is None:
+            raise NotAchievedException("BeginFirmwareUpdate callback received None (timeout)")
+
+        if resp.error != 0:
+            raise NotAchievedException(
+                "BeginFirmwareUpdate error=%d, expected 0 (OK)" % resp.error)
+
+        self.progress("BeginFirmwareUpdate accepted, waiting for periph to reboot")
+
+        # Phase 3: Wait for periph to reboot and reconnect via DNA
+        # On SITL, reboot(true) calls execv() which restarts the process
+        node_id_2 = self.wait_dronecan_node(timeout=60)
+        self.progress("Periph reconnected as node %d after firmware update reboot" % node_id_2)
+
+        if node_id_2 != node_id:
+            self.progress("Warning: node_id changed %d -> %d (DNA re-allocation)" %
+                          (node_id, node_id_2))
+
+        self.progress("DroneCAN BeginFirmwareUpdate validated: request accepted, periph rebooted and reconnected")
         self.context_pop()
 
     def show_gps_and_sim_positions(self, on_off):

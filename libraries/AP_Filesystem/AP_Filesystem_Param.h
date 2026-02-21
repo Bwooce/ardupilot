@@ -50,12 +50,13 @@ private:
     static constexpr uint16_t pmagic = 0x671b;
     static constexpr uint16_t pmagic_with_default = 0x671c;
 
-    // header at front of the file
-    struct header {
+    // header at front of the file (wire protocol, must be packed)
+    struct PACKED header {
         uint16_t magic = pmagic;
         uint16_t num_params;
         uint16_t total_params; // for upload this is total file length
     };
+    static_assert(sizeof(header) == 6, "param header size mismatch");
 
     struct cursor {
         AP_Param::ParamToken token;

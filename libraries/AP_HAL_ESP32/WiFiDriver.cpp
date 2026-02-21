@@ -24,7 +24,7 @@
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
-#include "esp_log.h"
+#include "ESP32_Debug.h"
 #include "nvs_flash.h"
 
 #include "lwip/err.h"
@@ -70,7 +70,28 @@ void WiFiDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
 
 void WiFiDriver::_end()
 {
-    //TODO
+    // Close all connected client sockets
+    for (unsigned short i = 0; i < WIFI_MAX_CONNECTION; ++i) {
+        if (socket_list[i] != -1) {
+            shutdown(socket_list[i], SHUT_RDWR);
+            close(socket_list[i]);
+            socket_list[i] = -1;
+        }
+    }
+    // Close the listening socket
+    if (accept_socket != -1) {
+        close(accept_socket);
+        accept_socket = -1;
+    }
+    // Stop the WiFi thread
+    if (_wifi_task_handle != nullptr) {
+        vTaskDelete(_wifi_task_handle);
+        _wifi_task_handle = nullptr;
+    }
+    // Free ring buffers
+    _readbuf.set_size(0);
+    _writebuf.set_size(0);
+    _state = NOT_INITIALIZED;
 }
 
 void WiFiDriver::_flush()
@@ -120,7 +141,7 @@ bool WiFiDriver::start_listen()
         accept_socket = -1;
         return false;
     }
-    int opt;
+    int opt = 1;
     setsockopt(accept_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     struct sockaddr_in destAddr;
     destAddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -129,7 +150,7 @@ bool WiFiDriver::start_listen()
     int err = bind(accept_socket, (struct sockaddr *)&destAddr, sizeof(destAddr));
     if (err != 0) {
         close(accept_socket);
-        accept_socket = 0;
+        accept_socket = -1;
         return false;
     }
     err = listen(accept_socket, 5);
@@ -182,9 +203,9 @@ bool WiFiDriver::read_data()
 
 bool WiFiDriver::write_data()
 {
+    _write_mutex.take_blocking();
     for (unsigned short i = 0; i < WIFI_MAX_CONNECTION && socket_list[i] > -1; ++i) {
         int count = 0;
-        _write_mutex.take_blocking();
         do {
             count = _writebuf.peekbytes(_buffer, sizeof(_buffer));
             if (count > 0) {
@@ -218,7 +239,6 @@ bool WiFiDriver::write_data()
 #define ESP_STATION_MAXIMUM_RETRY 10
 #endif
 
-static const char *TAG = "wifi station";
 static int s_retry_num = 0;
 static EventGroupHandle_t s_wifi_event_group;
 
@@ -231,11 +251,11 @@ static void _sta_event_handler(void* arg, esp_event_base_t event_base,
         if (s_retry_num < ESP_STATION_MAXIMUM_RETRY) {
             esp_wifi_connect();
             s_retry_num++;
-            ESP_LOGI(TAG, "retry to connect to the AP");
+            ESP32_DEBUG_INFO("retry to connect to the AP");
         } else {
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
-        ESP_LOGI(TAG,"connect to the AP fail");
+        ESP32_DEBUG_INFO("connect to the AP fail");
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
@@ -347,13 +367,13 @@ void WiFiDriver::initialize_wifi()
     /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
      * happened. */
     if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "connected to ap SSID: %s password: %s",
+        ESP32_DEBUG_INFO("connected to ap SSID: %s password: %s",
                  wifi_config.sta.ssid, wifi_config.sta.password);
     } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGI(TAG, "Failed to connect to SSID: %s, password: %s",
+        ESP32_DEBUG_INFO("Failed to connect to SSID: %s, password: %s",
                  wifi_config.sta.ssid, wifi_config.sta.password);
     } else {
-        ESP_LOGE(TAG, "UNEXPECTED EVENT");
+        ESP32_DEBUG_ERROR("UNEXPECTED EVENT");
     }
 
     /* The event will not be processed after unregister */

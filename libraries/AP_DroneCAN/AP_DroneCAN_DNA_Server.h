@@ -1,6 +1,7 @@
 #pragma once
 #include <AP_HAL/AP_HAL_Boards.h>
 #include <AP_HAL/Semaphores.h>
+#include "AP_DroneCAN_config.h"
 
 #if HAL_ENABLE_DRONECAN_DRIVERS
 #include <AP_Common/Bitmask.h>
@@ -13,26 +14,31 @@
 #include <dronecan_msgs.h>
 
 class AP_DroneCAN;
+
+// Maximum DroneCAN node ID supported by the DNA database.
+// Reduced from 125 to 62 to store full 16-byte unique IDs (vs 7-byte
+// FNV-1a hashes) within the 1KB storage area.  62 nodes is well beyond
+// any practical CAN bus deployment.
+#define MAX_NODE_ID 62
+
 //Forward declaring classes
 class AP_DroneCAN_DNA_Server
 {
     StorageAccess storage;
 
-    struct NodeRecord {
-        uint8_t uid_hash[6];
-        uint8_t crc;
+    struct PACKED NodeRecord {
+        uint8_t uid[16];
     };
 
     /*
      * For each node ID (1 through MAX_NODE_ID), the database can have one
      * registration for it. Each registration consists of a NodeRecord which
-     * contains the (hash of the) unique ID reported by that node ID. Other
-     * info could be added to the registration in the future.
+     * contains the unique ID reported by that node ID.
      *
      * Physically, the database is stored as a header and format version,
      * followed by an array of NodeRecords indexed by node ID. If a particular
-     * NodeRecord has an all-zero unique ID hash or an invalid CRC, then that
-     * node ID isn't considerd to have a registration.
+     * NodeRecord has an all-zero unique ID, then that node ID isn't
+     * considered to have a registration.
      *
      * The database has public methods which handle the server behavior for the
      * relevant message. The methods can be used by multiple servers in
@@ -57,17 +63,14 @@ class AP_DroneCAN_DNA_Server
         void init_server(uint8_t own_node_id, const uint8_t own_unique_id[], uint8_t own_unique_id_len);
 
         // handle processing the node info message. returns true if from a duplicate node
-        bool handle_node_info(uint8_t source_node_id, const uint8_t unique_id[]);
+        bool handle_node_info(uint8_t source_node_id, const uint8_t unique_id[], const Bitmask<128> *healthy_mask);
 
         // handle the allocation message. returns the allocated node ID, or 0 if allocation failed
-        uint8_t handle_allocation(const uint8_t unique_id[]);
+        uint8_t handle_allocation(const uint8_t unique_id[], uint8_t uid_len, const Bitmask<128> *seen_mask);
 
     private:
         // retrieve node ID that matches the given unique ID. returns 0 if not found
         uint8_t find_node_id(const uint8_t unique_id[], uint8_t size);
-
-        // fill the given record with the hash of the given unique ID
-        void compute_uid_hash(NodeRecord &record, const uint8_t unique_id[], uint8_t size) const;
 
         // register a given unique ID to a given node ID, deleting any existing registration for the unique ID
         void register_uid(uint8_t node_id, const uint8_t unique_id[], uint8_t size);
@@ -92,6 +95,7 @@ class AP_DroneCAN_DNA_Server
 
         StorageAccess *storage;
         HAL_Semaphore sem;
+        bool initialized;  // true after init() validates/resets database
     };
 
     static Database db;
@@ -153,6 +157,26 @@ public:
     //report the server state, along with failure message if any
     bool prearm_check(char* fail_msg, uint8_t fail_msg_len) const;
 
+    // Get node health statistics for LED display
+    uint8_t get_healthy_node_count() { return node_healthy.count(); }
+    uint8_t get_verified_node_count() { return node_verified.count(); }
+    uint8_t get_seen_node_count() { return node_seen.count(); }
+    bool has_healthy_nodes() { return node_healthy.count() > 0; }
+    bool all_nodes_healthy() { return node_healthy == node_verified && node_verified.count() > 0; }
+
+    // Check if a specific node has been seen (for parameter access via MAVLink)
+    bool is_node_seen(uint8_t node_id) { return node_seen.get(node_id); }
+
+    // Get node counts excluding local node (for display purposes)
+    uint8_t get_remote_healthy_count() {
+        uint8_t count = node_healthy.count();
+        return (node_healthy.get(self_node_id) && count > 0) ? count - 1 : count;
+    }
+    uint8_t get_remote_verified_count() {
+        uint8_t count = node_verified.count();
+        return (node_verified.get(self_node_id) && count > 0) ? count - 1 : count;
+    }
+
     // canard message handler callbacks
     void handle_allocation(const CanardRxTransfer& transfer, const uavcan_protocol_dynamic_node_id_Allocation& msg);
     void handleNodeStatus(const CanardRxTransfer& transfer, const uavcan_protocol_NodeStatus& msg);
@@ -160,6 +184,56 @@ public:
 
     //Run through the list of seen node ids for verification
     void verify_nodes();
+
+    // Request node info for all seen nodes (for MAV_CMD_UAVCAN_GET_NODE_INFO)
+    void request_all_node_info();
+
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
+    // Drain pending MAVLink messages queued by the DroneCAN thread.
+    // Must be called from the main thread (e.g. GCS::update_send).
+    static void service_pending_mavlink();
+#endif
+
+private:
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
+    // Queue node data for deferred MAVLink sending from the main thread.
+    // These are called from the DroneCAN thread callbacks.
+    void queue_node_status_mavlink(uint8_t node_id, const uavcan_protocol_NodeStatus& msg);
+    void report_node_health_change(uint8_t node_id, uint8_t health, uint8_t mode, bool recovered);
+    void queue_node_info_mavlink(uint8_t node_id, const uavcan_protocol_GetNodeInfoResponse& msg);
+
+    // Pending node status data (DroneCAN thread writes, main thread reads)
+    struct PendingNodeStatus {
+        uint32_t uptime_sec;
+        uint16_t vendor_specific_status_code;
+        uint8_t node_id;
+        uint8_t health;
+        uint8_t mode;
+        uint8_t sub_mode;
+    };
+
+    // Pending node info data (DroneCAN thread writes, main thread reads)
+    struct PendingNodeInfo {
+        uint32_t uptime_sec;
+        uint32_t sw_vcs_commit;
+        uint8_t node_id;
+        uint8_t hw_version_major;
+        uint8_t hw_version_minor;
+        uint8_t unique_id[16];
+        uint8_t sw_version_major;
+        uint8_t sw_version_minor;
+        char name[81];
+    };
+
+    static constexpr uint8_t PENDING_MAVLINK_MAX = 4;
+    static struct PendingMavlink {
+        PendingNodeStatus status[PENDING_MAVLINK_MAX];
+        PendingNodeInfo info[PENDING_MAVLINK_MAX];
+        uint8_t status_count;
+        uint8_t info_count;
+        HAL_Semaphore sem;
+    } _pending_mavlink;
+#endif
 };
 
 #endif

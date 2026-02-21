@@ -3894,13 +3894,8 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             # disable simulated GPS, so only via DroneCAN
             "SIM_GPS1_ENABLE": 0,
             "SIM_GPS2_ENABLE": 0,
-            # this ensures we use DroneCAN baro and compass
+            # this ensures we use DroneCAN baro
             "SIM_BARO_COUNT" : 0,
-            "SIM_MAG1_DEVID" : 0,
-            "SIM_MAG2_DEVID" : 0,
-            "SIM_MAG3_DEVID" : 0,
-            "COMPASS_USE2"   : 0,
-            "COMPASS_USE3"   : 0,
             # use DroneCAN rangefinder
             "RNGFND1_TYPE" : 24,
             "RNGFND1_MAX" : 110.00,
@@ -3911,6 +3906,31 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         })
 
         self.context_push()
+        # Disable ALL simulated magnetometers so only DroneCAN
+        # compasses register during GPS ordering tests. SIM_MAG4-6
+        # defaults encode as BUS_TYPE_UAVCAN (nodes 124/126/127) and
+        # would fill all 3 compass priority slots before real DroneCAN
+        # compasses can register.  These are restored by context_pop
+        # before the mission phase so the SITL compass (which saves
+        # its dev_id to EEPROM) provides calibrated compass data.
+        self.set_parameters({
+            "SIM_MAG1_DEVID" : 0,
+            "SIM_MAG2_DEVID" : 0,
+            "SIM_MAG3_DEVID" : 0,
+            "SIM_MAG4_DEVID" : 0,
+            "SIM_MAG5_DEVID" : 0,
+            "SIM_MAG6_DEVID" : 0,
+            "SIM_MAG7_DEVID" : 0,
+            "SIM_MAG8_DEVID" : 0,
+            "COMPASS_USE2"   : 0,
+            "COMPASS_USE3"   : 0,
+            "COMPASS_PRIO1_ID": 0,
+            "COMPASS_PRIO2_ID": 0,
+            "COMPASS_PRIO3_ID": 0,
+            "COMPASS_DEV_ID"  : 0,
+            "COMPASS_DEV_ID2" : 0,
+            "COMPASS_DEV_ID3" : 0,
+        })
         # enable only GPS arming check during ordering test
         self.set_parameter("ARMING_SKIPCHK", ~(1 << 3))
         self.context_collect('STATUSTEXT')
@@ -15391,11 +15411,11 @@ RTL_ALT_M 111
             self.set_parameters({
                 "CAN_D1_UC_SER_EN": 1, # enable serial
                 "CAN_D1_UC_S1_IDX": 1,  # serial port number on CAN device
-                "CAN_D1_UC_S1_NOD": 125,  # FIXME: set this explicitly
+                "CAN_D1_UC_S1_NOD": 62,  # Must match MAX_NODE_ID (AP_DroneCAN_DNA_Server.h); single periph always gets highest
                 "CAN_D1_UC_S1_PRO": 2,  # protocol to set on remote node
 
                 "CAN_D1_UC_S2_IDX": 2,  # serial port number on CAN device
-                "CAN_D1_UC_S2_NOD": 125,  # FIXME: set this explicitly
+                "CAN_D1_UC_S2_NOD": 62,  # Must match MAX_NODE_ID (AP_DroneCAN_DNA_Server.h); single periph always gets highest
                 "CAN_D1_UC_S2_PRO": 2,  # protocol to set on remote node
             })
 
@@ -16018,3 +16038,23 @@ class AutoTestBattCAN(AutoTestCopter):
 
     def tests(self):
         return self.testcanbatt()
+
+
+class AutoTestDroneCAN(AutoTestCopter):
+
+    def tests(self):
+        return [
+            self.DroneCAN_NodeStatus,
+            self.DroneCAN_NodeInfo,
+            self.DroneCAN_ParamExtRead,
+            self.DroneCAN_ParamExtSet,
+            self.DroneCAN_ParamExtSetFloat,
+            self.DroneCAN_ParamExtTypeCross,
+            self.DroneCAN_ParamExtSavePersist,
+            self.DroneCAN_ParamExtList,
+            self.DroneCAN_DNAPersistence,
+            self.DroneCAN_ParamExtInvalidNode,
+            self.DroneCAN_ParamExtInvalidParam,
+            self.DroneCAN_NodeDisconnect,
+            self.DroneCAN_FirmwareUpdate,
+        ]

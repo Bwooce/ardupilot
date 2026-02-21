@@ -1,0 +1,30 @@
+# ESP-IDF Compatibility Notes
+# This file documents options removed across IDF versions.
+# It is NOT used by the build system -- sdkconfig.defaults is the sole config source.
+
+# ---- Removed in ESP-IDF 5.5 ----
+# CONFIG_HEAP_CORRUPTION_DETECTION (use HEAP_POISONING instead)
+# CONFIG_FREERTOS_ASSERT_ON_UNTESTED_FUNCTION (removed)
+# CONFIG_FREERTOS_ASSERT_FAIL_ABORT (use CONFIG_FREERTOS_ASSERT)
+# CONFIG_ESP_TASK_WDT (renamed to CONFIG_ESP_TASK_WDT_INIT)
+
+# ---- Removed in ESP-IDF 6.0 ----
+# CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF (ELF is now the only format, auto-selected)
+# CONFIG_ESP_COREDUMP_CHECKSUM_CRC32 (SHA256 is now the only checksum)
+# CONFIG_ADC_SUPPRESS_DEPRECATE_WARN (legacy ADC driver removed)
+# CONFIG_ADC_CALI_SUPPRESS_DEPRECATE_WARN (legacy ADC calibration removed)
+# CONFIG_MCPWM_SUPPRESS_DEPRECATE_WARN (legacy MCPWM driver removed)
+# CONFIG_RMT_SUPPRESS_DEPRECATE_WARN (legacy RMT driver removed)
+# CONFIG_TWAI_ERRATA_FIX_BUS_OFF_REC (errata handled internally by new driver)
+# CONFIG_TWAI_ERRATA_FIX_TX_INTR_LOST (errata handled internally by new driver)
+# CONFIG_TWAI_ERRATA_FIX_RX_FRAME_INVALID (errata handled internally by new driver)
+# CONFIG_TWAI_ERRATA_FIX_RX_FIFO_CORRUPT (errata handled internally by new driver)
+# CONFIG_TWAI_ERRATA_FIX_LISTEN_ONLY_DOM (errata handled internally by new driver)
+
+# ---- Changed in ESP-IDF 6.0 ----
+# CONFIG_SPI_MASTER_IN_IRAM now depends on CONFIG_FREERTOS_IN_IRAM
+#   (kept on ESP32 original where FreeRTOS is in IRAM by default;
+#    removed from ESP32-S3 where IRAM is scarce)
+# CONFIG_NEWLIB_* options renamed to CONFIG_LIBC_* (backward compat via sdkconfig.rename)
+# PicoLibC is now the default C library (CONFIG_LIBC_PICOLIBC=y)
+# FREERTOS_ENABLE_BACKWARD_COMPATIBILITY default changed from y to n

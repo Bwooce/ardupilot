@@ -1,0 +1,177 @@
+# NOTE FOR DEVELOPERS:
+# When making changes to this file, please ensure the corresponding
+# board documentation is updated to reflect the new default parameters.
+#
+# Default parameters for the LilyGO T-Connect
+
+# Set SERIAL1 for MAVLink (mLRS to GCS)
+SERIAL1_PROTOCOL 2
+# mLRS for MAVLink
+SERIAL1_BAUD 57600
+# No special serial options needed (moved to MAV1_OPTIONS)
+SERIAL1_OPTIONS 0 
+
+# Set SERIAL2 for GPS (GPIO 1/2)
+SERIAL2_PROTOCOL 5
+SERIAL2_BAUD 38400
+
+# MAVLink Options for SERIAL1 (mLRS connection)
+# Removed MAV1_OPTIONS to allow GCS to set stream rates
+# MAV1_OPTIONS 0
+
+# Enable DroneCAN on CAN port 1
+CAN_P1_DRIVER 1
+CAN_D1_PROTOCOL 1
+# Set CAN bitrate to 1Mbps (default) - change if your nodes use different rate
+# Common rates: 125000, 250000, 500000, 1000000
+# CAN_P1_BITRATE 1000000
+
+# Configure Battery Monitoring via DroneCAN
+BATT_MONITOR 8
+
+# Servo output function mapping for DroneCAN ESCs
+# For Ackermann steering with 4 hub motors:
+SERVO9_FUNCTION 70   # All motors use throttle function
+SERVO10_FUNCTION 70  # ArduPilot handles differential speed
+SERVO11_FUNCTION 70  # based on steering angle
+SERVO12_FUNCTION 70  # and wheelbase geometry
+# Steering servo (separate actuator):
+SERVO1_FUNCTION 26   # Ground Steering (Ackermann)
+
+# For differential/skid steering (no Ackermann), use:
+# SERVO9_FUNCTION 73   # Left motors
+# SERVO10_FUNCTION 73
+# SERVO11_FUNCTION 74  # Right motors
+# SERVO12_FUNCTION 74
+
+# ESC Telemetry
+ESC_TELEM_TYPE 2    # DroneCAN ESC telemetry
+
+# Configure DroneCAN ESCs starting at servo channel 8
+MOT_PWM_TYPE 0 # Set to None, as we are using DroneCAN ESCs
+CAN_D1_UC_ESC_BM 15 # Enable ESC 0-3 RPM feedback (0x0F = bits 0-3)
+CAN_D1_UC_ESC_CM 15 # Enable ESC 0-3 command output (0x0F = bits 0-3)
+CAN_D1_UC_ESC_OF 8 # ESCs start at servo channel 8 (maps to SERVO9-12)
+
+# Wheel encoder from ESC RPM feedback
+WENC_TYPE 10  # Type 10 = DroneCAN wheel encoder
+# WENC_POS_X 1.0  # Set to your wheelbase in meters
+# WENC_POS_Y 0.5  # Set to half your track width in meters
+
+# Steering-throttle mixing for Ackermann geometry
+MOT_STR_THR_MIX 0.5  # Reduce inner wheel speed in turns (0-1)
+
+# Configure DroneCAN servos starting at servo channel 0
+# Servos: steering, gimbal, etc.
+CAN_D1_SRV_OF 0 # Servos start at servo channel 0
+CAN_D1_UC_SRV_BM 255 # Enable servo control on channels 0-7
+
+# CAN Debug Configuration - CAN_LOGLEVEL is set in hwdef.dat as compile-time constant
+
+# Log all CAN frames to dataflash (bit 0 = LogAllFrames)
+CAN_P1_OPTIONS 1
+
+# DroneCAN debug options (bitmask):
+# Bit 8 (256) = EnableStats - CAN bus performance metrics
+# Bit 9 (512) = EnableFlexDebug - Custom debug messages from nodes
+CAN_D1_UC_OPTION 768
+
+# Serial configuration for debug output - Enable maximum debugging
+# SERIAL0 (USB) for debug messages and MAVLink (2, -1 to disable all MAVLinks, 0 to turn off mavlink here
+SERIAL0_PROTOCOL 0
+SERIAL0_BAUD 115200
+
+# Debug logging configuration - Maximum verbosity for troubleshooting
+LOG_REPLAY 1
+
+# Enable all debug message categories
+SYS_DEBUG 1
+
+# Enable file-based logging to PSRAM/SPIFFS filesystem
+LOG_BACKEND_TYPE 3  # Bit 0=File, Bit 1=MAVLink - both enabled for QGC access
+LOG_DISARMED 1
+LOG_FILE_DSRMROT 1
+LOG_MAX_FILES 5
+LOG_MAV_BUFSIZE 16  # Increase MAVLink buffer size
+
+# Navigation and AHRS Configuration for DroneCAN hub operation
+# Enable minimal EKF for basic attitude estimation
+EK3_ENABLE 1
+EK3_IMU_MASK 0
+
+# Disable GPS requirement for rover (DroneCAN hub may not have GPS)
+EK3_GPS_TYPE 0
+
+# Use compass-free navigation since compass is disabled
+COMPASS_USE 0
+COMPASS_USE2 0
+COMPASS_USE3 0
+
+# Configure vehicle frame type for rover
+FRAME_CLASS 2
+FRAME_TYPE 0
+
+# Disable arming checks that might prevent startup
+ARMING_CHECK 0
+
+# Basic motor configuration for rover
+MOT_PWM_FREQ 50
+
+# Disable unnecessary sensors for DroneCAN hub operation
+RNGFND1_TYPE 0
+RNGFND2_TYPE 0
+
+# LCD1602 I2C Display Configuration
+# Enable HD44780 16x2 LCD display on I2C address 0x27 (PCF8574 backpack)
+NTF_DISPLAY_TYPE 3
+# APA102 LED configuration (bit 20 = 1048576)
+NTF_LED_TYPES 1048576
+
+# GCS Compatibility Parameters - Prevent "missing parameters" warnings
+# Explicitly disable components to avoid QGroundControl parameter errors
+ARSPD_TYPE 0
+BARO_TYPE 0
+
+# MAVLink Stream Rate Configuration for Rover Efficiency
+# Optimize telemetry bandwidth for rover applications with large batteries and slow dynamics
+
+# Critical streams - keep at reasonable rates
+SR0_EXT_STAT 0.5   # System status, GPS, waypoints, fence - needed for navigation
+SR0_POSITION 0.5   # Global/local position - needed for tracking
+
+# Slow-changing data - significantly reduced rates
+SR0_EXTRA3 0.2     # Battery status, wind, rangefinder, system time - every 5 seconds
+SR0_RAW_SENS 0.1   # IMU, pressure, airspeed data - every 10 seconds (rovers have stable sensors)
+SR0_EXTRA1 0.25    # Attitude, ESC telemetry, RPM - every 4 seconds
+SR0_EXTRA2 0.1     # VFR HUD display - every 10 seconds (not critical for rovers)
+
+# RC/Servo data - very slow for rovers  
+SR0_RC_CHAN 0.1    # Servo outputs, RC channels - every 10 seconds
+SR0_RAW_CTRL 0.1   # Raw servo control - every 10 seconds
+
+# Parameter downloads - keep fast for setup
+SR0_PARAMS 10      # Parameter transfers - keep fast for configuration
+
+# ADSB - disabled for rovers
+SR0_ADSB 0         # ADS-B data - not relevant for ground vehicles
+
+# MAVLink Stream Rates for SERIAL1 (mLRS telemetry)
+SR1_EXT_STAT 2     # System status, GPS at 2Hz
+SR1_POSITION 2     # Position at 2Hz
+SR1_EXTRA1 2       # Attitude, ESC telemetry at 2Hz
+SR1_EXTRA2 1       # VFR HUD at 1Hz
+SR1_EXTRA3 1       # Battery, rangefinder at 1Hz
+SR1_RAW_SENS 1     # IMU data at 1Hz
+SR1_RC_CHAN 2      # RC channels at 2Hz
+SR1_RAW_CTRL 0.1   # Raw servo control at 0.1Hz
+SR1_PARAMS 10      # Parameter transfers at 10Hz
+SR1_ADSB 0         # ADSB disabled
+
+# DroneCAN ESC Configuration - RPM-based control already enabled
+# CAN_D1_UC_ESC_BM 1 enables ESC RPM feedback (already configured above)
+# CAN_D1_UC_ESC_CM 1 enables ESC command output (already configured above)
+
+# Failsafe Configuration for GCS Compatibility
+FS_GCS_ENABL 0     # GCS failsafe disabled by default
+FS_THR_ENABLE 0    # Throttle failsafe disabled for DroneCAN ESCs
+BATT_SERIAL_NUM -1

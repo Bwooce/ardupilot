@@ -290,6 +290,7 @@ __bin_names = {
     "SITLPeriphBattMon": ("sitl_periph_battmon", "AP_Periph"),
     "CAN": "arducopter",
     "BattCAN": "arducopter",
+    "DroneCAN": "arducopter",
 }
 
 
@@ -364,6 +365,7 @@ tester_class_map = {
     "test.Tracker": antennatracker.AutoTestTracker,
     "test.CAN": arducopter.AutoTestCAN,
     "test.BattCAN": arducopter.AutoTestBattCAN,
+    "test.DroneCAN": arducopter.AutoTestDroneCAN,
 }
 
 supplementary_test_binary_map = {
@@ -371,6 +373,9 @@ supplementary_test_binary_map = {
                  "sitl_periph_universal:AP_Periph:1:Tools/autotest/default_params/periph.parm"],
     "test.BattCAN": [
         "sitl_periph_battmon:AP_Periph:0:Tools/autotest/default_params/periph-battmon.parm,Tools/autotest/default_params/quad-periph.parm", # noqa: E501
+    ],
+    "test.DroneCAN": [
+        "sitl_periph_universal:AP_Periph:0:Tools/autotest/default_params/periph.parm",
     ],
 }
 
@@ -1113,6 +1118,7 @@ if __name__ == "__main__":
 
         'build.SITLPeriphUniversal',
         'test.CAN',
+        'test.DroneCAN',
 
         'build.SITLPeriphBattMon',
         'test.BattCAN',

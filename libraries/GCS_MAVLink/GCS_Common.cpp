@@ -27,6 +27,7 @@
 #include <AP_AdvancedFailsafe/AP_AdvancedFailsafe.h>
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_HAL/AP_HAL.h>
+
 #include <AP_Arming/AP_Arming.h>
 #include <AP_InternalError/AP_InternalError.h>
 #include <AP_Logger/AP_Logger.h>
@@ -48,6 +49,9 @@
 #include <AP_Mount/AP_Mount.h>
 #include <AP_Common/AP_FWVersion.h>
 #include <AP_VisualOdom/AP_VisualOdom.h>
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#include <AP_HAL_ESP32/Util.h>
+#endif
 #include <AP_Baro/AP_Baro.h>
 #include <AP_EFI/AP_EFI.h>
 #include <AP_Proximity/AP_Proximity.h>
@@ -245,9 +249,18 @@ bool GCS_MAVLINK::init(uint8_t instance)
 
 void GCS_MAVLINK::send_meminfo(void)
 {
-    unsigned __brkval = 0;
     uint32_t memory = hal.util->available_memory();
+    
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32-specific: Report heap used size instead of meaningless __brkval
+    ESP32::Util* esp32_util = ESP32::Util::from(hal.util);
+    uint16_t heap_used = MIN(esp32_util->get_heap_used_size(), 0xFFFFU);
+    mavlink_msg_meminfo_send(chan, heap_used, MIN(memory, 0xFFFFU), memory);
+#else
+    // Traditional platforms: Use __brkval for heap top
+    unsigned __brkval = 0;
     mavlink_msg_meminfo_send(chan, __brkval, MIN(memory, 0xFFFFU), memory);
+#endif
 }
 
 // report power supply status
@@ -1453,8 +1466,7 @@ bool GCS_MAVLINK_InProgress::send_ack(MAV_RESULT result)
         0,
         0,
         requesting_sysid,
-        requesting_compid
-        );
+        requesting_compid);
 
     return true;
 }
@@ -1585,6 +1597,13 @@ void GCS_MAVLINK::update_send()
 
     // check for any in-progress tasks; check_tasks does its own rate-limiting
     GCS_MAVLINK_InProgress::check_tasks();
+
+#if AP_DRONECAN_PARAM_EXT_ENABLED
+    // Continue any active PARAM_EXT enumeration for DroneCAN nodes
+    // This must be called unconditionally (not tied to stream rates) because
+    // PARAM_EXT enumeration is initiated by explicit GCS requests
+    continue_param_enumeration();
+#endif
 
     const uint32_t start = AP_HAL::millis();
     const uint16_t start16 = start & 0xFFFF;
@@ -2785,6 +2804,13 @@ void GCS::update_send()
 
     service_statustext();
 
+#if HAL_ENABLE_DRONECAN_DRIVERS
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
+    // Drain DroneCAN node status/info messages queued by the DroneCAN thread
+    AP_DroneCAN_DNA_Server::service_pending_mavlink();
+#endif
+#endif
+
     first_backend_to_send++;
     if (first_backend_to_send >= num_gcs()) {
         first_backend_to_send = 0;
@@ -3072,6 +3098,26 @@ void GCS_MAVLINK::send_vibration() const
 
     Vector3f vibration = ins.get_vibration_levels();
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+    // ESP32 workaround: use aligned buffer to avoid stack corruption
+    // Use char array to match MAVLink macro expectations
+    char buf[MAVLINK_MSG_ID_VIBRATION_LEN] __attribute__((aligned(16))) = {0};
+    uint64_t time_us = AP_HAL::micros64();
+    float vib_x = vibration.x;
+    float vib_y = vibration.y;
+    float vib_z = vibration.z;
+    uint32_t clip_0 = ins.get_accel_clip_count(0);
+    uint32_t clip_1 = ins.get_accel_clip_count(1);
+    uint32_t clip_2 = ins.get_accel_clip_count(2);
+    _mav_put_uint64_t(buf, 0, time_us);
+    _mav_put_float(buf, 8, vib_x);
+    _mav_put_float(buf, 12, vib_y);
+    _mav_put_float(buf, 16, vib_z);
+    _mav_put_uint32_t(buf, 20, clip_0);
+    _mav_put_uint32_t(buf, 24, clip_1);
+    _mav_put_uint32_t(buf, 28, clip_2);
+    _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_VIBRATION, buf, MAVLINK_MSG_ID_VIBRATION_MIN_LEN, MAVLINK_MSG_ID_VIBRATION_LEN, MAVLINK_MSG_ID_VIBRATION_CRC);
+#else
     mavlink_msg_vibration_send(
         chan,
         AP_HAL::micros64(),
@@ -3081,6 +3127,7 @@ void GCS_MAVLINK::send_vibration() const
         ins.get_accel_clip_count(0),
         ins.get_accel_clip_count(1),
         ins.get_accel_clip_count(2));
+#endif
 #endif
 }
 
@@ -3659,10 +3706,13 @@ MAV_RESULT GCS_MAVLINK::handle_preflight_reboot(const mavlink_command_int_t &pac
 #endif
 
     // send ack before we reboot
-    mavlink_msg_command_ack_send(chan, packet.command, MAV_RESULT_ACCEPTED,
-                                 0, 0,
-                                 msg.sysid,
-                                 msg.compid);
+    mavlink_msg_command_ack_send(
+        chan,
+        packet.command,
+        MAV_RESULT_ACCEPTED,
+        0, 0,
+        msg.sysid,
+        msg.compid);
 
     // when packet.param1 == 3 we reboot to hold in bootloader
     const bool hold_in_bootloader = is_equal(packet.param1, 3.0f);
@@ -4013,7 +4063,11 @@ void GCS_MAVLINK::handle_vision_position_estimate(const mavlink_message_t &msg)
     mavlink_vision_position_estimate_t m;
     mavlink_msg_vision_position_estimate_decode(&msg, &m);
 
-    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, m.covariance, m.reset_counter,
+    // Use local array to avoid packed member address issue
+    float covariance_local[21];
+    memcpy(covariance_local, m.covariance, sizeof(covariance_local));
+    
+    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, covariance_local, m.reset_counter,
                                                 PAYLOAD_SIZE(chan, VISION_POSITION_ESTIMATE));
 }
 
@@ -4022,7 +4076,11 @@ void GCS_MAVLINK::handle_global_vision_position_estimate(const mavlink_message_t
     mavlink_global_vision_position_estimate_t m;
     mavlink_msg_global_vision_position_estimate_decode(&msg, &m);
 
-    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, m.covariance, m.reset_counter,
+    // Use local array to avoid packed member address issue
+    float covariance_local[21];
+    memcpy(covariance_local, m.covariance, sizeof(covariance_local));
+
+    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, covariance_local, m.reset_counter,
                                                 PAYLOAD_SIZE(chan, GLOBAL_VISION_POSITION_ESTIMATE));
 }
 
@@ -4031,8 +4089,12 @@ void GCS_MAVLINK::handle_vicon_position_estimate(const mavlink_message_t &msg)
     mavlink_vicon_position_estimate_t m;
     mavlink_msg_vicon_position_estimate_decode(&msg, &m);
 
+    // Use local array to avoid packed member address issue
+    float covariance_local[21];
+    memcpy(covariance_local, m.covariance, sizeof(covariance_local));
+
     // vicon position estimate does not include reset counter
-    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, m.covariance, 0,
+    handle_common_vision_position_estimate_data(m.usec, m.x, m.y, m.z, m.roll, m.pitch, m.yaw, covariance_local, 0,
                                                 PAYLOAD_SIZE(chan, VICON_POSITION_ESTIMATE));
 }
 
@@ -4357,10 +4419,24 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
         break;
 
     case MAVLINK_MSG_ID_PARAM_REQUEST_LIST:
+        handle_common_param_message(msg);
+        break;
+        
     case MAVLINK_MSG_ID_PARAM_SET:
+        handle_common_param_message(msg);
+        break;
+        
     case MAVLINK_MSG_ID_PARAM_REQUEST_READ:
         handle_common_param_message(msg);
         break;
+
+#if AP_DRONECAN_PARAM_EXT_ENABLED
+    case MAVLINK_MSG_ID_PARAM_EXT_REQUEST_LIST:
+    case MAVLINK_MSG_ID_PARAM_EXT_REQUEST_READ:
+    case MAVLINK_MSG_ID_PARAM_EXT_SET:
+        handle_common_param_ext_message(msg);
+        break;
+#endif
 
 #if AP_MAVLINK_SET_GPS_GLOBAL_ORIGIN_MESSAGE_ENABLED
     case MAVLINK_MSG_ID_SET_GPS_GLOBAL_ORIGIN:
@@ -5399,9 +5475,7 @@ void GCS_MAVLINK::handle_command_long(const mavlink_message_t &msg)
 
     // send ACK or NAK
     mavlink_msg_command_ack_send(chan, packet.command, result,
-                                 0, 0,
-                                 msg.sysid,
-                                 msg.compid);
+                                 0, 0, msg.sysid, msg.compid);
 
 #if HAL_LOGGING_ENABLED
     // log the packet:
@@ -5421,15 +5495,8 @@ void GCS_MAVLINK::handle_command_long(const mavlink_message_t &msg)
     mavlink_msg_command_long_decode(&msg, &packet);
 
     // send ACK or NAK
-    mavlink_msg_command_ack_send(
-        chan,
-        packet.command,
-        MAV_RESULT_COMMAND_INT_ONLY,
-        0,
-        0,
-        msg.sysid,
-        msg.compid
-   );
+    mavlink_msg_command_ack_send(chan, packet.command, MAV_RESULT_COMMAND_INT_ONLY,
+                                 0, 0, msg.sysid, msg.compid);
 
 }
 #endif  // AP_MAVLINK_COMMAND_LONG_ENABLED
@@ -5804,6 +5871,66 @@ MAV_RESULT GCS_MAVLINK::handle_command_int_packet(const mavlink_command_int_t &p
     case MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN:
         return handle_preflight_reboot(packet, msg);
 
+#if AP_DRONECAN_MAVLINK_REPORTING_ENABLED
+    case MAV_CMD_UAVCAN_GET_NODE_INFO: {
+        // Request node info for all seen UAVCAN/DroneCAN nodes
+        // Per MAVLink spec: Command 5200
+        hal.console->printf("MAVLink: Received MAV_CMD_UAVCAN_GET_NODE_INFO\n");
+
+        bool found_nodes = false;
+        for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
+            AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(i);
+            if (ap_dronecan != nullptr) {
+                ap_dronecan->get_dna_server().request_all_node_info();
+                found_nodes = true;
+            }
+        }
+
+        if (found_nodes) {
+            hal.console->printf("MAVLink: MAV_CMD_UAVCAN_GET_NODE_INFO processed\n");
+            return MAV_RESULT_ACCEPTED;
+        } else {
+            hal.console->printf("MAVLink: No DroneCAN interfaces found\n");
+            return MAV_RESULT_UNSUPPORTED;
+        }
+    }
+#endif  // AP_DRONECAN_MAVLINK_REPORTING_ENABLED
+
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    case MAV_CMD_PREFLIGHT_UAVCAN: {
+        // Trigger UAVCAN/DroneCAN actuator enumeration
+        // Per MAVLink spec: Command 243
+        // param1: 1=begin enumeration, 0=cancel
+        if (is_equal(packet.param1, 0.0f)) {
+            // Cancel enumeration - not implemented yet
+            return MAV_RESULT_UNSUPPORTED;
+        } else if (is_equal(packet.param1, 1.0f)) {
+            // Begin enumeration
+            hal.console->printf("MAVLink: Received MAV_CMD_PREFLIGHT_UAVCAN (begin enumeration)\n");
+
+            bool found_interfaces = false;
+            for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
+                AP_DroneCAN *ap_dronecan = AP_DroneCAN::get_dronecan(i);
+                if (ap_dronecan != nullptr) {
+                    ap_dronecan->begin_actuator_enumeration();
+                    found_interfaces = true;
+                }
+            }
+
+            if (found_interfaces) {
+                send_text(MAV_SEVERITY_INFO, "DroneCAN: Actuator enumeration started");
+                hal.console->printf("MAVLink: MAV_CMD_PREFLIGHT_UAVCAN processed\n");
+                return MAV_RESULT_ACCEPTED;
+            } else {
+                hal.console->printf("MAVLink: No DroneCAN interfaces found\n");
+                return MAV_RESULT_UNSUPPORTED;
+            }
+        } else {
+            return MAV_RESULT_DENIED;
+        }
+    }
+#endif  // HAL_ENABLE_DRONECAN_DRIVERS
+
     case MAV_CMD_DO_SET_SAFETY_SWITCH_STATE:
         return handle_do_set_safety_switch_state(packet, msg);
 
@@ -5891,9 +6018,7 @@ void GCS_MAVLINK::handle_command_int(const mavlink_message_t &msg)
 
     // send ACK or NAK
     mavlink_msg_command_ack_send(chan, packet.command, result,
-                                 0, 0,
-                                 msg.sysid,
-                                 msg.compid);
+                                 0, 0, msg.sysid, msg.compid);
 
 #if HAL_LOGGING_ENABLED
     AP::logger().Write_Command(packet, msg.sysid, msg.compid, result);
@@ -6415,6 +6540,10 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
     case MSG_NEXT_PARAM:
         CHECK_PAYLOAD_SIZE(PARAM_VALUE);
         queued_param_send();
+#if AP_DRONECAN_PARAM_EXT_ENABLED
+        // Continue any active parameter enumeration for DroneCAN nodes
+        continue_param_enumeration();
+#endif
         break;
 
     case MSG_HEARTBEAT:

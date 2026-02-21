@@ -166,12 +166,12 @@ bool SPIDevice::transfer_fullduplex(const uint8_t *send, uint8_t *recv, uint32_t
     return true;
 }
 
-void SPIDevice::acquire_bus(bool accuire)
+void SPIDevice::acquire_bus(bool acquire)
 {
 #ifdef SPIDEBUG
     printf("%s:%d \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
-    if (accuire) {
+    if (acquire) {
         spi_device_acquire_bus(current_handle(), portMAX_DELAY);
         gpio_set_level(device_desc.cs, 0);
     } else {

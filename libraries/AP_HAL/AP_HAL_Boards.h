@@ -68,6 +68,7 @@
 // #define HAL_BOARD_SUBTYPE_CHIBIOS_VRCORE_V10    5019
 // #define HAL_BOARD_SUBTYPE_CHIBIOS_VRBRAIN_V54   5020
 
+// ESP32 board subtypes are now set via hwdef.dat using numeric values directly
 // #define HAL_BOARD_SUBTYPE_ESP32_DIY             6001
 // #define HAL_BOARD_SUBTYPE_ESP32_ICARUS          6002
 // #define HAL_BOARD_SUBTYPE_ESP32_BUZZ            6003
@@ -78,6 +79,8 @@
 // #define HAL_BOARD_SUBTYPE_ESP32_S3EMPTY         6008
 // #define HAL_BOARD_SUBTYPE_ESP32_S3M5STAMPFLY    6009
 // #define HAL_BOARD_SUBTYPE_ESP32_IMU_MODULE_V11  6010
+// #define HAL_BOARD_SUBTYPE_ESP32_LILYGO_TCONNECT  6011
+// #define HAL_BOARD_SUBTYPE_ESP32_LILYGO_T2CAN     6012
 // @LoggerEnumEnd
 
 /* InertialSensor driver types */
@@ -148,6 +151,15 @@
 
 #ifndef CONFIG_HAL_BOARD_SUBTYPE
 #error "No CONFIG_HAL_BOARD_SUBTYPE set"
+#endif
+
+// Packing attribute applied only on ESP32 where struct alignment
+// differs from other platforms (Xtensa is more permissive with
+// unaligned access than ARM Cortex-M but DMA requires packing)
+#if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#define PACKED_IF_ESP32 __attribute__((__packed__))
+#else
+#define PACKED_IF_ESP32
 #endif
 
 // HAL_PROGRAM_SIZE_LIMIT_KB is the amount of space we have for

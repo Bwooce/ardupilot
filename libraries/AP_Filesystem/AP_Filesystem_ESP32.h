@@ -20,6 +20,9 @@
 class AP_Filesystem_ESP32 : public AP_Filesystem_Backend
 {
 public:
+    AP_Filesystem_ESP32();
+    ~AP_Filesystem_ESP32();
+
     // functions that closely match the equivalent posix calls
     int open(const char *fname, int flags, bool allow_absolute_paths = false) override;
     int close(int fd) override;

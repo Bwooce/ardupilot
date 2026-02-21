@@ -29,6 +29,9 @@ public:
     }
 
     uint32_t available_memory() override;
+    
+    // ESP32-specific memory information
+    uint32_t get_heap_used_size(void) const;
 
     // Special Allocation Routines
     void *malloc_type(size_t size, AP_HAL::Util::Memory_Type mem_type) override;
@@ -78,7 +81,6 @@ private:
     FlashBootloader flash_bootloader() override;
 #endif
 
-    // stm32F4 and F7 have 20 total RTC backup registers. We use the first one for boot type
-    // flags, so 19 available for persistent data
+    // ESP32 uses RTC memory for persistent data across resets
     static_assert(sizeof(persistent_data) <= 19*4, "watchdog persistent data too large");
 };

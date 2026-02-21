@@ -29,6 +29,18 @@
 #include <stdio.h>
 
 #include "esp_log.h"
+#include "esp_idf_version.h"
+
+// IDF 6.0 moved MCPWM resource counts from SOC caps to HAL LL layer.
+// Use the new MCPWM_LL_* names, with compat defines for IDF 5.x.
+#include "hal/mcpwm_ll.h"
+#ifndef MCPWM_LL_GROUP_NUM
+#define MCPWM_LL_GROUP_NUM                 SOC_MCPWM_GROUPS
+#define MCPWM_LL_TIMERS_PER_GROUP          SOC_MCPWM_TIMERS_PER_GROUP
+#define MCPWM_LL_OPERATORS_PER_GROUP       SOC_MCPWM_OPERATORS_PER_GROUP
+#define MCPWM_LL_COMPARATORS_PER_OPERATOR  SOC_MCPWM_COMPARATORS_PER_OPERATOR
+#define MCPWM_LL_GENERATORS_PER_OPERATOR   SOC_MCPWM_GENERATORS_PER_OPERATOR
+#endif
 
 #define TAG "RCOut"
 
@@ -50,9 +62,9 @@ gpio_num_t outputs_pins[] = {};
 /*
  * The MCPWM (motor control PWM) peripheral is used to generate PWM signals for
  * RC output. It is divided up into the following blocks:
- *  * The chip has SOC_MCPWM_GROUPS groups
- *  * Each group has SOC_MCPWM_TIMERS_PER_GROUP timers and operators
- *  * Each operator has SOC_MCPWM_COMPARATORS_PER_OPERATOR comparators and
+ *  * The chip has MCPWM_LL_GROUP_NUM groups
+ *  * Each group has MCPWM_LL_TIMERS_PER_GROUP timers and operators
+ *  * Each operator has MCPWM_LL_COMPARATORS_PER_OPERATOR comparators and
  *    generators
  *  * Each generator can drive one GPIO pin
  * Though there is more possible, we use the following capabilities:
@@ -77,11 +89,11 @@ gpio_num_t outputs_pins[] = {};
  */
 
 // each of our PWM groups has its own timer
-#define MAX_GROUPS (SOC_MCPWM_GROUPS*SOC_MCPWM_TIMERS_PER_GROUP)
+#define MAX_GROUPS (MCPWM_LL_GROUP_NUM*MCPWM_LL_TIMERS_PER_GROUP)
 // we connect one timer to one operator
-static_assert(SOC_MCPWM_OPERATORS_PER_GROUP >= SOC_MCPWM_TIMERS_PER_GROUP);
+static_assert(MCPWM_LL_OPERATORS_PER_GROUP >= MCPWM_LL_TIMERS_PER_GROUP);
 // and one generator to one comparator
-static_assert(SOC_MCPWM_GENERATORS_PER_OPERATOR >= SOC_MCPWM_COMPARATORS_PER_OPERATOR);
+static_assert(MCPWM_LL_GENERATORS_PER_OPERATOR >= MCPWM_LL_COMPARATORS_PER_OPERATOR);
 
 // default settings for PWM ("normal") and brushed mode. carefully understand
 // the prescaler update logic in set_group_mode before changing resolution!
@@ -94,7 +106,7 @@ static_assert(SOC_MCPWM_GENERATORS_PER_OPERATOR >= SOC_MCPWM_COMPARATORS_PER_OPE
 static_assert(MAX_CHANNELS < 12, "overrunning _pending and safe_pwm"); // max for current chips
 static_assert(MAX_CHANNELS < 32, "overrunning bitfields");
 
-#define NEEDED_GROUPS ((MAX_CHANNELS+SOC_MCPWM_COMPARATORS_PER_OPERATOR-1)/SOC_MCPWM_COMPARATORS_PER_OPERATOR)
+#define NEEDED_GROUPS ((MAX_CHANNELS+MCPWM_LL_COMPARATORS_PER_OPERATOR-1)/MCPWM_LL_COMPARATORS_PER_OPERATOR)
 static_assert(NEEDED_GROUPS <= MAX_GROUPS, "not enough hardware PWM groups");
 
 RCOutput::pwm_group RCOutput::pwm_group_list[NEEDED_GROUPS];
@@ -115,14 +127,20 @@ void RCOutput::init()
 
     _initialized = true; // assume we are initialized, any error will call abort()
 
+    // Return early if no RCOUT pins are configured
+    if (MAX_CHANNELS == 0) {
+        printf("No RCOUT pins configured, RCOutput disabled\n");
+        return;
+    }
+
     RCOutput::pwm_group *curr_group = &pwm_group_list[0];
     RCOutput::pwm_chan *curr_ch = &pwm_chan_list[0];
     int chan = 0;
 
     // loop through all the hardware blocks and set them up. returns when we run
     // out of GPIO pins (each of which is assigned in order to a PWM channel)
-    for (int mcpwm_group_id=0; mcpwm_group_id<SOC_MCPWM_GROUPS; mcpwm_group_id++) {
-        for (int timer_num=0; timer_num<SOC_MCPWM_TIMERS_PER_GROUP; timer_num++) {
+    for (int mcpwm_group_id=0; mcpwm_group_id<MCPWM_LL_GROUP_NUM; mcpwm_group_id++) {
+        for (int timer_num=0; timer_num<MCPWM_LL_TIMERS_PER_GROUP; timer_num++) {
             RCOutput::pwm_group &group = *curr_group++;
 
             // set up the group to use the default frequency and mode
@@ -142,7 +160,10 @@ void RCOutput::init()
             set_group_mode(group);
 
             // set up comparators/generators
-            for (int comparator_num=0; comparator_num<SOC_MCPWM_COMPARATORS_PER_OPERATOR; comparator_num++) {
+            for (int comparator_num=0; comparator_num<MCPWM_LL_COMPARATORS_PER_OPERATOR; comparator_num++) {
+                if (chan >= MAX_CHANNELS) {
+                    return;
+                }
                 RCOutput::pwm_chan &ch = *curr_ch++;
 
                 // set up the output to be a part of the current group

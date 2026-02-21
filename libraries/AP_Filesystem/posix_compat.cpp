@@ -22,6 +22,10 @@
   uniform implementation across all platforms
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#include <stdio.h>
 #include "AP_Filesystem.h"
 
 #if AP_FILESYSTEM_FATFS_ENABLED || AP_FILESYSTEM_POSIX_ENABLED || AP_FILESYSTEM_ESP32_ENABLED || AP_FILESYSTEM_ROMFS_ENABLED
@@ -92,7 +96,7 @@ int apfs_fprintf(APFS_FILE *stream, const char *fmt, ...)
     va_start(va, fmt);
     len = vasprintf(&buf, fmt, va);
     va_end(va);
-    if (len > 0) {
+    if (len > 0 && buf) {
         len = AP::FS().write(stream->fd, buf, len);
         free(buf);
     }
