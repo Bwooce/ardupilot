@@ -621,7 +621,7 @@ void UARTDriver::calculate_buffer_sizes(uint32_t baudrate, uint16_t &rxS, uint16
         min_rx_buffer *= 2;
     }
     
-#if CONFIG_IDF_TARGET_ESP32S3
+#if HAL_ESP32_LARGE_BUFFERS
     // ESP32-S3 has plenty of memory - use larger buffers for reliability
     min_tx_buffer *= 2;
     min_rx_buffer *= 2;
