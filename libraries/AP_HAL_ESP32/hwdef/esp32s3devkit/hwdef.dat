@@ -1,5 +1,7 @@
 # Nick K on Discord
 
+MCU ESP32S3
+
 define HAL_ESP32_BOARD_NAME "esp32s3devkit"
 
 # SPI Buses; https://docs.espressif.com/projects/esp-idf/en/v5.3.4/esp32/api-reference/peripherals/spi_master.html

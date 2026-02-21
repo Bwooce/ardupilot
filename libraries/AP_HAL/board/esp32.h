@@ -2,6 +2,14 @@
 
 #include <hwdef.h>
 
+#ifndef HAL_PROGRAM_SIZE_LIMIT_KB
+#define HAL_PROGRAM_SIZE_LIMIT_KB 2048
+#endif
+
+#ifndef HAL_BOARD_NAME
+#define HAL_BOARD_NAME "ESP32"
+#endif
+
 #ifndef HAL_BOARD_STATE_DIRECTORY
 #define HAL_BOARD_STATE_DIRECTORY "/SDCARD/APM"
 #endif
@@ -19,7 +27,6 @@
 #endif
 
 
-#define HAL_BOARD_NAME "ESP32"
 #define HAL_CPU_CLASS HAL_CPU_CLASS_150
 #define HAL_WITH_DRONECAN 0
 #define HAL_WITH_UAVCAN 0
@@ -32,10 +39,6 @@
 
 #define O_CLOEXEC 0
 #define HAL_STORAGE_SIZE (16384)
-
-#ifndef HAL_PROGRAM_SIZE_LIMIT_KB
-#define HAL_PROGRAM_SIZE_LIMIT_KB 2048
-#endif
 
 #ifdef __cplusplus
 // allow for static semaphores
@@ -56,14 +59,22 @@
 #define HAL_MEM_CLASS HAL_MEM_CLASS_192
 
 // disable uncommon stuff that we'd otherwise get 
+#ifndef AP_EXTERNAL_AHRS_ENABLED
 #define AP_EXTERNAL_AHRS_ENABLED 0
+#endif
 #define HAL_GENERATOR_ENABLED 0
 
+#ifndef __LITTLE_ENDIAN
 #define __LITTLE_ENDIAN  1234
+#endif
+#ifndef __BYTE_ORDER
 #define __BYTE_ORDER     __LITTLE_ENDIAN
+#endif
 
 // ArduPilot uses __RAMFUNC__ to place functions in fast instruction RAM
+#ifndef __RAMFUNC__
 #define __RAMFUNC__ IRAM_ATTR
+#endif
 
 
 // whenver u get ... error: "xxxxxxx" is not defined, evaluates to 0 [-Werror=undef]  just define it below as 0
@@ -107,32 +118,58 @@
 //turn off a bunch of advanced plane scheduler table things. see Plane.cpp
 #define AP_ADVANCEDFAILSAFE_ENABLED 0
 #define AP_ICENGINE_ENABLED 0
+#ifndef AP_OPTICALFLOW_ENABLED
 #define AP_OPTICALFLOW_ENABLED 0
+#endif
+#ifndef AP_RPM_ENABLED
 #define AP_RPM_ENABLED 0
+#endif
 #define AP_AIRSPEED_AUTOCAL_ENABLE 0
 #define HAL_MOUNT_ENABLED 0
 #define AP_CAMERA_ENABLED 0
 #define HAL_SOARING_ENABLED 0
 #define AP_TERRAIN_AVAILABLE 0
+#ifndef HAL_ADSB_ENABLED
 #define HAL_ADSB_ENABLED 0
+#endif
+#ifndef HAL_BUTTON_ENABLED
 #define HAL_BUTTON_ENABLED 0 
+#endif
 #define AP_GRIPPER_ENABLED 0
 #define AP_LANDINGGEAR_ENABLED 0
 
 // disable avoid-fence-follow in copter, these all kinda need each other, so its all or none.
+#ifndef AP_AVOIDANCE_ENABLED
 #define AP_AVOIDANCE_ENABLED 0
+#endif
+#ifndef AP_FENCE_ENABLED
 #define AP_FENCE_ENABLED 0
+#endif
+#ifndef MODE_FOLLOW_ENABLED
 #define MODE_FOLLOW_ENABLED 0
+#endif
+#ifndef AP_OAPATHPLANNER_ENABLED
 #define AP_OAPATHPLANNER_ENABLED 0
+#endif
 
 
 // other big things..
 #define HAL_QUADPLANE_ENABLED 0
+#ifndef HAL_GYROFFT_ENABLED
 #define HAL_GYROFFT_ENABLED 0
+#endif
 
 // remove once ESP32 isn't so chronically slow
 #define AP_SCHEDULER_OVERTIME_MARGIN_US 50000UL
 
 #ifndef AP_NOTIFY_BUZZER_ENABLED
 #define AP_NOTIFY_BUZZER_ENABLED 1
+#endif
+
+#ifndef HAL_OS_POSIX_IO
+#define HAL_OS_POSIX_IO 1
+#endif
+
+#ifndef HAVE_FILESYSTEM_SUPPORT
+#define HAVE_FILESYSTEM_SUPPORT 1
 #endif

@@ -28,7 +28,9 @@
     ./Tools/autotest/sim_vehicle.py -v Plane -A "--serial3=sim:MicroStrain7" --console --map -DG
  */
 
+#ifndef AP_MATH_ALLOW_DOUBLE_FUNCTIONS
 #define AP_MATH_ALLOW_DOUBLE_FUNCTIONS 1
+#endif
 
 #include "AP_ExternalAHRS_config.h"
 

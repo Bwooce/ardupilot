@@ -2,6 +2,7 @@ import os
 import sys
 import re
 import shlex
+import argparse
 
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../../../libraries/AP_HAL/hwdef/scripts'))
 import hwdef
@@ -53,17 +54,17 @@ class ESP32HWDef(hwdef.HWDef):
         }
     }
 
-    def __init__(self, outdir, hwdef, **kwargs):
-        super(ESP32HWDef, self).__init__(outdir=outdir, hwdef=hwdef, **kwargs)
+    def __init__(self, outdir, hwdef, quiet=False, **kwargs):
+        super(ESP32HWDef, self).__init__(outdir=outdir, hwdef=hwdef, quiet=quiet, **kwargs)
         self.board = os.path.basename(os.path.dirname(hwdef[0]))
         self.mcu = 'esp32'
         self.advanced_build = False
-        self.serial_pins = {}
-        self.rcout_pins = []
-        self.spi_buses = []
-        self.spi_devices = []
-        self.i2c_buses = []
-        self.adc_pins = []
+        self.esp32_serials = []
+        self.esp32_rcout = []
+        self.esp32_spibus = []
+        self.esp32_spidev = []
+        self.esp32_i2cbus = []
+        self.esp32_adcs = []
         self.reserved_pins = set()
         self.input_only_pins = set()
         self.strapping_pins = set()
@@ -83,10 +84,10 @@ class ESP32HWDef(hwdef.HWDef):
 
     def validate_pin_assignment(self, pin_num, function, pin_name):
         try:
-            pstr = pin_num.replace('GPIO_NUM_', '')
+            pstr = str(pin_num).replace('GPIO_NUM_', '')
             if pstr.startswith('ADC1_GPIO'):
                 pstr = pstr.replace('ADC1_GPIO', '').replace('_CHANNEL', '')
-            if 'ADC_CHANNEL_' in pstr:
+            if 'ADC_CHANNEL_' in pstr or 'HOST' in pstr or 'CH_AUTO' in pstr or 'SERIAL_NUM' in pstr or 'UART_NUM' in pstr:
                 return True
             pin_num_int = int(pstr)
         except:
@@ -113,83 +114,71 @@ class ESP32HWDef(hwdef.HWDef):
         # Keep track of all lines for output, like ChibiOS
         self.alllines.append(line)
         
+        a = shlex.split(line, posix=False)
+        
         # MCU directive enables advanced logic and dynamic sdkconfig
-        if line.startswith("MCU"):
+        if a[0] == "MCU":
             self.advanced_build = True
-            self.mcu = line.split()[1]
+            self.mcu = a[1]
             self.env_vars['MCU'] = self.mcu
             self.init_hardware_constraints()
             super(ESP32HWDef, self).process_line(line, depth)
             return
 
         # Platform-specific tags (Supported in both V1 and V2 modes)
-        if line.startswith("ESP32_SERIAL"):
-            p = shlex.split(line)
-            if len(p) == 4:
-                num, tx, rx = p[1].replace('UART_NUM_', ''), p[2], p[3]
-                self.validate_pin_assignment(tx, 'UART_TX', f'SERIAL{num}')
-                self.validate_pin_assignment(rx, 'UART_RX', f'SERIAL{num}')
-                self.serial_pins[f'tx_{num}'] = tx.replace('GPIO_NUM_', '')
-                self.serial_pins[f'rx_{num}'] = rx.replace('GPIO_NUM_', '')
+        if a[0] == "ESP32_SERIAL":
+            if len(a) == 4:
+                self.validate_pin_assignment(a[2], 'UART_RX', f'SERIAL{a[1]}')
+                self.validate_pin_assignment(a[3], 'UART_TX', f'SERIAL{a[1]}')
+                self.esp32_serials.append(a[1:])
             return
-        elif line.startswith("ESP32_RCOUT"):
-            p = shlex.split(line)
-            for pin in p[1:]:
-                self.validate_pin_assignment(pin, 'RCOUT', f'CH{len(self.rcout_pins)+1}')
-                self.rcout_pins.append(pin.replace('GPIO_NUM_', ''))
+        elif a[0] == "ESP32_RCOUT":
+            for pin in a[1:]:
+                self.validate_pin_assignment(pin, 'RCOUT', f'CH{len(self.esp32_rcout)+1}')
+                self.esp32_rcout.append(pin)
             return
-        elif line.startswith("ESP32_SPIBUS"):
-            p = shlex.split(line)
-            if len(p) == 5:
-                host_str = p[1].upper()
-                num = 3 if 'VSPI' in host_str or 'SPI3' in host_str else 2 if 'HSPI' in host_str or 'SPI2' in host_str else 1
-                mosi, miso, sck = p[2], p[3], p[4]
-                self.validate_pin_assignment(mosi, 'SPI_MOSI', f'BUS{num}')
-                self.validate_pin_assignment(miso, 'SPI_MISO', f'BUS{num}')
-                self.validate_pin_assignment(sck, 'SPI_SCK', f'BUS{num}')
-                self.spi_buses.append({'num': num, 'sck': sck.replace('GPIO_NUM_', ''), 
-                                      'miso': miso.replace('GPIO_NUM_', ''), 'mosi': mosi.replace('GPIO_NUM_', '')})
+        elif a[0] == "ESP32_SPIBUS":
+            if len(a) == 5:
+                (host, dma_ch, mosi, miso, sclk) = a[1:]
+                self.validate_pin_assignment(mosi, 'SPI_MOSI', host)
+                self.validate_pin_assignment(miso, 'SPI_MISO', host)
+                self.validate_pin_assignment(sclk, 'SPI_SCK', host)
+                self.esp32_spibus.append(a[1:])
             return
-        elif line.startswith("ESP32_SPIDEV"):
-            p = shlex.split(line)
-            if len(p) == 8:
-                name, cs = p[1], p[4]
+        elif a[0] == "ESP32_SPIDEV":
+            if len(a) == 8:
+                (name, bus, device, cs, mode, lowspeed, highspeed) = a[1:]
                 self.validate_pin_assignment(cs, 'SPI_CS', name)
-                self.spi_devices.append({'name': name, 'cs': cs.replace('GPIO_NUM_', '')})
+                self.esp32_spidev.append(a[1:])
             return
-        elif line.startswith("ESP32_I2CBUS"):
-            p = shlex.split(line)
-            if len(p) >= 4:
-                num = int(p[1].replace('I2C_NUM_', ''))
-                sda, scl = p[2], p[3]
-                self.validate_pin_assignment(sda, 'I2C_SDA', f'BUS{num}')
-                self.validate_pin_assignment(scl, 'I2C_SCL', f'BUS{num}')
-                self.i2c_buses.append({'num': num, 'sda': sda.replace('GPIO_NUM_', ''), 'scl': scl.replace('GPIO_NUM_', '')})
+        elif a[0] == "ESP32_I2CBUS":
+            if len(a) >= 4:
+                (port, sda, scl) = a[1:4]
+                self.validate_pin_assignment(sda, 'I2C_SDA', port)
+                self.validate_pin_assignment(scl, 'I2C_SCL', port)
+                self.esp32_i2cbus.append(a[1:])
             return
-        elif line.startswith("ESP32_ADC_PIN") or line.startswith("ADC_PIN"):
-            p = shlex.split(line)
-            if len(p) == 4:
-                pin, ardupilot_pin = p[1], p[3]
+        elif a[0] == "ESP32_ADC_PIN":
+            if len(a) == 4:
+                (pin, gain, ardupilot_pin) = a[1:]
                 self.validate_pin_assignment(pin, 'ADC', f'CH{ardupilot_pin}')
-                self.adc_pins.append({'channel': int(ardupilot_pin), 'pin': pin})
+                self.esp32_adcs.append(a[1:])
             return
-        elif line.startswith("FLASH_SIZE_MB"):
-            self.flash_size_mb = int(line.split()[1])
+        elif a[0] == "FLASH_SIZE_MB":
+            self.flash_size_mb = int(a[1])
             return
-        elif line.startswith("PSRAM_SIZE"):
-            self.psram_size = line.split()[1]
+        elif a[0] == "PSRAM_SIZE":
+            self.psram_size = a[1]
             return
 
         super(ESP32HWDef, self).process_line(line, depth)
         
-        if line.startswith("RESERVED_PINS"):
-            for pin in line.split()[1:]:
+        if a[0] == "RESERVED_PINS":
+            for pin in a[1:]:
                 self.reserved_pins.add(int(pin.replace('GPIO_NUM_', '')))
 
     def write_hwdef_header_content(self, f):
         self.advanced_build = ('MCU' in self.env_vars)
-        
-        f.write("#include <AP_HAL/board/esp32.h>\n")
         
         # Write all definitions from alllines, preserving strings
         for d in self.alllines:
@@ -206,51 +195,71 @@ class ESP32HWDef(hwdef.HWDef):
                 for feat in chip['features']:
                     f.write("#ifndef %s\n#define %s 1\n#endif\n" % (feat, feat))
 
+        self.write_SPI_bus_table(f)
+        self.write_SPI_device_table(f)
         self.write_IMU_config(f)
+        self.write_MAG_config(f)
         self.write_BARO_config(f)
-        self.write_esp32_config(f)
+        self.write_SERIAL_config(f)
+        self.write_RCOUT_config(f)
+        self.write_ADC_config(f)
+        self.write_I2C_config(f)
 
-    def write_esp32_config(self, f):
-        f.write("\n/* UART Configuration */\n#ifndef HAL_ESP32_UART_DEVICES\n#define HAL_ESP32_UART_DEVICES \\\n")
-        entries = []
-        for key in sorted(self.serial_pins.keys()):
-            if key.startswith('tx_'):
-                num = key.split('_')[1]
-                if f'rx_{num}' in self.serial_pins:
-                    entries.append(f'    {{ .rx = GPIO_NUM_{self.serial_pins[f"rx_{num}"]}, .tx = GPIO_NUM_{self.serial_pins[key]} }}')
-        f.write(',\\\n'.join(entries) + '\n#endif\n')
-        
-        if self.rcout_pins:
-            valid = [p for p in self.rcout_pins if p is not None]
-            f.write(f"\n#ifndef HAL_ESP32_RCOUT_MAX\n#define HAL_ESP32_RCOUT_MAX {len(valid)}\n#endif\n")
-            f.write(f"#ifndef HAL_ESP32_RCOUT\n#define HAL_ESP32_RCOUT {{{','.join([f'GPIO_NUM_{p}' for p in valid])}}}\n#endif\n")
-        
-        if self.spi_buses:
-            f.write("\n/* SPI Bus Configuration */\n#ifndef HAL_ESP32_SPI_BUSES\n#define HAL_ESP32_SPI_BUSES \\\n")
-            entries = []
-            for b in sorted(self.spi_buses, key=lambda x: x['num']):
-                host = "SPI2_HOST" if b['num'] == 1 else "SPI3_HOST" if b['num'] == 2 else "SPI1_HOST"
-                entries.append(f"    {{.host={host}, .dma_ch=1, .mosi=GPIO_NUM_{b['mosi']}, .miso=GPIO_NUM_{b['miso']}, .sclk=GPIO_NUM_{b['sck']}}}")
-            f.write(',\\\n'.join(entries) + '\n#endif\n')
+    def write_device_table_esp32(self, f, name, definition, devices):
+        '''write a device table, but ALWAYS define the macro for ESP32 HAL'''
+        f.write(f"\n/* {name} */\n#ifndef {definition}\n#define {definition} \\\n")
+        if not devices:
+            f.write("    { }") # Empty entry
+        else:
+            f.write(',\\\n'.join(devices))
+        f.write("\n#endif\n")
 
-        if self.spi_devices:
-            f.write("\n/* SPI Device Configuration */\n#ifndef HAL_ESP32_SPI_DEVICES\n#define HAL_ESP32_SPI_DEVICES \\\n")
-            entries = []
-            for i, d in enumerate(self.spi_devices):
-                entries.append(f'    {{.name="{d["name"]}", .bus=0, .device={i}, .cs=GPIO_NUM_{d["cs"]}, .mode=0, .lspeed=1*MHZ, .hspeed=10*MHZ}}')
-            f.write(',\\\n'.join(entries) + '\n#endif\n')
+    def write_SPI_bus_table(self, f):
+        buslist = []
+        for bus in self.esp32_spibus:
+            if len(bus) != 5: continue
+            (host, dma_ch, mosi, miso, sclk) = bus
+            buslist.append(f"{{ .host={host}, .dma_ch={dma_ch}, .mosi={mosi}, .miso={miso}, .sclk={sclk} }}")
+        self.write_device_table_esp32(f, "SPI buses", "HAL_ESP32_SPI_BUSES", buslist)
 
-        if self.i2c_buses:
-            f.write("\n/* I2C Configuration */\n#ifndef HAL_ESP32_I2C_BUSES\n#define HAL_ESP32_I2C_BUSES \\\n")
-            entries = [f"    {{.port=I2C_NUM_{b['num']}, .sda=GPIO_NUM_{b['sda']}, .scl=GPIO_NUM_{b['scl']}, .speed=400*KHZ, .internal=true}}" for b in sorted(self.i2c_buses, key=lambda x: x['num'])]
-            f.write(',\\\n'.join(entries) + '\n#endif\n')
+    def write_SPI_device_table(self, f):
+        devlist = []
+        for dev in self.esp32_spidev:
+            if len(dev) != 7: continue
+            (name, bus, device, cs, mode, lowspeed, highspeed) = dev
+            devlist.append(f'{{.name= "{name}", .bus={bus}, .device={device}, .cs={cs}, .mode={mode}, .lspeed={lowspeed}, .hspeed={highspeed}}}')
+        self.write_device_table_esp32(f, "SPI devices", "HAL_ESP32_SPI_DEVICES", devlist)
 
-        if self.adc_pins:
-            f.write("\n/* ADC Configuration */\n#ifndef HAL_ESP32_ADC_PINS\n#define HAL_ESP32_ADC_PINS \\\n")
-            entries = []
-            for p in sorted(self.adc_pins, key=lambda x: x['channel']):
-                entries.append(f"    {{{p['pin']}, 11, {p['channel']}}}")
-            f.write(',\\\n'.join(entries) + '\n#endif\n')
+    def write_SERIAL_config(self, f):
+        seriallist = []
+        for serial in self.esp32_serials:
+            if len(serial) != 3: continue
+            (port, rxpin, txpin) = serial
+            seriallist.append(f"{{ .port={port}, .rx={rxpin}, .tx={txpin} }}")
+        self.write_device_table_esp32(f, "serial devices", "HAL_ESP32_UART_DEVICES", seriallist)
+
+    def write_RCOUT_config(self, f):
+        f.write(f"\n#ifndef HAL_ESP32_RCOUT_MAX\n#define HAL_ESP32_RCOUT_MAX {len(self.esp32_rcout)}\n#endif\n")
+        f.write(f"#ifndef HAL_ESP32_RCOUT\n#define HAL_ESP32_RCOUT {{{','.join(self.esp32_rcout)}}}\n#endif\n")
+
+    def write_ADC_config(self, f):
+        adclist = []
+        for adc in self.esp32_adcs:
+            if len(adc) != 3: continue
+            (pin, gain, ardupilot_pin) = adc
+            adclist.append(f"{{ {pin}, {gain}, {ardupilot_pin} }}")
+        self.write_device_table_esp32(f, "ADC pins", "HAL_ESP32_ADC_PINS", adclist)
+
+    def write_I2C_config(self, f):
+        buslist = []
+        for bus in self.esp32_i2cbus:
+            if len(bus) < 3: continue
+            port, sda, scl = bus[0:3]
+            speed = bus[3] if len(bus) > 3 else "400*KHZ"
+            internal = bus[4] if len(bus) > 4 else "1"
+            soft = bus[5] if len(bus) > 5 else "0"
+            buslist.append(f"{{ .port={port}, .sda={sda}, .scl={scl}, .speed={speed}, .internal={internal}, .soft={soft} }}")
+        self.write_device_table_esp32(f, "I2C buses", "HAL_ESP32_I2C_BUSES", buslist)
 
     def generate_esp_idf_config(self):
         if not self.advanced_build: return []
@@ -261,9 +270,6 @@ class ESP32HWDef(hwdef.HWDef):
             config_lines.append("CONFIG_SPIRAM=y")
             config_lines.append("CONFIG_SPIRAM_TYPE_AUTO=y")
             config_lines.append("CONFIG_SPIRAM_MODE_QUAD=y")
-        if self.partition_table_filename:
-            config_lines.append("CONFIG_PARTITION_TABLE_CUSTOM=y")
-            config_lines.append(f'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="{self.partition_table_filename}"')
         
         hal_with_wifi = self.intdefines.get('HAL_WITH_WIFI', '1')
         if str(hal_with_wifi) == '0':
@@ -281,21 +287,21 @@ class ESP32HWDef(hwdef.HWDef):
             f.write("# Auto-generated config\n")
             for line in config_lines: f.write(line + "\n")
 
-    def copy_partition_table(self):
-        if not self.partition_table_filename: return
-        hwdef_dir = os.path.dirname(self.hwdef[0])
-        src = os.path.join(hwdef_dir, self.partition_table_filename)
-        if os.path.exists(src):
-            import shutil
-            shutil.copy2(src, os.path.join(self.outdir, self.partition_table_filename))
-
 if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-D', '--outdir', required=True)
-    parser.add_argument('hwdef', nargs='+')
+    parser = argparse.ArgumentParser("esp32_hwdef.py")
+    parser.add_argument(
+        '-D', '--outdir', type=str, default="/tmp", help='Output directory')
+    parser.add_argument(
+        'hwdef', type=str, nargs='+', default=None, help='hardware definition file')
+    parser.add_argument(
+        '--quiet', action='store_true', default=False, help='quiet running')
+
     args = parser.parse_args()
-    eh = ESP32HWDef(args.outdir, args.hwdef)
+
+    eh = ESP32HWDef(
+        outdir=args.outdir,
+        hwdef=args.hwdef,
+        quiet=args.quiet,
+    )
     eh.run()
     eh.write_esp_idf_config()
-    eh.copy_partition_table()
