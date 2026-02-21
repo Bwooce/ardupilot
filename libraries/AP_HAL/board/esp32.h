@@ -81,6 +81,15 @@
 #define HAL_STORAGE_SIZE (16384)
 #endif
 
+// DSP/FFT: must be defined before Semaphores.h pulls in AP_HAL_Boards.h
+// which would otherwise default HAL_GYROFFT_ENABLED based on flash size
+#ifndef HAL_GYROFFT_ENABLED
+#define HAL_GYROFFT_ENABLED 0
+#endif
+#ifndef HAL_WITH_DSP
+#define HAL_WITH_DSP HAL_GYROFFT_ENABLED
+#endif
+
 #ifdef __cplusplus
 // allow for static semaphores
 #include <AP_HAL_ESP32/Semaphores.h>
@@ -265,9 +274,6 @@
 
 // other big things..
 #define HAL_QUADPLANE_ENABLED 0
-#ifndef HAL_GYROFFT_ENABLED
-#define HAL_GYROFFT_ENABLED 0
-#endif
 #ifndef FFT_DEFAULT_WINDOW_SIZE
 #define FFT_DEFAULT_WINDOW_SIZE 32
 #endif
