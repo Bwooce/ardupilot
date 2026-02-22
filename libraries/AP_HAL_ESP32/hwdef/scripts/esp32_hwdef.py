@@ -13,6 +13,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)),
                              '../../../../libraries/AP_HAL/hwdef/scripts'))
 import hwdef  # noqa: E402
 
+
 class ESP32HWDef(hwdef.HWDef):
     # Hardware capability database for ESP32 variants
     CHIP_DATA = {
@@ -118,9 +119,10 @@ class ESP32HWDef(hwdef.HWDef):
             return False
 
         # Check if pin is input-only but used for output
-        if pin_num in self.input_only_pins and function in \
-           ['CAN_TX', 'UART_TX', 'SCK', 'MOSI', 'SDA_OUT',
-            'LED_DATA', 'LED_CLOCK']:
+        output_functions = [
+            'CAN_TX', 'UART_TX', 'SCK', 'MOSI',
+            'SDA_OUT', 'LED_DATA', 'LED_CLOCK']
+        if pin_num in self.input_only_pins and function in output_functions:
             self.error(f"Pin {pin_num} is input-only - cannot use for "
                        f"output function {function} {pin_name}")
             return False
@@ -304,35 +306,35 @@ class ESP32HWDef(hwdef.HWDef):
             # CAN pins
             if pin_name.startswith('CAN_TX_'):
                 can_num = pin_name.split('_')[2]
-                if self.validate_pin_assignment(pin_value, 'CAN_TX',
-                                               f'CAN{can_num}'):
+                if self.validate_pin_assignment(
+                        pin_value, 'CAN_TX', f'CAN{can_num}'):
                     self.can_pins[f'tx_{can_num}'] = pin_value
             elif pin_name.startswith('CAN_RX_'):
                 can_num = pin_name.split('_')[2]
-                if self.validate_pin_assignment(pin_value, 'CAN_RX',
-                                               f'CAN{can_num}'):
+                if self.validate_pin_assignment(
+                        pin_value, 'CAN_RX', f'CAN{can_num}'):
                     self.can_pins[f'rx_{can_num}'] = pin_value
 
             # SERIAL pins
             elif pin_name.startswith('SERIAL') and '_TX_PIN' in pin_name:
                 serial_num = pin_name.split('SERIAL')[1].split('_')[0]
-                if self.validate_pin_assignment(pin_value, 'UART_TX',
-                                               f'SERIAL{serial_num}'):
+                if self.validate_pin_assignment(
+                        pin_value, 'UART_TX', f'SERIAL{serial_num}'):
                     self.serial_pins[f'tx_{serial_num}'] = pin_value
             elif pin_name.startswith('SERIAL') and '_RX_PIN' in pin_name:
                 serial_num = pin_name.split('SERIAL')[1].split('_')[0]
-                if self.validate_pin_assignment(pin_value, 'UART_RX',
-                                               f'SERIAL{serial_num}'):
+                if self.validate_pin_assignment(
+                        pin_value, 'UART_RX', f'SERIAL{serial_num}'):
                     self.serial_pins[f'rx_{serial_num}'] = pin_value
 
             # LED pins
             elif pin_name == 'APA102_DATA_PIN':
-                if self.validate_pin_assignment(pin_value, 'LED_DATA',
-                                               'APA102'):
+                if self.validate_pin_assignment(
+                        pin_value, 'LED_DATA', 'APA102'):
                     self.led_pins['apa102_data'] = pin_value
             elif pin_name == 'APA102_CLOCK_PIN':
-                if self.validate_pin_assignment(pin_value, 'LED_CLOCK',
-                                               'APA102'):
+                if self.validate_pin_assignment(
+                        pin_value, 'LED_CLOCK', 'APA102'):
                     self.led_pins['apa102_clock'] = pin_value
             elif pin_name == 'APA102_NUM_LEDS':
                 try:
@@ -348,20 +350,20 @@ class ESP32HWDef(hwdef.HWDef):
 
             # Boot/system pins
             elif pin_name == 'KEY_BOOT':
-                if self.validate_pin_assignment(pin_value, 'BOOT_BUTTON',
-                                               'SYSTEM'):
+                if self.validate_pin_assignment(
+                        pin_value, 'BOOT_BUTTON', 'SYSTEM'):
                     pass  # Just validate
 
             # RMT (Remote Control) pin handling
             elif pin_name.startswith('RMT_RX'):
-                if self.validate_pin_assignment(pin_value, 'RMT_RX',
-                                               pin_name):
+                if self.validate_pin_assignment(
+                        pin_value, 'RMT_RX', pin_name):
                     self.rmt_rx_pin = pin_value
 
             # RCOUT pin handling
             elif pin_name.startswith('RCOUT') and pin_name.endswith('_PIN'):
-                if self.validate_pin_assignment(pin_value, 'RCOUT',
-                                               pin_name):
+                if self.validate_pin_assignment(
+                        pin_value, 'RCOUT', pin_name):
                     try:
                         channel_str = pin_name.replace('RCOUT', '') \
                             .replace('_PIN', '')
@@ -440,8 +442,8 @@ class ESP32HWDef(hwdef.HWDef):
 
             # SPI device chip select pins
             elif pin_name.endswith('_CS_PIN'):
-                if self.validate_pin_assignment(pin_value, 'SPI_CS',
-                                               pin_name):
+                if self.validate_pin_assignment(
+                        pin_value, 'SPI_CS', pin_name):
                     device_name = pin_name.replace('_CS_PIN', '').lower()
                     spi_device = {'name': device_name, 'cs': pin_value}
                     self.spi_devices.append(spi_device)
