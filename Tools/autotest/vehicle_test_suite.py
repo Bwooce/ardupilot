@@ -4946,21 +4946,30 @@ class TestSuite(abc.ABC):
         self.context_pop()
 
     def wait_dronecan_node(self, timeout=60):
-        '''wait for a DroneCAN node to come online via statustext, return node_id'''
+        '''wait for a DroneCAN node to come online via statustext, return node_id.
+        Caller MUST have called self.context_collect('STATUSTEXT') before rebooting
+        so that the node announcement (which arrives during reboot) is captured.'''
         import re
         self.progress("Waiting for DroneCAN node via statustext...")
+        text = self.wait_text("DroneCAN Node (\\d+):", regex=True,
+                              check_context=True, timeout=timeout)
+        match = re.search(r"DroneCAN Node (\d+):", text)
+        if match:
+            node_id = int(match.group(1))
+            self.progress("Found DroneCAN node %d" % node_id)
+            return node_id
+        raise AutoTestTimeoutException("Could not parse DroneCAN node ID")
+
+    def reboot_sitl_dronecan(self, timeout=60):
+        '''Reboot SITL and wait for DroneCAN node to come online.
+        Collects STATUSTEXT across the reboot so the node announcement
+        (which arrives during boot) is captured.'''
         self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
         try:
-            text = self.wait_text("DroneCAN Node (\\d+):", regex=True,
-                                  check_context=True, timeout=timeout)
-            match = re.search(r"DroneCAN Node (\d+):", text)
-            if match:
-                node_id = int(match.group(1))
-                self.progress("Found DroneCAN node %d" % node_id)
-                return node_id
+            return self.wait_dronecan_node(timeout=timeout)
         finally:
             self.context_stop_collecting('STATUSTEXT')
-        raise AutoTestTimeoutException("Could not parse DroneCAN node ID")
 
     def DroneCAN_NodeStatus(self):
         '''test UAVCAN_NODE_STATUS MAVLink broadcasting'''
@@ -4970,12 +4979,14 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        # Collect NODE_STATUS messages during reboot (they arrive on first contact)
+        # Collect messages during reboot (they arrive on first contact)
         self.context_collect('UAVCAN_NODE_STATUS')
+        self.context_collect('STATUSTEXT')
         self.reboot_sitl()
 
-        # Wait for node to appear (detected via statustext)
+        # Wait for node to appear (detected via statustext captured during reboot)
         self.wait_dronecan_node(timeout=60)
+        self.context_stop_collecting('STATUSTEXT')
 
         # Check collected NODE_STATUS from initial contact
         m = self.assert_receive_message('UAVCAN_NODE_STATUS', timeout=5,
@@ -5003,12 +5014,14 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        # Collect NODE_INFO during reboot (sent when node info response arrives)
+        # Collect messages during reboot (they arrive on first contact)
         self.context_collect('UAVCAN_NODE_INFO')
+        self.context_collect('STATUSTEXT')
         self.reboot_sitl()
 
-        # Wait for node to appear
+        # Wait for node to appear (statustext captured during reboot)
         self.wait_dronecan_node(timeout=60)
+        self.context_stop_collecting('STATUSTEXT')
 
         # Check collected NODE_INFO
         m = self.assert_receive_message('UAVCAN_NODE_INFO', timeout=5,
@@ -5083,10 +5096,9 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        self.reboot_sitl()
+        node_id = self.reboot_sitl_dronecan(timeout=60)
 
-        # Discover node and wait for startup param queries to complete
-        node_id = self.wait_dronecan_node(timeout=60)
+        # Wait for startup param queries to complete
         self.delay_sim_time(5)
 
         # Read GPS1_TYPE (known to be 1 from periph.parm)
@@ -5120,10 +5132,9 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        self.reboot_sitl()
+        node_id = self.reboot_sitl_dronecan(timeout=60)
 
-        # Discover node and wait for startup param queries to complete
-        node_id = self.wait_dronecan_node(timeout=60)
+        # Wait for startup param queries to complete
         self.delay_sim_time(5)
 
         # Read current BARO_ENABLE value (should be 1)
@@ -5165,9 +5176,7 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        self.reboot_sitl()
-
-        node_id = self.wait_dronecan_node(timeout=60)
+        node_id = self.reboot_sitl_dronecan(timeout=60)
         self.delay_sim_time(5)
 
         # Read current RNGFND1_MAX value (should be 120.0, a float param)
@@ -5221,9 +5230,7 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        self.reboot_sitl()
-
-        node_id = self.wait_dronecan_node(timeout=60)
+        node_id = self.reboot_sitl_dronecan(timeout=60)
         self.delay_sim_time(5)
 
         # --- Phase 1: Send integer-typed SET to a float parameter ---
@@ -5285,10 +5292,7 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        self.reboot_sitl()
-
-        # Phase 1: Verify node is online
-        self.wait_dronecan_node(timeout=60)
+        self.reboot_sitl_dronecan(timeout=60)
         self.progress("Node is online")
 
         # Phase 2: Restart periph in maintenance mode, verify unhealthy report
@@ -5302,8 +5306,10 @@ class TestSuite(abc.ABC):
 
         # Phase 3: Restart periph normally, verify recovery
         self.stop_sup_program(instance=0)
+        self.context_collect('STATUSTEXT')
         self.start_sup_program(instance=0)
         self.wait_dronecan_node(timeout=60)
+        self.context_stop_collecting('STATUSTEXT')
         self.progress("Node recovered after maintenance mode restart")
 
         self.context_pop()
@@ -5316,9 +5322,7 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        self.reboot_sitl()
-
-        node_id = self.wait_dronecan_node(timeout=60)
+        node_id = self.reboot_sitl_dronecan(timeout=60)
         self.delay_sim_time(5)
 
         # Read current RNGFND1_MAX (default 120.0)
@@ -5339,10 +5343,12 @@ class TestSuite(abc.ABC):
         self.progress("Rebooting periph to test persistence")
         self.stop_sup_program(instance=0)
         self.delay_sim_time(2)
+        self.context_collect('STATUSTEXT')
         self.start_sup_program(instance=0)
 
         # Wait for node to reconnect
         new_node_id = self.wait_dronecan_node(timeout=60)
+        self.context_stop_collecting('STATUSTEXT')
         self.delay_sim_time(5)
         self.progress("Periph reconnected as node %d" % new_node_id)
 
@@ -5372,10 +5378,8 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        self.reboot_sitl()
-
         # Discover node
-        node_id = self.wait_dronecan_node(timeout=60)
+        node_id = self.reboot_sitl_dronecan(timeout=60)
         self.delay_sim_time(2)
 
         # Request parameter list
@@ -5424,10 +5428,8 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        self.reboot_sitl()
-
         # Phase 1: Get initial node_id from DNA allocation
-        node_id_1 = self.wait_dronecan_node(timeout=60)
+        node_id_1 = self.reboot_sitl_dronecan(timeout=60)
         self.progress("Initial DNA allocation: node_id=%d" % node_id_1)
 
         if node_id_1 < 1 or node_id_1 > 127:
@@ -5435,9 +5437,7 @@ class TestSuite(abc.ABC):
 
         # Phase 2: Reboot autopilot (preserves DNA database), verify same node_id
         self.progress("Rebooting SITL to test DNA database persistence")
-        self.reboot_sitl()
-
-        node_id_2 = self.wait_dronecan_node(timeout=60)
+        node_id_2 = self.reboot_sitl_dronecan(timeout=60)
         self.progress("Post-reboot DNA allocation: node_id=%d" % node_id_2)
 
         if node_id_2 != node_id_1:
@@ -5456,10 +5456,8 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        self.reboot_sitl()
-
         # Wait for real node so CAN bus is active
-        self.wait_dronecan_node(timeout=60)
+        self.reboot_sitl_dronecan(timeout=60)
         self.delay_sim_time(5)
 
         # Send PARAM_EXT_REQUEST_READ to non-existent node (node_id=99)
@@ -5494,9 +5492,7 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        self.reboot_sitl()
-
-        node_id = self.wait_dronecan_node(timeout=60)
+        node_id = self.reboot_sitl_dronecan(timeout=60)
         self.delay_sim_time(5)
 
         # Read a parameter that does not exist on the periph
@@ -5541,12 +5537,15 @@ class TestSuite(abc.ABC):
             "GPS1_TYPE": 9,
             "SIM_GPS1_ENABLE": 0,
         })
-        self.reboot_sitl()
-
         # Phase 1: Discover periph node
-        node_id = self.wait_dronecan_node(timeout=60)
+        node_id = self.reboot_sitl_dronecan(timeout=60)
         self.delay_sim_time(5)
         self.progress("Periph node %d online, sending BeginFirmwareUpdate" % node_id)
+
+        # Start collecting STATUSTEXT before sending BeginFirmwareUpdate,
+        # because the periph reboots immediately after responding and the
+        # "DroneCAN Node" announcement arrives during the reboot.
+        self.context_collect('STATUSTEXT')
 
         # Phase 2: Create pydronecan node on SITL multicast CAN bus
         dc_node = dronecan.make_node('mcast:0', node_id=100)
@@ -5596,13 +5595,16 @@ class TestSuite(abc.ABC):
         self.progress("BeginFirmwareUpdate accepted, waiting for periph to reboot")
 
         # Phase 3: Wait for periph to reboot and reconnect via DNA
-        # On SITL, reboot(true) calls execv() which restarts the process
-        node_id_2 = self.wait_dronecan_node(timeout=60)
-        self.progress("Periph reconnected as node %d after firmware update reboot" % node_id_2)
-
-        if node_id_2 != node_id:
-            self.progress("Warning: node_id changed %d -> %d (DNA re-allocation)" %
-                          (node_id, node_id_2))
+        # On SITL, reboot(true) calls execv() which restarts the process.
+        # The DNA server still has the node as verified, so no new
+        # "DroneCAN Node" STATUSTEXT is emitted. Instead, detect the
+        # reconnection via the GPS driver re-detecting the periph node
+        # (GPS1_TYPE=9 is set for this test).
+        import re
+        text = self.wait_text("GPS.*detected.*DroneCAN\\d+-(%d)" % node_id,
+                              regex=True, check_context=True, timeout=60)
+        self.context_stop_collecting('STATUSTEXT')
+        self.progress("Periph node %d reconnected after firmware update reboot" % node_id)
 
         self.progress("DroneCAN BeginFirmwareUpdate validated: request accepted, periph rebooted and reconnected")
         self.context_pop()
