@@ -712,11 +712,19 @@ class ESP32HWDef(hwdef.HWDef):
             else:
                 f.write("    /* No valid I2C buses defined */\n\n")
         else:
+            # MCU-appropriate default I2C pins
+            if self.mcu.upper() in ('ESP32S3', 'ESP32S2', 'ESP32P4'):
+                default_sda, default_scl = 41, 42
+            elif self.mcu.upper() == 'ESP32':
+                default_sda, default_scl = 21, 22
+            else:
+                # C3, C6 etc
+                default_sda, default_scl = 5, 6
             f.write("/* I2C Configuration - default internal bus */\n")
-            f.write("#define HAL_ESP32_I2C_BUSES "
-                    "{.port=I2C_NUM_0, .sda=GPIO_NUM_41, "
-                    ".scl=GPIO_NUM_42, .speed=400*KHZ, "
-                    ".internal=true, .soft=true}\n\n")
+            f.write(f"#define HAL_ESP32_I2C_BUSES "
+                    f"{{.port=I2C_NUM_0, .sda=GPIO_NUM_{default_sda}, "
+                    f".scl=GPIO_NUM_{default_scl}, .speed=400*KHZ, "
+                    f".internal=true, .soft=true}}\n\n")
 
         # Generate ADC pin configuration
         if self.adc_pins:
