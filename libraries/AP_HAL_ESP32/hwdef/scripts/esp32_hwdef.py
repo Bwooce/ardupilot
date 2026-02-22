@@ -7,7 +7,6 @@ AP_FLAKE8_CLEAN
 import os
 import sys
 import re
-import shlex
 
 # Module level import not at top of file fix: move sys.path adjustment
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)),
