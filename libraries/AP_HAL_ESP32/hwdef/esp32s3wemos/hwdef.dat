@@ -1,0 +1,102 @@
+# ArduPilot Hardware Definition for Wemos/LOLIN S3 Mini
+# ESP32-S3FH4R2: 4MB Flash, 2MB QPI PSRAM, native USB-C
+#
+# Bare board configuration for validation testing:
+# - No sensors (no IMU, baro, compass)
+# - WiFi SoftAP for MAVLink telemetry
+# - USB-Serial/JTAG console on SERIAL0
+# - One hardware UART on SERIAL1
+
+MCU ESP32S3
+
+# ESP-IDF RTC watchdog definitions (missing from some ESP-IDF versions)
+define RTC_WDT_STG_SEL_OFF 0
+define RTC_WDT_STG_SEL_INT 1
+define RTC_WDT_STG_SEL_RESET_CPU 2
+define RTC_WDT_STG_SEL_RESET_SYSTEM 3
+define RTC_WDT_STG_SEL_RESET_RTC 4
+
+# Board identification
+define CONFIG_HAL_BOARD_SUBTYPE 6009
+define HAL_ESP32_BOARD_NAME "esp32s3wemos"
+
+# Flash and PSRAM - matches ESP32-S3FH4R2 package
+FLASH_SIZE_MB 4
+PARTITION_TABLE_CUSTOM_FILENAME partitions.csv
+PSRAM_SIZE 2MB
+PSRAM_MODE QPI
+
+# Disable aggressive debug options that crash during early init
+# (HEAP_TASK_TRACKING causes null deref in xTaskRemoveFromEventList)
+# Debug mode: light heap poisoning, stack canary, core dump to flash
+# (comprehensive poisoning and heap task tracking removed - crash during early init)
+define ESP32_DEBUG_MODE 1
+
+# Sensors - none on bare board
+define HAL_INS_DEFAULT HAL_INS_NONE
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
+define AP_COMPASS_ENABLE_DEFAULT 0
+define ALLOW_ARM_NO_COMPASS 1
+define AP_AIRSPEED_ENABLED 0
+define AP_AIRSPEED_ANALOG_ENABLED 0
+define AP_AIRSPEED_BACKEND_DEFAULT_ENABLED 0
+
+# ADC disabled (ADC2 conflicts with WiFi anyway)
+define HAL_DISABLE_ADC_DRIVER 1
+define HAL_USE_ADC 0
+
+# WiFi - UDP SoftAP for MAVLink telemetry
+# Connect to SSID "ardupilot123", then UDPCL to 192.168.4.1:14550
+define HAL_ESP32_WIFI 2
+define WIFI_SSID "ardupilot123"
+define WIFI_PWD "ardupilot123"
+
+# RC input disabled for bare board
+define AP_RCPROTOCOL_ENABLED 0
+
+# Logging - MAVLink only (no filesystem, no SD card)
+define HAL_LOGGING_FILESYSTEM_ENABLED 0
+define HAL_LOGGING_DATAFLASH_ENABLED 0
+define HAL_LOGGING_MAVLINK_ENABLED 1
+define HAL_LOGGING_BACKENDS_DEFAULT 2
+define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
+define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
+define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
+
+# Minimal features for small flash
+define AP_FILESYSTEM_ESP32_ENABLED 0
+define AP_SCRIPTING_ENABLED 0
+define HAL_GYROFFT_ENABLED 1
+define HAL_USE_EMPTY_STORAGE 1
+define AP_MOTORS_FRAME_DEFAULT_ENABLED 0
+define AP_MOTORS_FRAME_QUAD_ENABLED 1
+
+# UART Configuration
+# SERIAL0: USB-Serial/JTAG (native USB-C, handled by IDF when
+#   CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y in sdkconfig.defaults)
+#   Pin numbers are placeholders - USB console ignores them
+# SERIAL1: Hardware UART1 for GPS/telemetry/external devices
+define HAL_ESP32_USE_USB_CONSOLE 1
+UART_ORDER SERIAL0 SERIAL1
+SERIAL0_TX_PIN 43
+SERIAL0_RX_PIN 44
+SERIAL1_TX_PIN 18
+SERIAL1_RX_PIN 17
+
+# I2C - available for external sensors
+I2C_ORDER I2C0
+I2C0_SDA_PIN 13
+I2C0_SCL_PIN 14
+I2C0_SPEED 400000
+I2C0_INTERNAL 1
+I2C0_SOFT 1
+
+# RCOUT - 4 channels for basic testing
+RCOUT1_PIN 11
+RCOUT2_PIN 10
+RCOUT3_PIN 9
+RCOUT4_PIN 8
+
+# RMT for RC input (disabled but pin assigned to avoid conflicts)
+define HAL_ESP32_RMT_RX_PIN_NUMBER 16
+RCIN_PIN 16

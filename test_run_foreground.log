@@ -1,0 +1,59 @@
+Setting top to                           : /home/bruce/ardupilot-esp32-refactor 
+Setting out to                           : /home/bruce/ardupilot-esp32-refactor/build 
+Autoconfiguration                        : enabled 
+Checking for program 'python'            : /usr/bin/python3 
+Checking for python version >= 3.8.0     : 3.12.3 
+Setting board to                         : esp32buzz 
+args=['AP_Baro_BMP280::probe', '"bmp280"']
+Using toolchain                          : xtensa-esp32-elf 
+Checking for 'g++' (C++ compiler)        : /home/bruce/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32-elf-g++ 
+Checking for 'gcc' (C compiler)          : /home/bruce/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32-elf-gcc 
+Checking for c flags '-MMD'              : yes 
+Checking for cxx flags '-MMD'            : yes 
+Checking for program 'xtensa-esp32-elf-nm' : /home/bruce/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32-elf-nm 
+CXX Compiler                               : g++ 14.2.0 
+Checking for program 'cmake'               : /usr/bin/cmake 
+Checking for program 'ninja, ninja-build'  : /usr/bin/ninja 
+ESP32 constraints loaded
+Processing /home/bruce/ardupilot-esp32-refactor/libraries/AP_HAL_ESP32/hwdef/esp32buzz/hwdef.dat
+Writing hwdef setup in /home/bruce/ardupilot-esp32-refactor/build/esp32buzz/hwdef.h
+args=['AP_Baro_BMP280::probe', '"bmp280"']
+ESP-IDF: /opt/espressif/esp-idf-v5.5 (v5.5)
+ESP32 Debug build     : disabled
+Processing hwdef: /usr/bin/python3 /home/bruce/ardupilot-esp32-refactor/libraries/AP_HAL_ESP32/hwdef/scripts/esp32_hwdef.py -D /home/bruce/ardupilot-esp32-refactor/build/esp32buzz --mcu esp32 /home/bruce/ardupilot-esp32-refactor/libraries/AP_HAL_ESP32/hwdef/esp32buzz/hwdef.dat
+ESP32 constraints loaded
+Processing /home/bruce/ardupilot-esp32-refactor/libraries/AP_HAL_ESP32/hwdef/esp32buzz/hwdef.dat
+Writing hwdef setup in /home/bruce/ardupilot-esp32-refactor/build/esp32buzz/hwdef.h
+args=['AP_Baro_BMP280::probe', '"bmp280"']
+Creating combined ESP-IDF config: /home/bruce/ardupilot-esp32-refactor/build/esp32buzz/sdkconfig.combined
+Using combined ESP-IDF config: /home/bruce/ardupilot-esp32-refactor/build/esp32buzz/sdkconfig.combined
+Enabled OpenDroneID                        : no 
+Enabled firmware ID checking               : no 
+GPS Debug Logging                          : no 
+Enabled custom controller                  : no 
+Checking for HAVE_CMATH_ISFINITE           : yes 
+Checking for HAVE_CMATH_ISINF              : yes 
+Checking for HAVE_CMATH_ISNAN              : yes 
+Checking for NEED_CMATH_ISFINITE_STD_NAMESPACE : yes 
+Checking for NEED_CMATH_ISINF_STD_NAMESPACE    : yes 
+Checking for NEED_CMATH_ISNAN_STD_NAMESPACE    : yes 
+Checking for header endian.h                   : not found 
+Checking for header byteswap.h                 : not found 
+Checking for HAVE_MEMRCHR                      : yes 
+Configured VSCode Intellisense:                : no 
+DC_DSDL compiler in                            : /home/bruce/ardupilot-esp32-refactor/modules/DroneCAN/dronecan_dsdlc 
+Source is git repository                       : yes 
+Update submodules                              : yes 
+Checking for program 'git'                     : /usr/bin/git 
+Checking for program 'xtensa-esp32-elf-size'   : /home/bruce/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32-elf-size 
+Benchmarks                                     : disabled 
+Unit tests                                     : enabled 
+Scripting                                      : maybe 
+Scripting runtime checks                       : enabled 
+Debug build                                    : disabled 
+Coverage build                                 : disabled 
+Consistent build                               : disabled 
+Force 32-bit build                             : disabled 
+Checking for program 'rsync'                   : /usr/bin/rsync 
+Removing target_list file /home/bruce/ardupilot-esp32-refactor/build/esp32buzz/target_list
+'configure' finished successfully (3.227s)
