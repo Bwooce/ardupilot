@@ -51,6 +51,9 @@ public:
     void toneAlarm_set_buzzer_tone(float frequency, float volume, uint32_t duration_ms) override;
 #endif
 
+    // fill a buffer with random values using ESP32 hardware RNG
+    bool get_random_vals(uint8_t *data, size_t size) override;
+
     // return true if the reason for the reboot was a watchdog reset
     bool was_watchdog_reset() const override;
 

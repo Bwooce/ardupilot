@@ -100,11 +100,10 @@ void Scheduler::register_task_with_watchdog(const char* task_name)
                 break;
         }
 
-        ESP_LOGE("WDT", "Failed to register task '%s' with watchdog: %s (%d)",
+        ESP_LOGE("WDT", "Failed to register '%s': %s (%d)",
                  task_name, error_desc, wdt_result);
-        hal.console->printf("WDT: Failed to register '%s': %s\n", task_name, error_desc);
     } else {
-        ESP_LOGI("WDT", "Successfully registered task '%s' with watchdog", task_name);
+        ESP_LOGD("WDT", "Registered '%s'", task_name);
     }
 }
 
@@ -145,15 +144,15 @@ void Scheduler::wdt_init(uint32_t timeout, uint32_t core_mask)
 
 void Scheduler::report_reset_reason()
 {
-    // Try immediate report (may fail if GCS not ready)
-    GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "WDT: Check magic=0x%lX exp=0x%lX", 
+    // Try immediate report (GCS may not exist yet in simple examples)
+    GCS_SEND_TEXT_SAFE(MAV_SEVERITY_CRITICAL, "WDT: Check magic=0x%lX exp=0x%lX",
                   (unsigned long)wdt_info.magic, (unsigned long)WDT_INFO_MAGIC);
     
     // Check for saved WDT info from previous crash
     if (wdt_info.magic == WDT_INFO_MAGIC) {
-        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "WDT: Found valid saved info!");
+        GCS_SEND_TEXT_SAFE(MAV_SEVERITY_CRITICAL, "WDT: Found valid saved info!");
         // Report detailed WDT info
-        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, 
+        GCS_SEND_TEXT_SAFE(MAV_SEVERITY_CRITICAL, 
                      "WDT: Task=%s Stack=%lu Heap=%lu/%lu",
                      wdt_info.task_name,
                      (unsigned long)wdt_info.stack_hwm,
@@ -162,7 +161,7 @@ void Scheduler::report_reset_reason()
         
         // Report last PC if available
         if (wdt_info.last_pc != 0) {
-            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,
+            GCS_SEND_TEXT_SAFE(MAV_SEVERITY_CRITICAL,
                          "WDT: PC=0x%lX Tick=%lu",
                          (unsigned long)wdt_info.last_pc,
                          (unsigned long)wdt_info.timestamp);
@@ -224,24 +223,24 @@ void Scheduler::report_reset_reason()
             break;
     }
     
-    // Send reset reason via MAVLink STATUSTEXT
+    // Send reset reason via MAVLink STATUSTEXT (use _SAFE: GCS may not exist yet)
     if (reason_str != nullptr) {
-        GCS_SEND_TEXT(severity, "%s (%d)", reason_str, (int)reason);
+        GCS_SEND_TEXT_SAFE(severity, "%s (%d)", reason_str, (int)reason);
     }
-    
+
     // Additional info for watchdog resets - get more details if available
     if (reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT || reason == ESP_RST_WDT) {
         // Report heap status in case it's memory related
         size_t free_heap = esp_get_free_heap_size();
         size_t min_free_heap = esp_get_minimum_free_heap_size();
-        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Heap: free=%u min=%u", 
+        GCS_SEND_TEXT_SAFE(MAV_SEVERITY_WARNING, "Heap: free=%u min=%u",
                      (unsigned)free_heap, (unsigned)min_free_heap);
-        
+
         // Try to get WDT task name if available
         #if CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0 || CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1
         // Note: ESP-IDF doesn't provide direct API to get which task triggered WDT
         // but we can report that WDT was triggered
-        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "WDT: Check console for task details");
+        GCS_SEND_TEXT_SAFE(MAV_SEVERITY_WARNING, "WDT: Check console for task details");
         #endif
         
         // Log more details via ESP_LOG which might be captured
@@ -284,10 +283,8 @@ void Scheduler::init()
         "WATCH"
 #endif
         ;
-    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "%s", protections);
-    
-    // Also print to console for local debugging
-    printf("%s protections enabled\n", protections);
+    ESP_LOGI("SCHEDULER", "%s", protections);
+    GCS_SEND_TEXT_SAFE(MAV_SEVERITY_INFO, "%s", protections);
 #endif
 
     // keep main tasks that need speed on CPU 0
@@ -295,57 +292,32 @@ void Scheduler::init()
     #define FASTCPU 0
     #define SLOWCPU 1
 
-    // pin main thread to Core 0, and we'll also pin other heavy-tasks to core 1, like wifi-related.
-    if (xTaskCreatePinnedToCore(_main_thread, "APM_MAIN", Scheduler::MAIN_SS, this, Scheduler::MAIN_PRIO, &_main_task_handle,FASTCPU) != pdPASS) {
-    //if (xTaskCreate(_main_thread, "APM_MAIN", Scheduler::MAIN_SS, this, Scheduler::MAIN_PRIO, &_main_task_handle) != pdPASS) {
-        ESP_LOGE("SCHEDULER", "FAILED to create task _main_thread on FASTCPU");
-        hal.console->printf("FAILED to create task _main_thread on FASTCPU\n");
-    } else {
-    	ESP_LOGI("SCHEDULER", "OK created task _main_thread on FASTCPU");
-    	hal.console->printf("OK created task _main_thread on FASTCPU\n");
+    // Create FreeRTOS tasks -- pin main thread and UART to Core 0 (fast),
+    // IO/storage/RC to Core 1 (slow, no WDT)
+    struct {
+        const char *name;
+        TaskFunction_t func;
+        uint32_t stack;
+        UBaseType_t prio;
+        TaskHandle_t *handle;
+        BaseType_t core;
+    } tasks[] = {
+        {"APM_MAIN",    _main_thread,    MAIN_SS,    MAIN_PRIO,    &_main_task_handle,    FASTCPU},
+        {"APM_TIMER",   _timer_thread,   TIMER_SS,   TIMER_PRIO,   &_timer_task_handle,   FASTCPU},
+        {"APM_RCOUT",   _rcout_thread,   RCOUT_SS,   RCOUT_PRIO,   &_rcout_task_handle,   SLOWCPU},
+        {"APM_RCIN",    _rcin_thread,    RCIN_SS,    RCIN_PRIO,    &_rcin_task_handle,    SLOWCPU},
+        {"APM_UART",    _uart_thread,    UART_SS,    UART_PRIO,    &_uart_task_handle,    FASTCPU},
+        {"APM_IO",      _io_thread,      IO_SS,      IO_PRIO,      &_io_task_handle,      SLOWCPU},
+        {"APM_STORAGE", _storage_thread, STORAGE_SS, STORAGE_PRIO, &_storage_task_handle, SLOWCPU},
+    };
+
+    for (auto &t : tasks) {
+        if (xTaskCreatePinnedToCore(t.func, t.name, t.stack, this, t.prio, t.handle, t.core) != pdPASS) {
+            ESP_LOGE("SCHEDULER", "FAILED to create task %s on CPU%d", t.name, t.core);
+        } else {
+            ESP_LOGI("SCHEDULER", "Created %s on CPU%d", t.name, t.core);
+        }
     }
-
-    if (xTaskCreatePinnedToCore(_timer_thread, "APM_TIMER", TIMER_SS, this, TIMER_PRIO, &_timer_task_handle,FASTCPU) != pdPASS) {
-        hal.console->printf("FAILED to create task _timer_thread on FASTCPU\n");
-    } else {
-    	hal.console->printf("OK created task _timer_thread on FASTCPU\n");
-    }	
-
-    if (xTaskCreatePinnedToCore(_rcout_thread, "APM_RCOUT", RCOUT_SS, this, RCOUT_PRIO, &_rcout_task_handle,SLOWCPU) != pdPASS) {
-       hal.console->printf("FAILED to create task _rcout_thread on SLOWCPU\n");
-    } else {
-       hal.console->printf("OK created task _rcout_thread on SLOWCPU\n");
-    }
-
-    if (xTaskCreatePinnedToCore(_rcin_thread, "APM_RCIN", RCIN_SS, this, RCIN_PRIO, &_rcin_task_handle,SLOWCPU) != pdPASS) {
-       hal.console->printf("FAILED to create task _rcin_thread on SLOWCPU\n");
-    } else {
-       hal.console->printf("OK created task _rcin_thread on SLOWCPU\n");
-    }
-
-    // pin this thread to Core 1 as it keeps all teh uart/s feed data, and we need that quick.
-    if (xTaskCreatePinnedToCore(_uart_thread, "APM_UART", UART_SS, this, UART_PRIO, &_uart_task_handle,FASTCPU) != pdPASS) {
-        hal.console->printf("FAILED to create task _uart_thread on FASTCPU\n");
-    } else {
-    	hal.console->printf("OK created task _uart_thread on FASTCPU\n");
-    }	  
-
-    // we put those on the SLOW core as it mounts the sd card, and that often isn't connected.
-    if (xTaskCreatePinnedToCore(_io_thread, "SchedulerIO:APM_IO", IO_SS, this, IO_PRIO, &_io_task_handle,SLOWCPU) != pdPASS) {
-        hal.console->printf("FAILED to create task _io_thread on SLOWCPU\n");
-    } else {
-        hal.console->printf("OK created task _io_thread on SLOWCPU\n");
-    }	 
-
-    if (xTaskCreatePinnedToCore(_storage_thread, "APM_STORAGE", STORAGE_SS, this, STORAGE_PRIO, &_storage_task_handle,SLOWCPU) != pdPASS) { //no actual flash writes without this, storage kinda appears to work, but does an erase on every boot and params don't persist over reset etc.
-        hal.console->printf("FAILED to create task _storage_thread on SLOWCPU\n");
-    } else {
-    	hal.console->printf("OK created task _storage_thread on SLOWCPU\n");
-    }
-
-    //   xTaskCreatePinnedToCore(_print_profile, "APM_PROFILE", IO_SS, this, IO_PRIO, nullptr,SLOWCPU);
-    
-    printf("SCHEDULER: All tasks created successfully\n");
 }
 
 template <typename T>
@@ -418,17 +390,11 @@ bool Scheduler::thread_create(AP_HAL::MemberProc proc, const char *name, uint32_
         return false;
     }
 
-    // Auto-register dynamically created tasks with watchdog
-    // This fixes tasks like "FTP" that are created at runtime
-    // Note: Registration happens in the creating task's context, not the new task
-    esp_err_t wdt_result = esp_task_wdt_add(xhandle);
-
-    // Don't log success - ESP-IDF logging system can deadlock during init when
-    // multiple threads try to log simultaneously. Watchdog registration failure
-    // is critical, so we use printf to bypass the logging semaphore.
-    if (wdt_result != ESP_OK) {
-        printf("SCHED: Failed to auto-register task '%s' with watchdog: %d\n", name, wdt_result);
-    }
+    // Do NOT auto-register dynamic threads with the task watchdog.
+    // Core ArduPilot threads (timer, rcout, rcin, io, storage, uart, main)
+    // register themselves explicitly via register_task_with_watchdog().
+    // Dynamic threads (FTP, scripting, test threads) do not feed the WDT,
+    // and registering them would cause spurious WDT resets.
 
     return true;
 }
@@ -453,33 +419,11 @@ void IRAM_ATTR Scheduler::delay_microseconds(uint16_t us)
     } else { // Minimum delay for FreeRTOS is 1ms
         uint32_t tick = portTICK_PERIOD_MS * 1000;
 
-        // For delays >= 1ms, feed the watchdog to prevent timeout
-        // Only reset watchdog for longer delays to avoid overhead
+        // For delays >= 1ms, feed the watchdog to prevent timeout.
+        // Silently ignore ESP_ERR_NOT_FOUND -- dynamic threads created via
+        // thread_create() are intentionally not registered with the WDT.
         if (us >= 1000) {
-            esp_err_t wdt_err = esp_task_wdt_reset();
-
-            // Debug unregistered tasks trying to reset watchdog
-            if (wdt_err == ESP_ERR_NOT_FOUND) {
-                static uint32_t last_report_ms = 0;
-                uint32_t now_ms = AP_HAL::millis();
-
-                // Report which task is failing (limit to once per second per task)
-                if (now_ms - last_report_ms > 1000) {
-                    TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
-                    const char* task_name = pcTaskGetName(current_task);
-
-                    // Get task details for debugging
-                    TaskStatus_t task_status;
-                    vTaskGetInfo(current_task, &task_status, pdTRUE, eInvalid);
-
-                    ESP_LOGE("SCHED_WDT", "Task '%s' (handle=%p, stack_hwm=%lu) not registered with watchdog",
-                             task_name ? task_name : "UNKNOWN",
-                             current_task,
-                             (unsigned long)task_status.usStackHighWaterMark);
-
-                    last_report_ms = now_ms;
-                }
-            }
+            esp_task_wdt_reset();
         }
 
         vTaskDelay((us+tick-1)/tick);
@@ -994,13 +938,17 @@ void Scheduler::print_main_loop_rate(void)
         
         // Reset WDT before potentially blocking console write
         esp_task_wdt_reset();
-        
-        // null pointer in here...
-        const float actual_loop_rate = AP::scheduler().get_filtered_loop_rate_hz();
-        const uint16_t expected_loop_rate = AP::scheduler().get_loop_rate_hz();
-        
+
+        // AP_Scheduler singleton may not exist (e.g. in examples)
+        auto *scheduler = AP_Scheduler::get_singleton();
+        if (scheduler == nullptr) {
+            return;
+        }
+        const float actual_loop_rate = scheduler->get_filtered_loop_rate_hz();
+        const uint16_t expected_loop_rate = scheduler->get_loop_rate_hz();
+
         // Use GCS instead of console to avoid blocking
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Loop rate: %.1fHz / %uHz", 
+        GCS_SEND_TEXT_SAFE(MAV_SEVERITY_INFO, "Loop rate: %.1fHz / %uHz",
                      actual_loop_rate, expected_loop_rate);
         
         // Don't use console->printf as it might block on UART
@@ -1013,16 +961,11 @@ void Scheduler::print_main_loop_rate(void)
 
 void IRAM_ATTR Scheduler::_main_thread(void *arg)
 {
-    ESP_LOGI("MAIN", "===========================================");
     ESP_LOGI("MAIN", "ArduPilot main thread starting");
-    ESP_LOGI("MAIN", "===========================================");
-#ifdef SCHEDDEBUG
-    printf("%s:%d start\n", __PRETTY_FUNCTION__, __LINE__);
-#endif
     Scheduler *sched = (Scheduler *)arg;
 
     if (sched->callbacks == nullptr) {
-        ESP_LOGE("MAIN", "CRITICAL: callbacks is NULL - cannot proceed");
+        ESP_LOGE("MAIN", "callbacks is NULL - cannot proceed");
         vTaskDelete(NULL);
         return;
     }
@@ -1033,33 +976,23 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
     hal.rcout->init();
 
     // Register main thread with watchdog BEFORE calling setup()
-    // This prevents "task not found" errors during initialization
     register_task_with_watchdog("APM_MAIN");
 
-    ESP_LOGI("MAIN", "Calling ArduPilot setup() - this may take a while...");
-    ESP_LOGI("SCHEDULER", "========================================");
-    ESP_LOGI("SCHEDULER", "About to call callbacks->setup()");
-    ESP_LOGI("SCHEDULER", "callbacks=%p", sched->callbacks);
-    ESP_LOGI("SCHEDULER", "========================================");
+    ESP_LOGI("MAIN", "Calling setup()");
 
     // Temporarily increase watchdog timeout for long-running setup()
     // setup() can take 10-15 seconds for parameter loading, CAN init, sensor detection, etc.
     // Normal timeout is 5s, increase to 20s during init
     esp_task_wdt_config_t temp_config = {
         .timeout_ms = 20000,  // 20 seconds for setup
-        .idle_core_mask = (1 << 0) | (1 << 1),  // Both cores
+        .idle_core_mask = 0,  // Don't monitor idle tasks; ArduPilot threads register explicitly
         .trigger_panic = true
     };
     esp_task_wdt_reconfigure(&temp_config);
     esp_task_wdt_reset();
 
-    if (sched->callbacks != nullptr) {
-        ESP_LOGI("SCHEDULER", "Callbacks valid, calling setup()");
-        sched->callbacks->setup();
-        ESP_LOGI("SCHEDULER", "callbacks->setup() returned");
-    } else {
-        ESP_LOGE("SCHEDULER", "ERROR: callbacks is NULL!");
-    }
+    sched->callbacks->setup();
+    ESP_LOGI("MAIN", "setup() completed");
 
     // Restore normal watchdog timeout (5 seconds for production, 30s for debug)
     #ifdef SCHEDDEBUG
@@ -1069,13 +1002,11 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
     #endif
     esp_task_wdt_config_t normal_config = {
         .timeout_ms = normal_timeout_ms,
-        .idle_core_mask = (1 << 0) | (1 << 1),
+        .idle_core_mask = 0,  // Don't monitor idle tasks; ArduPilot threads register explicitly
         .trigger_panic = true
     };
     esp_task_wdt_reconfigure(&normal_config);
     esp_task_wdt_reset();
-
-    ESP_LOGI("MAIN", "ArduPilot setup completed successfully");
 
     // Re-apply ESP-IDF log levels after parameter loading in setup()
     ESP32::esp32_params()->update_log_levels();
@@ -1096,7 +1027,7 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
         static uint32_t last_wdt_reset_report = 0;
         esp_err_t wdt_err = esp_task_wdt_reset();
         if (wdt_err != ESP_OK) {
-            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "WDT: Reset failed err=%d at %lu ms", 
+            GCS_SEND_TEXT_SAFE(MAV_SEVERITY_CRITICAL, "WDT: Reset failed err=%d at %lu ms", 
                          (int)wdt_err, (unsigned long)AP_HAL::millis());
             ESP_LOGE("WDT", "Failed to reset WDT: error %d", wdt_err);
         } else {
@@ -1106,7 +1037,7 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
             if (now - last_wdt_reset_report > 10000) {
                 last_wdt_reset_report = now;
                 // Suppress this message - it's just counting successful WDT feeds, not actual resets
-                // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "WDT: %lu resets OK", 
+                // GCS_SEND_TEXT_SAFE(MAV_SEVERITY_INFO, "WDT: %lu resets OK", 
                 //              (unsigned long)wdt_reset_count);
                 wdt_reset_count = 0;
             }
@@ -1119,7 +1050,7 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
         
         // Warn if too much time passed since last loop (indicates blocking)
         if (last_loop_start != 0 && time_since_last > 2000) {
-            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "WDT: %lums since last loop!", 
+            GCS_SEND_TEXT_SAFE(MAV_SEVERITY_CRITICAL, "WDT: %lums since last loop!", 
                          (unsigned long)time_since_last);
         }
         last_loop_start = loop_start;
@@ -1130,7 +1061,7 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
         if (loop_time > max_loop_time) {
             max_loop_time = loop_time;
             if (loop_time > 2000) {  // Warn if loop takes > 2 seconds
-                GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "WDT: Loop took %lums (max %lums)", 
+                GCS_SEND_TEXT_SAFE(MAV_SEVERITY_CRITICAL, "WDT: Loop took %lums (max %lums)", 
                              (unsigned long)loop_time, (unsigned long)max_loop_time);
             }
         }
@@ -1160,7 +1091,7 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
             // Combine messages to reduce mLRS traffic
             if (wdt_info.magic == WDT_INFO_MAGIC) {
                 // Send one combined message instead of multiple
-                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "WDT: %s S=%lu H=%lu L=%d", 
+                GCS_SEND_TEXT_SAFE(MAV_SEVERITY_INFO, "WDT: %s S=%lu H=%lu L=%d", 
                              wdt_info.task_name,
                              (unsigned long)wdt_info.stack_hwm,
                              (unsigned long)wdt_info.heap_free,
@@ -1212,7 +1143,7 @@ void IRAM_ATTR Scheduler::_main_thread(void *arg)
                 // Reset WDT before potentially blocking GCS send
                 esp_task_wdt_reset();
 
-                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "WDT: Saved %s S=%lu H=%lu/%lu MaxLoop=%lu",
+                GCS_SEND_TEXT_SAFE(MAV_SEVERITY_INFO, "WDT: Saved %s S=%lu H=%lu/%lu MaxLoop=%lu",
                              wdt_info.task_name,
                              (unsigned long)wdt_info.stack_hwm,
                              (unsigned long)wdt_info.heap_free,

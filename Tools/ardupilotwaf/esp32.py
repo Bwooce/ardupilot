@@ -251,7 +251,13 @@ def pre_build(self):
     lib_vars['WAF_BUILD_TARGET'] = self.targets
     lib_vars['ARDUPILOT_LIB'] = self.bldnode.find_or_declare('lib/').abspath()
     lib_vars['ARDUPILOT_BIN'] = self.bldnode.find_or_declare('lib/bin').abspath()
-    
+
+    # Pass board-specific sdkconfig to cmake so CMakeLists.txt can
+    # append it after sdkconfig.defaults (board settings override defaults)
+    board_sdkconfig = os.path.join(self.bldnode.abspath(), 'sdkconfig.board')
+    if os.path.exists(board_sdkconfig):
+        lib_vars['SDKCONFIG_BOARD'] = board_sdkconfig
+
     # Restore ESP-IDF environment variables captured during configure
     if self.env.ESP32_ENV:
         for key, value in self.env.ESP32_ENV.items():

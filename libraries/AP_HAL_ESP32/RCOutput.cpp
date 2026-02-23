@@ -121,9 +121,7 @@ void RCOutput::init()
     rtc_gpio_deinit(GPIO_NUM_33);
 #endif
 
-    printf("oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo\n");
-    printf("RCOutput::init() - channels available: %d \n",(int)MAX_CHANNELS);
-    printf("oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo\n");
+    ESP_LOGI("RCOUT", "RCOutput init: %d channels", (int)MAX_CHANNELS);
 
     _initialized = true; // assume we are initialized, any error will call abort()
 

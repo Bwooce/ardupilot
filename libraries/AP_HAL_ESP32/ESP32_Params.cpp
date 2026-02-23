@@ -43,7 +43,7 @@ const struct AP_Param::GroupInfo ESP32Params::var_info[] = {
     // @Description: Controls ESP32 HAL debug output via ESP-IDF logging. 0=Disabled, 1=Errors only, 2=Warnings+Errors, 3=Info+Warnings+Errors, 4=Verbose, 5=All debug output
     // @Values: 0:Disabled, 1:Errors, 2:Warnings, 3:Info, 4:Verbose, 5:All
     // @User: Advanced
-    AP_GROUPINFO("DEBUG_LVL", 1, ESP32Params, debug_level, 3), // Default to Info level
+    AP_GROUPINFO("DEBUG_LVL", 1, ESP32Params, debug_level, ESP32_DEFAULT_LOG_LEVEL),
     
     // @Param: LOG_MAV
     // @DisplayName: ESP32 Log to MAVLink
@@ -77,111 +77,77 @@ void ESP32Params::update_log_levels() {
 
 void ESP32Params::apply_log_level() {
     esp_log_level_t level;
-    
+
     switch (debug_level.get()) {
-        case 0:  level = ESP_LOG_ERROR;   break;  // Level 0: Errors only (never fully disable)
-        case 1:  level = ESP_LOG_ERROR;   break;  // Level 1: Errors only  
-        case 2:  level = ESP_LOG_WARN;    break;  // Level 2: Warnings + Errors
-        case 3:  level = ESP_LOG_INFO;    break;  // Level 3: Info + Warnings + Errors
-        case 4:  level = ESP_LOG_DEBUG;   break;  // Level 4: Verbose (Debug)
-        case 5:  level = ESP_LOG_VERBOSE; break;  // Level 5: All debug output
-        default: level = ESP_LOG_INFO;    break;  // Default to Info
+        case 0:  level = ESP_LOG_ERROR;   break;
+        case 1:  level = ESP_LOG_ERROR;   break;
+        case 2:  level = ESP_LOG_WARN;    break;
+        case 3:  level = ESP_LOG_INFO;    break;
+        case 4:  level = ESP_LOG_DEBUG;   break;
+        case 5:  level = ESP_LOG_VERBOSE; break;
+        default: level = ESP_LOG_INFO;    break;
     }
-    // Remove forced override - respect the configured debug level
-    
-    // NEVER allow ESP_LOG_NONE to preserve critical logging infrastructure
-    esp_log_level_set("HAL_INIT", ESP_LOG_ERROR);	
-    
-    // Apply to all ESP32 HAL modules
-    // UART_DROP messages are too spammy and ESP-IDF doesn't distinguish per-UART
-    // Since console drops are expected when debugging is verbose, suppress all UART_DROP
-    esp_log_level_set("UART_DROP", ESP_LOG_NONE);  // Always suppress
-    esp_log_level_set("UART0", ESP_LOG_NONE);      // Always suppress UART0
-    esp_log_level_set("uart", ESP_LOG_NONE);       // Suppress lowercase variant
-    
-    // Only apply level to non-suppressed UART modules
-    if (level > ESP_LOG_WARN) {
-        esp_log_level_set("UART_TICK", level);
-        esp_log_level_set("UART_WRITE_DATA", level);
-        esp_log_level_set("UART_HW", level);
-    } else {
-        // Keep UART internals quiet unless verbose
+
+    // Set global default FIRST -- all tags inherit this
+    esp_log_level_set("*", level);
+
+    // Suppress known-spammy tags regardless of global level
+    esp_log_level_set("UART_DROP", ESP_LOG_NONE);
+    esp_log_level_set("UART_FLOW", ESP_LOG_NONE);
+
+    // UART internals only at DEBUG or above (very high frequency)
+    if (level < ESP_LOG_DEBUG) {
         esp_log_level_set("UART_TICK", ESP_LOG_WARN);
         esp_log_level_set("UART_WRITE_DATA", ESP_LOG_WARN);
-        esp_log_level_set("UART_HW", ESP_LOG_WARN);
     }
-    esp_log_level_set("MUTEX", level);
-    esp_log_level_set("ESP32", ESP_LOG_WARN);      // Reduced - DNA issues resolved
-    esp_log_level_set("HAL", level);
-    esp_log_level_set("SCHED", level);
 
-    // Important initialization messages should always be visible
-    esp_log_level_set("SCHEDULER", ESP_LOG_INFO);
-    esp_log_level_set("CONSOLE", ESP_LOG_INFO);
-    esp_log_level_set("CANMANAGER", ESP_LOG_INFO);
-    esp_log_level_set("GPS", ESP_LOG_INFO);       // GPS detection and status
-    esp_log_level_set("GPS_UART", ESP_LOG_INFO);  // GPS UART communication
-    esp_log_level_set("STATUSTEXT", ESP_LOG_INFO); // STATUSTEXT corruption debugging
-    esp_log_level_set("AP_FS_ESP32", ESP_LOG_INFO); // Filesystem operations debugging
-    esp_log_level_set("ESP32_SPIFFS", ESP_LOG_INFO); // SPIFFS operations debugging
+    // Per-module overrides from hwdef.dat (define ESP32_LOG_LEVEL_<MODULE> <0-5>)
+    // These use the same 0-5 scale as ESP32_DEFAULT_LOG_LEVEL.
+    // Only modules explicitly defined in hwdef.dat get overridden.
+#ifdef ESP32_LOG_LEVEL_CAN
+    {
+        esp_log_level_t can_level = (esp_log_level_t)ESP32_LOG_LEVEL_CAN;
+        esp_log_level_set("CAN", can_level);
+        esp_log_level_set("TWAI_RX", can_level);
+        esp_log_level_set("TWAI_TX", can_level);
+        esp_log_level_set("CAN_HEALTH", can_level);
+    }
+#endif
+#ifdef ESP32_LOG_LEVEL_UART
+    {
+        esp_log_level_t uart_level = (esp_log_level_t)ESP32_LOG_LEVEL_UART;
+        esp_log_level_set("UART_TICK", uart_level);
+        esp_log_level_set("UART_WRITE_DATA", uart_level);
+    }
+#endif
+#ifdef ESP32_LOG_LEVEL_SCHEDULER
+    {
+        esp_log_level_t sched_level = (esp_log_level_t)ESP32_LOG_LEVEL_SCHEDULER;
+        esp_log_level_set("SCHEDULER", sched_level);
+        esp_log_level_set("MAIN", sched_level);
+        esp_log_level_set("WDT", sched_level);
+        esp_log_level_set("SCHED_WDT", sched_level);
+        esp_log_level_set("ESP32_CPU", sched_level);
+    }
+#endif
+#ifdef ESP32_LOG_LEVEL_STORAGE
+    esp_log_level_set("STORAGE", (esp_log_level_t)ESP32_LOG_LEVEL_STORAGE);
+#endif
+#ifdef ESP32_LOG_LEVEL_OTA
+    {
+        esp_log_level_t ota_level = (esp_log_level_t)ESP32_LOG_LEVEL_OTA;
+        esp_log_level_set("OTA", ota_level);
+        esp_log_level_set("OTA_FTP", ota_level);
+    }
+#endif
 
-    // CAN/DroneCAN debugging - reduced after resolving DNA issues (keep unknown message logging)
-    esp_log_level_set("CAN", ESP_LOG_INFO);        // Show CAN info for debugging
-    esp_log_level_set("CAN_RX", ESP_LOG_INFO);     // Show unknown message rejection logging
-    esp_log_level_set("CAN_TX", ESP_LOG_INFO);     // Show TX info for debugging
-    esp_log_level_set("CAN_SEND", ESP_LOG_INFO);   // Show send queue info
-    esp_log_level_set("DRONECAN", ESP_LOG_INFO);   // Show DroneCAN info
-    esp_log_level_set("CANARD", ESP_LOG_WARN);     // Reduced - DNA issues resolved
-    esp_log_level_set("DNA_SERVER", ESP_LOG_INFO); // Enable for magic number diagnostic
-    esp_log_level_set("DNA_HEX", ESP_LOG_INFO); // Enable DNA hex debugging for manual decode
-    esp_log_level_set("TWAI_RX", ESP_LOG_INFO);    // TWAI receive debugging
-    esp_log_level_set("TWAI_TX", ESP_LOG_INFO);    // TWAI transmit debugging
-    esp_log_level_set("TWAI_BUG", ESP_LOG_INFO);   // TWAI bug detection
-    esp_log_level_set("GETNODEINFO", ESP_LOG_WARN); // Reduced - DNA issues resolved
-    esp_log_level_set("NODESTATUS", ESP_LOG_WARN);  // Reduced - DNA issues resolved
-    esp_log_level_set("DNA", ESP_LOG_INFO);         // DNA allocation protocol
-    esp_log_level_set("DNA_DB", ESP_LOG_INFO);      // DNA database operations
-    esp_log_level_set("DNA_HEALTH", ESP_LOG_WARN);  // Node health transitions
-    esp_log_level_set("CAN_HEALTH", ESP_LOG_WARN);  // CAN health monitoring
-    esp_log_level_set("BATTERY", ESP_LOG_INFO);     // Battery monitor debugging
-
-    // OTA and system tags
-    esp_log_level_set("OTA", ESP_LOG_INFO);
-    esp_log_level_set("OTA_FTP", ESP_LOG_INFO);
-    esp_log_level_set("WDT", ESP_LOG_WARN);
-    esp_log_level_set("SCHED_WDT", ESP_LOG_WARN);
-
-    // Apply global default for any unspecified tags
-    esp_log_level_set("*", level);
-    
-    // Enable GCS parameter debug messages
-    esp_log_level_set("GCS_PARAM", ESP_LOG_INFO);
-
-    // ESP32 CPU statistics (only appears in debug builds)
-    esp_log_level_set("ESP32_CPU", ESP_LOG_INFO);
-
-    // Enable storage debugging to diagnose persistence issues
-    esp_log_level_set("STORAGE", ESP_LOG_INFO);  // Show storage write success/failures
-    esp_log_level_set("PARAM", ESP_LOG_WARN);
-    
-    // MAVLink debugging - use INFO level to see warnings but avoid ERROR popups in QGC
-    esp_log_level_set("MAVLINK", ESP_LOG_INFO);     // Show info and warnings
-    esp_log_level_set("MAVLINK_RX", ESP_LOG_INFO);  // Show RX info and warnings
-    
-    // Debug: verify the logging configuration is applied
-    printf("ESP32: ESP32_DEBUG_LVL param=%d (configured=%d) -> ESP-IDF level=%d (%s)\n", 
-           debug_level.get(),
-           debug_level.configured(),
-           level, 
-           level == ESP_LOG_ERROR ? "ERROR" :
-           level == ESP_LOG_WARN ? "WARN" :
-           level == ESP_LOG_INFO ? "INFO" :
-           level == ESP_LOG_DEBUG ? "DEBUG" :
-           level == ESP_LOG_VERBOSE ? "VERBOSE" : "UNKNOWN");
-    
-    // Always suppress UART_DROP messages regardless of debug level
-    // These are too spammy when console buffer is full during verbose logging
-    esp_log_level_set("UART_DROP", ESP_LOG_NONE);
+    ESP_LOGI("ESP32", "Log level: %d (%s)",
+             level,
+             level == ESP_LOG_ERROR   ? "ERROR" :
+             level == ESP_LOG_WARN    ? "WARN" :
+             level == ESP_LOG_INFO    ? "INFO" :
+             level == ESP_LOG_DEBUG   ? "DEBUG" :
+             level == ESP_LOG_VERBOSE ? "VERBOSE" : "?");
 }
 
 } // namespace ESP32

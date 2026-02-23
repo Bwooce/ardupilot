@@ -133,6 +133,30 @@ define WIFI_SSID "MyDrone"
 define WIFI_PWD "password123"
 ```
 
+### ESP-IDF Logging Configuration
+
+ESP-IDF log output (`ESP_LOGI`, `ESP_LOGW`, etc.) is controlled centrally in
+`ESP32_Params::apply_log_level()`. The global level is set via:
+
+```bash
+# In hwdef.dat -- compile-time default (0=Error..5=Verbose, default 3=Info)
+define ESP32_DEFAULT_LOG_LEVEL 3
+```
+
+The user can override at runtime via the `ESP32_DEBUG_LVL` parameter.
+
+Per-module overrides (optional, same 0-5 scale):
+
+```bash
+define ESP32_LOG_LEVEL_CAN 4        # CAN, TWAI_RX, TWAI_TX, CAN_HEALTH
+define ESP32_LOG_LEVEL_UART 4       # UART_TICK, UART_WRITE_DATA
+define ESP32_LOG_LEVEL_SCHEDULER 2  # SCHEDULER, MAIN, WDT, SCHED_WDT, ESP32_CPU
+define ESP32_LOG_LEVEL_STORAGE 4    # STORAGE
+define ESP32_LOG_LEVEL_OTA 4        # OTA, OTA_FTP
+```
+
+Modules without an explicit override inherit the global `ESP32_DEFAULT_LOG_LEVEL`.
+
 ### Advanced: ESP-IDF Configuration
 
 The `hwdef.dat` file automatically generates `sdkconfig`. If you need to override low-level ESP-IDF settings (like compiler flags or RTOS tweaks), you can add a `sdkconfig.board` file in your board directory, but most common settings are handled by `esp32_hwdef.py`.
@@ -165,11 +189,62 @@ See `libraries/AP_HAL_ESP32/hwdef/esp32s3devkit/hwdef.dat` for the exact pinout.
 
 * Motors 1-4: GPIO 25, 27, 33, 32
 
-## 5. Debugging
+## 5. Console Output (hal.console)
+
+### How ArduPilot Console I/O Works on ESP32
+
+ArduPilot's `hal.console->printf()` does NOT use stdout/printf. It goes through:
+
+```
+hal.console->printf() -> UARTDriver::vprintf() -> UARTDriver::_write()
+  -> _writebuf (ring buffer) -> _timer_tick() -> write_data()
+  -> usb_serial_jtag_write_bytes()  [USB boards]
+  -> uart_tx_chars()                [UART boards]
+```
+
+ESP-IDF logging (`ESP_LOGI` etc.) goes through a completely separate path:
+
+```
+ESP_LOGI() -> vprintf() -> stdout -> VFS -> usb_serial_jtag LL functions
+```
+
+### USB-Serial/JTAG Console (ESP32-S3)
+
+On ESP32-S3 boards using the internal USB-Serial/JTAG peripheral (no external
+USB-UART bridge chip), the console is configured with:
+
+```
+define HAL_ESP32_USE_USB_CONSOLE 1          # in hwdef.dat
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y        # in sdkconfig.defaults
+```
+
+When `HAL_ESP32_USE_USB_CONSOLE` is set, UARTDriver(0) uses
+`usb_serial_jtag_driver_install()` instead of the regular UART driver.
+After installing, `usb_serial_jtag_vfs_use_driver()` is called to unify
+ESP-IDF log output and ArduPilot console output through the same driver,
+preventing them from competing for the USB hardware.
+
+### Key Requirement: hal.serial(0)->begin()
+
+The console MUST be initialized with `hal.serial(0)->begin(115200)` in
+`HAL_ESP32_Class::run()` before any `hal.console->printf()` calls. Without
+this, `UARTDriver::_initialized` stays false and `_write()` silently
+drops all output. This matches what ChibiOS does in `HAL_ChibiOS_Class.cpp`.
+
+The baud rate is irrelevant for USB (USB is packet-based), but `begin()`
+triggers `_begin()` which installs the USB driver and sets `_initialized`.
+
+### UART Console (ESP32 Classic)
+
+Boards without USB-Serial/JTAG (ESP32 classic with external USB-UART bridge)
+use standard UART0 for the console. `HAL_ESP32_USE_USB_CONSOLE` should NOT
+be defined for these boards.
+
+## 6. Debugging
 
 See `README.s3.debug.howto.md` for detailed JTAG/OpenOCD debugging instructions.
 
-### Analyzing Core Dumps
+### Core Dumps
 
 If the firmware crashes, it may output a base64-encoded core dump to the console.
 

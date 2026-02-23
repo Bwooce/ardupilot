@@ -69,8 +69,6 @@ bool esp32_spiffs_init(void)
         return true;
     }
 
-    // Use GCS message to avoid stack overflow
-    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "ESP32: Initializing SPIFFS");
     ESP_LOGI(TAG, "Initializing SPIFFS for OTA updates only");
 
     // Configure SPIFFS with optimizations for fast startup

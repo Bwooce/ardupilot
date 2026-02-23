@@ -215,15 +215,11 @@ void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
     // Initialize ESP log redirection to MAVLink if needed
     esp32_log_redirect_init();
     
-    // Force a test message to verify redirect is working
+    // Log redirect status via ESP-IDF (GCS may not be initialized yet)
     if (ESP32::esp32_params()->log_to_mavlink.get()) {
-        ESP_LOGI("TEST", "ESP32 log redirect ACTIVE");
-        // Also send directly as CRITICAL to ensure it gets through
-        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "ESP32: Log redirect enabled=%d", 
-                     (int)ESP32::esp32_params()->log_to_mavlink.get());
+        ESP_LOGI("ESP32", "Log redirect to MAVLink ACTIVE");
     } else {
-        // Send message that redirect is disabled
-        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "ESP32: Log redirect DISABLED");
+        ESP_LOGI("ESP32", "Log redirect to MAVLink DISABLED");
     }
     
     // Initialize SPIFFS filesystem for OTA updates only
@@ -235,16 +231,14 @@ void HAL_ESP32::run(int argc, char * const argv[], Callbacks* callbacks) const
         ESP_LOGI("HAL", "SPIFFS mounted for OTA updates only");
     }
 
-    // Debug via MAVLink STATUSTEXT - safe from serial contamination
-    ESP32_DEBUG_INFO("HAL run starting with callbacks");
+    // Initialize console serial port (like ChibiOS does in HAL_ChibiOS_Class.cpp)
+    // This is required for hal.console->printf() output to work.
+    // Without this, UARTDriver::_initialized stays false and all writes are dropped.
+    // DEFAULT_SERIAL0_BAUD is set in hwdef.h (default 115200, override in hwdef.dat)
+    hal.serial(0)->begin(DEFAULT_SERIAL0_BAUD);
+
     ((ESP32::Scheduler *)hal.scheduler)->set_callbacks(callbacks);
-    ESP32_DEBUG_INFO("Calling scheduler init");
     hal.scheduler->init();
-    ESP32_DEBUG_INFO("Scheduler init completed - ESP32 tasks created");
-    ESP32_DEBUG_VERBOSE("ESP32 scheduler uses FreeRTOS tasks, main loop in _main_thread");
-    
-    ESP32_DEBUG_INFO("ArduPilot HAL setup complete - entering infinite loop");
-    ESP32_DEBUG_INFO("Main ArduPilot logic now running in FreeRTOS tasks");
     
     // ESP32 HAL: Keep the main ESP-IDF task alive
     // The actual ArduPilot main loop runs in the _main_thread FreeRTOS task

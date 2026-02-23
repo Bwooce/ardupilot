@@ -72,6 +72,17 @@
     } \
 } while(0)
 
+// Safe GCS_SEND_TEXT that checks for GCS singleton before sending.
+// Use in ESP32 HAL code that runs before the application's setup()
+// has instantiated a GCS (e.g. HAL_ESP32::run, Scheduler init, SPIFFS init).
+// Simple examples that don't link GCS_Dummy would otherwise crash.
+#include <GCS_MAVLink/GCS.h>
+#define GCS_SEND_TEXT_SAFE(severity, fmt, args...) do { \
+    if (GCS::get_singleton() != nullptr) { \
+        GCS_SEND_TEXT(severity, fmt, ##args); \
+    } \
+} while(0)
+
 // Heap monitoring functions for debug builds
 #if !ESP32_DEBUG_DISABLED && ESP32_DEBUG_MODE
 void esp32_debug_init_heap_monitoring(void);

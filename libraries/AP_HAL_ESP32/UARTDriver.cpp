@@ -89,23 +89,16 @@ UARTDriver::UARTDriver(uint8_t serial_num)
     _is_usb_console = false;
 #endif
     
-    // ESP log level will be controlled by ESP32_DEBUG_LVL parameter
-    // Suppress UART drop messages - they're too spammy and not useful
-    esp_log_level_set("UART_DROP", ESP_LOG_NONE);
-    esp_log_level_set("UART_FLOW", ESP_LOG_NONE);
+    // Log levels controlled centrally by ESP32_Params::apply_log_level()
 }
 
 void UARTDriver::vprintf(const char *fmt, va_list ap)
 {
-    // Serialize console output from multiple tasks, but only after _begin()
-    // has run -- before that the FreeRTOS scheduler may not be running yet
-    if (_initialized) {
-        _write_mutex.take_blocking();
-        AP_HAL::UARTDriver::vprintf(fmt, ap);
-        _write_mutex.give();
-    } else {
-        AP_HAL::UARTDriver::vprintf(fmt, ap);
-    }
+    // Don't take _write_mutex here -- the base class vprintf() calls _write()
+    // which already takes the mutex for buffer protection. Double-locking
+    // causes deadlock on non-recursive mutexes (SERIAL1+).
+    // Per-chunk atomicity from _write() is sufficient; other HALs behave the same.
+    AP_HAL::UARTDriver::vprintf(fmt, ap);
 }
 
 void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
@@ -139,6 +132,16 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
             usb_config.rx_buffer_size = RX_BUF_SIZE;
             usb_config.tx_buffer_size = TX_BUF_SIZE;
             usb_serial_jtag_driver_install(&usb_config);
+            // Tell VFS to route stdout/stderr through the driver instead of
+            // using LL functions directly. Without this, ESP_LOG output
+            // (which goes through VFS/stdout) and hal.console output (which
+            // goes through usb_serial_jtag_write_bytes) compete for the
+            // same USB hardware.
+    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+            usb_serial_jtag_vfs_use_driver();
+    #else
+            esp_vfs_usb_serial_jtag_use_driver();
+    #endif
         } else
 #endif
         {

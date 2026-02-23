@@ -104,23 +104,28 @@ static void test_printf_floats(void)
     hal.console->printf("%u failures\n", (unsigned)failures);
 }
 
-// test_printf_null_termination(void) : tests the printf() and the snprintf() function against a char sequence and whether they consider the terminating null character '\0' 
+// test_printf_null_termination(void) : tests the printf() and the snprintf() function against a char sequence and whether they consider the terminating null character '\0'
 static void test_printf_null_termination(void)
 {
     hal.console->printf("Starting Printf null-termination tests\n");
     // 10 bytes long char buffer(Expected length of string : 9)
     char buf[10];
-    // create a format string(buf) in accordance with "ABCDEABCDE" and length of buf[]  
+    // create a format string(buf) in accordance with "ABCDEABCDE" and length of buf[]
     int ret = hal.util->snprintf(buf,sizeof(buf), "%s", "ABCDEABCDE");    //For more info, see : http://www.cplusplus.com/reference/cstdio/snprintf/
-    // store the expected length of string
-    const int want = 9;
+
+    // hal.util->snprintf() uses ArduPilot's BufferPrinter which counts all
+    // characters even past the buffer end, matching C99 snprintf behavior:
+    // returns the number of characters that *would have been written* if the
+    // buffer were unlimited (excluding null terminator).
+    // "ABCDEABCDE" is 10 chars, so the return value is 10 despite truncation.
+    const int want = 10;
     // comparing the results of the snprintf() function :
     //  1. check whether the expected length of the string is equal to the buffer(buf) length or not
     if (ret != want) {
         hal.console->printf("snprintf returned %d expected %d\n", ret, want);
     }
     //  2. check whether the buffer(buf) is equal to "ABCDEABCD" or not
-    if (!strncmp(buf, "ABCDEABCD", sizeof(buf))) {
+    if (strncmp(buf, "ABCDEABCD", sizeof(buf)) != 0) {
         hal.console->printf("Bad snprintf string (%s)\n", buf);
     }
 }

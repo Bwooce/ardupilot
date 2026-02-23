@@ -526,6 +526,19 @@ class ESP32HWDef(hwdef.HWDef):
             f.write("#undef HAL_GCS_ENABLED\n")
             f.write("#define HAL_GCS_ENABLED 1\n")
 
+        # Default console baud rate (board can override via
+        # 'define DEFAULT_SERIAL0_BAUD <rate>' in hwdef.dat)
+        if 'DEFAULT_SERIAL0_BAUD' not in self.intdefines:
+            f.write("#undef DEFAULT_SERIAL0_BAUD\n")
+            f.write("#define DEFAULT_SERIAL0_BAUD 115200\n")
+
+        # Default ESP-IDF log level for ESP32_DEBUG_LVL parameter
+        # 0=Errors, 1=Errors, 2=Warnings, 3=Info, 4=Debug, 5=Verbose
+        # Board can override via 'define ESP32_DEFAULT_LOG_LEVEL <n>' in hwdef.dat
+        if 'ESP32_DEFAULT_LOG_LEVEL' not in self.intdefines:
+            f.write("#undef ESP32_DEFAULT_LOG_LEVEL\n")
+            f.write("#define ESP32_DEFAULT_LOG_LEVEL 3\n")
+
         # Add standard TRUE/FALSE constants for compatibility
         f.write("#undef TRUE\n")
         f.write("#define TRUE 1\n")
@@ -855,15 +868,21 @@ class ESP32HWDef(hwdef.HWDef):
                     config_lines.append(
                         f"# CONFIG_ESPTOOLPY_FLASHSIZE_{size}MB "
                         f"is not set")
+            config_lines.append(
+                f'CONFIG_ESPTOOLPY_FLASHSIZE="{self.flash_size_mb}MB"')
 
         # Partition table configuration
         if self.partition_table_filename:
+            # Use absolute path so cmake finds the board copy in the
+            # build dir, not the target-level one in the source tree
+            abs_path = os.path.join(self.outdir,
+                                    self.partition_table_filename)
             self.progress(f"Using board-specific partition table: "
-                          f"{self.partition_table_filename}")
+                          f"{abs_path}")
             config_lines.append("CONFIG_PARTITION_TABLE_CUSTOM=y")
             config_lines.append(
                 f'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME='
-                f'"{self.partition_table_filename}"')
+                f'"{abs_path}"')
             config_lines.append("CONFIG_PARTITION_TABLE_OFFSET=0x8000")
         else:
             self.progress("Using default partition table for chip type")
@@ -894,13 +913,22 @@ class ESP32HWDef(hwdef.HWDef):
             config_lines.append("CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y")
 
         if self.has_psram():
-            self.progress("Generating ESP-IDF PSRAM configuration")
-            config_lines.append(
-                "# SPIRAM configuration handled automatically "
-                "by ESP-IDF 5.5+")
+            mode = self.psram_config.get('mode', 'OPI').upper()
+            self.progress("Generating ESP-IDF PSRAM configuration "
+                          "(mode=%s)" % mode)
+            config_lines.append("CONFIG_SPIRAM=y")
+            config_lines.append("CONFIG_SPIRAM_TYPE_AUTO=y")
+            if mode == 'QPI' or mode == 'QUAD':
+                config_lines.append("CONFIG_SPIRAM_MODE_QUAD=y")
+                config_lines.append(
+                    "# CONFIG_SPIRAM_MODE_OCT is not set")
+            else:
+                config_lines.append("CONFIG_SPIRAM_MODE_OCT=y")
+                config_lines.append(
+                    "# CONFIG_SPIRAM_MODE_QUAD is not set")
         else:
-            self.progress("No PSRAM configured - using ESP-IDF 5.5+ "
-                          "defaults")
+            self.progress("No PSRAM configured - disabling SPIRAM")
+            config_lines.append("# CONFIG_SPIRAM is not set")
 
         # ESP32 Memory Protection and Debugging Configuration
         debug_mode = '1'  # Default to debug mode for safety
@@ -920,9 +948,12 @@ class ESP32HWDef(hwdef.HWDef):
                 "CONFIG_HEAP_POISONING_COMPREHENSIVE=y")
             config_lines.append(
                 "# CONFIG_HEAP_POISONING_LIGHT is not set")
-            config_lines.append("CONFIG_HEAP_TRACING=y")
-            config_lines.append("CONFIG_HEAP_TRACING_STACK_DEPTH=10")
-            config_lines.append("CONFIG_HEAP_TASK_TRACKING=y")
+            # HEAP_TASK_TRACKING disabled: crashes during early
+            # UART init with null deref in xTaskRemoveFromEventList
+            # called from heap_caps_update_per_task_info_alloc.
+            # HEAP_TRACING also disabled (depends on task tracking).
+            config_lines.append(
+                "# CONFIG_HEAP_TRACING is not set")
             config_lines.append(
                 "CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y")
             config_lines.append(

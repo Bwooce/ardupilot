@@ -13,6 +13,7 @@
 
 #include "ESP32_CrashDiagnostics.h"
 #include "ESP32_RTC_Breadcrumbs.h"
+#include "ESP32_Debug.h"
 #include <AP_HAL/AP_HAL.h>
 #include <GCS_MAVLink/GCS.h>
 
@@ -69,7 +70,7 @@ void esp32_check_and_report_coredump(void)
     }
     if (err != ESP_OK) {
         // Core dump exists but is corrupt
-        GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
+        GCS_SEND_TEXT_SAFE(MAV_SEVERITY_WARNING,
                       "Coredump: stored but corrupt (0x%lX)",
                       (unsigned long)err);
         // Erase the corrupt dump so we don't report it every boot
@@ -78,7 +79,7 @@ void esp32_check_and_report_coredump(void)
     }
 
     // Valid core dump found -- report it
-    GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,
+    GCS_SEND_TEXT_SAFE(MAV_SEVERITY_CRITICAL,
                   "Coredump: previous crash detected");
 
 // IDF 6.0 removed CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF (ELF is the only format)
@@ -89,14 +90,14 @@ void esp32_check_and_report_coredump(void)
     if (err == ESP_OK) {
         // STATUSTEXT text field is 50 chars; "Panic: " = 7 chars
         reason[43] = '\0';
-        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Panic: %s", reason);
+        GCS_SEND_TEXT_SAFE(MAV_SEVERITY_CRITICAL, "Panic: %s", reason);
     }
 
     // Get structured summary with task name, PC, and backtrace
     esp_core_dump_summary_t *summary =
         (esp_core_dump_summary_t *)malloc(sizeof(esp_core_dump_summary_t));
     if (summary == nullptr) {
-        GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
+        GCS_SEND_TEXT_SAFE(MAV_SEVERITY_WARNING,
                       "Coredump: no RAM for summary");
         return;
     }
@@ -104,7 +105,7 @@ void esp32_check_and_report_coredump(void)
     err = esp_core_dump_get_summary(summary);
     if (err == ESP_OK) {
         // Report crashing task and PC
-        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,
+        GCS_SEND_TEXT_SAFE(MAV_SEVERITY_CRITICAL,
                       "Crash task: %s  PC: 0x%08lX",
                       summary->exc_task,
                       (unsigned long)summary->exc_pc);
@@ -113,13 +114,13 @@ void esp32_check_and_report_coredump(void)
         const char *cause_str = exc_cause_name(summary->ex_info.exc_cause);
         if (cause_str) {
             // "Exc: LoadProhibit(28) @0x12345678" = ~35 chars
-            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,
+            GCS_SEND_TEXT_SAFE(MAV_SEVERITY_CRITICAL,
                           "Exc: %s(%lu) @0x%08lX",
                           cause_str,
                           (unsigned long)summary->ex_info.exc_cause,
                           (unsigned long)summary->ex_info.exc_vaddr);
         } else {
-            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,
+            GCS_SEND_TEXT_SAFE(MAV_SEVERITY_CRITICAL,
                           "Exc: cause=%lu @0x%08lX",
                           (unsigned long)summary->ex_info.exc_cause,
                           (unsigned long)summary->ex_info.exc_vaddr);
@@ -142,15 +143,15 @@ void esp32_check_and_report_coredump(void)
                                     " 0x%08lX",
                                     (unsigned long)summary->exc_bt_info.bt[j]);
                 }
-                GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "%s", bt_msg);
+                GCS_SEND_TEXT_SAFE(MAV_SEVERITY_CRITICAL, "%s", bt_msg);
             }
         } else if (summary->exc_bt_info.corrupted) {
-            GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
+            GCS_SEND_TEXT_SAFE(MAV_SEVERITY_WARNING,
                           "Coredump: backtrace corrupted");
         }
 
         // Report ELF SHA so user can match dump to binary
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO,
+        GCS_SEND_TEXT_SAFE(MAV_SEVERITY_INFO,
                       "ELF SHA: %.16s",
                       (const char *)summary->app_elf_sha256);
 
@@ -169,7 +170,7 @@ void esp32_check_and_report_coredump(void)
                      (unsigned long)summary->exc_bt_info.bt[i]);
         }
     } else {
-        GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
+        GCS_SEND_TEXT_SAFE(MAV_SEVERITY_WARNING,
                       "Coredump: summary read failed (0x%lX)",
                       (unsigned long)err);
     }
@@ -180,16 +181,16 @@ void esp32_check_and_report_coredump(void)
     // Report core dump size for reference
     size_t addr = 0, size = 0;
     if (esp_core_dump_image_get(&addr, &size) == ESP_OK) {
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO,
+        GCS_SEND_TEXT_SAFE(MAV_SEVERITY_INFO,
                       "Coredump: %lu bytes at flash 0x%lX",
                       (unsigned long)size, (unsigned long)addr);
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO,
+        GCS_SEND_TEXT_SAFE(MAV_SEVERITY_INFO,
                       "Retrieve: idf.py coredump-info -p PORT");
     }
 
     // Erase the dump after reporting so we don't report it every boot
     esp_core_dump_image_erase();
-    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Coredump: erased after report");
+    GCS_SEND_TEXT_SAFE(MAV_SEVERITY_INFO, "Coredump: erased after report");
 
 #else  // !CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
     // Core dump not enabled in this build

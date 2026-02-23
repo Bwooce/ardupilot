@@ -38,6 +38,7 @@
 #include <AP_Common/ExpandingString.h>
 
 #include "esp_mac.h"
+#include "esp_random.h"
 // Note: Custom MAC support temporarily disabled due to build issues with esp_efuse.h
 // Will be re-enabled once ESP-IDF include paths are fixed
 
@@ -255,6 +256,17 @@ bool Util::get_system_id_unformatted(uint8_t buf[], uint8_t &len)
     len = MIN(len, ARRAY_SIZE(base_mac_addr));
     memcpy(buf, (const void *)base_mac_addr, len);
 
+    return true;
+}
+
+// fill a buffer with random values using ESP32 hardware RNG
+bool Util::get_random_vals(uint8_t *data, size_t size)
+{
+    if (data == nullptr || size == 0) {
+        return false;
+    }
+    // esp_fill_random() uses the hardware RNG and is safe to call from any context
+    esp_fill_random(data, size);
     return true;
 }
 

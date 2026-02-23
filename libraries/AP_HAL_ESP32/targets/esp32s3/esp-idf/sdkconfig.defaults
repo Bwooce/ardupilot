@@ -20,8 +20,9 @@ CONFIG_ESP_SLEEP_FLASH_LEAKAGE_WORKAROUND=n
 CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND=n
 CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# WDT configuration is set per-board by the hwdef generator (debug vs production).
+# Do NOT set CONFIG_ESP_TASK_WDT_INIT here -- it would conflict with board config.
 CONFIG_ESP_INT_WDT=n
-CONFIG_ESP_TASK_WDT_INIT=n
 CONFIG_ESP_IPC_TASK_STACK_SIZE=1536
 CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_1=y
 CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE=n
@@ -58,10 +59,9 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 # Enable after verifying the board's flash supports auto-suspend.
 # CONFIG_SPI_FLASH_AUTO_SUSPEND=y
 # PSRAM Configuration for ESP32-S3
-# The T-Connect has 8MB OPI PSRAM (Octal SPI)
+# Mode (QUAD vs OCT) is set per-board in sdkconfig.board by the hwdef generator.
+# Do NOT set CONFIG_SPIRAM_MODE_* here -- it would override board-specific config.
 CONFIG_SPIRAM=y
-CONFIG_SPIRAM_MODE_OCT=y
-# CONFIG_SPIRAM_MODE_QUAD is not set
 CONFIG_SPIRAM_TYPE_AUTO=y
 # Configure ESP-IDF to use USB-Serial/JTAG as primary console
 # This prevents UART0 buffer overflow when no external UART is connected

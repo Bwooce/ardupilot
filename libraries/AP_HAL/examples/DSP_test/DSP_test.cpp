@@ -6,13 +6,7 @@
 #include <AP_Logger/AP_Logger.h>
 #include <AP_InertialSensor/AP_InertialSensor.h>
 
-#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
 #include "GyroFrame.h"
-#else
-// ESP32: GyroFrame data is 220KB, too large for flash.
-// Define SAMPLE_RATE locally (matches GyroFrame.cpp value).
-static const uint16_t SAMPLE_RATE = 999;
-#endif
 
 #if HAL_WITH_DSP
 const AP_HAL::HAL &hal = AP_HAL::get_HAL();
@@ -34,10 +28,8 @@ static AP_HAL::DSP::FFTWindowState* fft;
 void setup();
 void loop();
 void run_synthetic_fft_tests();
-#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
 void update();
 void do_fft(const float* data);
-#endif
 
 static AP_SerialManager serial_manager;
 static AP_BoardConfig board_config;
@@ -67,9 +59,7 @@ public:
 // create fake gcs object
 GCS_Dummy _gcs;
 
-#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
 uint32_t frame_num = 0;
-#endif
 
 void setup()
 {
@@ -123,6 +113,31 @@ void run_synthetic_fft_tests()
         }
         hal.dsp->fft_start(fft, test_buf, WINDOW_SIZE);
         hal.dsp->fft_analyse(fft, 1, last_bin, attenuation_cutoff);
+
+        // Dump magnitude spectrum for diagnosis (yield to avoid WDT)
+        hal.scheduler->delay(1);
+        float max_mag = 0;
+        uint16_t max_bin = 0;
+        for (uint16_t b = 0; b <= WINDOW_SIZE/2; b++) {
+            if (fft->_freq_bins[b] > max_mag) {
+                max_mag = fft->_freq_bins[b];
+                max_bin = b;
+            }
+        }
+        hal.console->printf("DSP_test: max_bin=%u(%.1fHz) center_bin=%u center_freq=%.1f\n",
+                           (unsigned)max_bin, max_bin * bin_resolution,
+                           (unsigned)fft->_peak_data[AP_HAL::DSP::CENTER]._bin,
+                           fft->_peak_data[AP_HAL::DSP::CENTER]._freq_hz);
+        hal.scheduler->delay(1);
+        // Print top 20 bins compactly
+        for (uint16_t b = 0; b < 20; b++) {
+            hal.console->printf(" [%u]=%.0f", (unsigned)b, fft->_freq_bins[b]);
+            if (b % 5 == 4) {
+                hal.console->printf("\n");
+                hal.scheduler->delay(1);
+            }
+        }
+
         float detected = fft->_peak_data[AP_HAL::DSP::CENTER]._freq_hz;
         bool ok = fabsf(detected - frequency1) < bin_resolution;
         hal.console->printf("DSP_test: Single freq %.0fHz -> detected %.1fHz [%s]\n",
@@ -177,7 +192,6 @@ void run_synthetic_fft_tests()
 }
 
 
-#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
 void do_fft(const float* data)
 {
     fft_window.push(data, WINDOW_SIZE);
@@ -218,12 +232,14 @@ void update()
 {
     for (uint16_t i = 0; i < FRAME_SIZE / WINDOW_SIZE; i++) {
         do_fft(&gyro_frames[frame_num].x[i * WINDOW_SIZE]);
+        hal.scheduler->delay(1);  // yield to prevent WDT timeout on ESP32
     }
     if (++frame_num > NUM_FRAMES) {
+#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
         exit(0);
+#endif
     };
 }
-#endif // CONFIG_HAL_BOARD != HAL_BOARD_ESP32
 
 void loop()
 {
@@ -231,7 +247,18 @@ void loop()
         return;
     }
 
-#if CONFIG_HAL_BOARD != HAL_BOARD_ESP32
+    // re-run synthetic tests once (setup output may be lost during USB reconnect)
+    static bool synth_rerun = false;
+    if (!synth_rerun) {
+        run_synthetic_fft_tests();
+        synth_rerun = true;
+    }
+
+    if (frame_num > NUM_FRAMES) {
+        hal.scheduler->delay(1000);
+        return;
+    }
+
     uint32_t reference_time, run_time;
 
     hal.console->printf("--------------------\n");
@@ -245,10 +272,6 @@ void loop()
 
     // delay before next display
     hal.scheduler->delay(1e3); // 1 second
-#else
-    // ESP32: synthetic tests run once in setup(), just idle here
-    hal.scheduler->delay(10000);
-#endif
 }
 
 AP_HAL_MAIN();

@@ -28,6 +28,11 @@ define RTC_WDT_STG_SEL_RESET_RTC 4
 define CONFIG_HAL_BOARD_SUBTYPE 6008
 define HAL_ESP32_BOARD_NAME "esp32s3empty"
 
+
+# PSRAM Configuration - Wemos S3 Mini has 2MB QPI PSRAM
+PSRAM_SIZE 2MB
+PSRAM_MODE QPI
+FLASH_SIZE_MB 4
 # Sensor Configuration - All Disabled for Minimal Build
 # This template has no sensors configured to minimize memory usage and provide
 # a clean starting point for custom configurations
@@ -93,8 +98,8 @@ define AP_RCPROTOCOL_ENABLED 0
 # Logging is minimized to reduce memory usage in this template configuration
 define HAL_LOGGING_FILESYSTEM_ENABLED 0  # No filesystem logging
 define HAL_LOGGING_DATAFLASH_ENABLED 0   # No dataflash logging
-define HAL_LOGGING_MAVLINK_ENABLED 0     # No mavlink logging
-define HAL_LOGGING_BACKENDS_DEFAULT 1    # Basic logging backend
+define HAL_LOGGING_MAVLINK_ENABLED 1     # MAVLink logging only
+define HAL_LOGGING_BACKENDS_DEFAULT 2    # MAVLink backend (bit 1)
 define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
 define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
 define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"

@@ -34,9 +34,24 @@ if(EXISTS "$ENV{IDF_PATH}/components/esp_hal_wdt")
     list(APPEND AP_COMPONENTS esp_hal_wdt)
 endif()
 
-# esp-dsp for FFT/DSP support (managed component from idf_component.yml)
-if(EXISTS "${CMAKE_SOURCE_DIR}/managed_components/espressif__esp-dsp")
-    list(APPEND AP_COMPONENTS espressif__esp-dsp)
+# esp-dsp for FFT/DSP support via IDF component manager.
+#
+# ArduPilot uses idf.cmake directly (not project.cmake), so we must enable
+# the component manager explicitly. The component manager only resolves
+# dependencies from components that have BOTH CMakeLists.txt AND
+# idf_component.yml -- the ap_deps/ component serves as this trigger.
+#
+# idf.cmake defaults IDF_COMPONENT_MANAGER to 0; we set it to 1.
+# The component manager's Python code also requires IDF_TARGET as an
+# environment variable (normally set by idf.py; we must set it explicitly).
+set(AP_DEPS_DIR "${CMAKE_SOURCE_DIR}/ap_deps")
+if(EXISTS "${AP_DEPS_DIR}/idf_component.yml")
+    set(ENV{IDF_TARGET} esp32s3)
+    idf_build_set_property(IDF_COMPONENT_MANAGER 1)
+    idf_build_set_property(__COMPONENT_MANAGER_INTERFACE_VERSION 4)
+    idf_build_component(${AP_DEPS_DIR})
+    list(APPEND AP_COMPONENTS ap_deps)
+    message(STATUS "IDF component manager enabled (ap_deps trigger component)")
 endif()
 
 # Create idf::esp32 and idf::freertos static libraries
@@ -122,6 +137,13 @@ endif()
 # esp-dsp for FFT/DSP support
 if(TARGET idf::espressif__esp-dsp)
     list(APPEND AP_LINK_LIBS idf::espressif__esp-dsp)
+    # PicoLibC (IDF 6.0+) doesn't expose std::cos/std::sin/std::atan in <cmath>.
+    # The esp-dsp kalman module uses these. Force-include math.h and add using
+    # declarations so the std:: qualified names resolve to the global C versions.
+    if(EXISTS "${CMAKE_SOURCE_DIR}/picolibc_cmath_shim.h")
+        target_compile_options(__idf_espressif__esp-dsp PRIVATE
+            "-include" "${CMAKE_SOURCE_DIR}/picolibc_cmath_shim.h")
+    endif()
 endif()
 
 target_link_libraries(${elf_file} ${AP_LINK_LIBS})

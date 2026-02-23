@@ -139,3 +139,155 @@ A 32-tap FIR at 1kHz costs ~5-10us per sample batch (negligible).
 
 **Files:** `libraries/AP_HAL_ESP32/DSP.cpp` (new decimation step),
 `libraries/AP_GyroFFT/AP_GyroFFT.cpp` (sample collection)
+
+---
+
+## 7. S3 Vector Optimization for `dsps_cplx2real_fc32` -- the last scalar FFT step
+
+### Summary
+
+The real-FFT pipeline on ESP32-S3 is: `fft2r` (aes3 vectorized) -> `bit_rev2r` (aes3 vectorized) ->
+`cplx2real` (ae32 scalar only). The cplx2real step is the remaining non-vectorized link in the
+chain. Upstream esp-dsp has an aes3 version of `dsps_fft4r_fc32` (the radix-4 butterfly), but has
+**not** written an aes3 version of `dsps_cplx2real_fc32`.
+
+### Current Implementation: ae32 Scalar Assembly
+
+The function `dsps_cplx2real_fc32_ae32_()` lives in:
+`managed_components/espressif__esp-dsp/modules/fft/float/dsps_fft4r_fc32_ae32.c` (lines 142-251)
+
+The ANSI C reference is in:
+`managed_components/espressif__esp-dsp/modules/fft/float/dsps_fft4r_fc32_ansi.c` (lines 218-256)
+
+Platform dispatch is in:
+`managed_components/espressif__esp-dsp/modules/fft/include/dsps_fft4r_platform.h`
+`managed_components/espressif__esp-dsp/modules/fft/include/dsps_fft4r.h`
+
+All paths are relative to `libraries/AP_HAL_ESP32/targets/esp32s3/esp-idf/`.
+
+On ESP32-S3, the ae32 variant is selected because `dsps_fft4r_platform.h` defines
+`dsps_cplx2real_fc32_ae32_enabled` when `XCHAL_HAVE_FP && XCHAL_HAVE_LOOPS` (both true on S3).
+There is **no** `dsps_cplx2real_fc32_aes3_enabled` define anywhere in the upstream codebase, and
+no `dsps_cplx2real_fc32_aes3_()` function declaration or implementation exists.
+
+### What the Algorithm Does
+
+`dsps_cplx2real_fc32` converts the output of an N/2-point complex FFT into the N-point real FFT
+spectrum. It is the final post-processing step that "unfolds" the Hermitian-symmetric result.
+
+The algorithm processes N/4 iterations (the loop counter is `fft_points >> 2` where
+`fft_points = N/2`, so iterations = N/8 ... but the loop body processes 2 pairs per iteration,
+so it covers N/4 complex bins total). Each iteration:
+
+1. **Loads 8 floats**: 4 from the forward pointer (`data[k]` region) and 4 from the reverse
+   pointer (`data[N-k]` region), reading 2 consecutive complex pairs from each end.
+2. **Computes symmetric/antisymmetric decomposition**: For each pair (k, N-k):
+   - `f1k.re = data[k].re + data[N-k].re`  (even part, real)
+   - `f1k.im = data[k].im - data[N-k].im`  (even part, imag)
+   - `f2k.re = data[k].re - data[N-k].re`  (odd part, real)
+   - `f2k.im = data[k].im + data[N-k].im`  (odd part, imag)
+3. **Applies twiddle factor** (complex multiply of f2k by table entry):
+   - `tw.re = c * f2k.re - s * f2k.im`  (2x mul.s + 1x msub.s)
+   - `tw.im = s * f2k.re + c * f2k.im`  (2x mul.s + 1x madd.s)
+4. **Combines and scales by 0.5**:
+   - `result[k]   = 0.5 * (f1k + tw)`
+   - `result[N-k] = 0.5 * (f1k - tw)*`  (conjugated)
+5. **Stores 8 floats** back to both forward and reverse positions.
+
+The ae32 assembly uses scalar Xtensa FPU instructions: `lsi`/`ssi`/`ssip` for load/store,
+`add.s`/`sub.s`/`mul.s`/`madd.s`/`msub.s` for arithmetic, and `loopnez` for the hardware loop.
+It processes 2 complex pairs (4 bins: k, k+1, N-k-1, N-k) per loop iteration.
+
+### Inner Loop Instruction Count (ae32)
+
+Per loop iteration (2 complex pairs processed):
+- 8 `lsi` loads (scalar, 32-bit each)
+- 8 `ssi`/`ssip` stores (scalar, 32-bit each)
+- 4 `add.s` + 4 `sub.s` = 8 add/sub (symmetric decomposition)
+- 2 `lsi` twiddle loads per pair = 4 total
+- 4 `mul.s` + 2 `madd.s` + 2 `msub.s` = 8 multiply-accumulate (twiddle application)
+- 8 `mul.s` for the 0.5 scaling
+- 4 `add.s` + 4 `sub.s` = 8 final combine
+- 2 address updates (`addx8` for twiddle pointer, `addi` for data pointers)
+
+Total: ~12 loads + 8 stores + ~24 arithmetic + ~4 address ops = ~48 instructions per 4 bins.
+
+### S3 Vectorization Opportunity
+
+The ESP32-S3 `EE.LDF.64.IP` instruction loads two adjacent 32-bit floats in one cycle (a complex
+pair). `EE.STF.64.IP` stores two floats in one cycle. The ae32 code already operates on pairs
+of complex values per iteration, making the data layout naturally amenable to 64-bit load/stores.
+
+**What S3 vector instructions would help:**
+
+1. **`EE.LDF.64.IP` / `EE.STF.64.IP`**: Replace pairs of `lsi`/`ssi` scalar loads/stores
+   with single 64-bit operations. This cuts 8+8=16 scalar memory ops down to 4+4=8 vector
+   memory ops (the reverse-pointer loads are non-sequential so gain is partial; forward loads
+   and stores are contiguous and fully benefit).
+
+2. The arithmetic (`add.s`, `sub.s`, `mul.s`, `madd.s`, `msub.s`) remains scalar -- the S3 does
+   not have SIMD float add/mul that processes two independent floats in parallel (unlike
+   integer SIMD). The `EE.MULA.F32.LD` instruction can fuse a load with a multiply-accumulate,
+   potentially saving cycles by overlapping memory access with computation.
+
+**What would NOT help:**
+
+The S3 vector extensions are primarily 128-bit integer SIMD (Q registers for int8/int16
+operations, useful for neural networks). For 32-bit float, the vector benefit is limited to
+wider load/store and load-with-compute fusion. There is no float SIMD add that processes
+two f32 values simultaneously. The butterfly math is inherently sequential per complex element.
+
+### Expected Speedup
+
+**Conservative estimate: 15-30% cycle reduction** on the cplx2real step alone.
+
+The gain comes from:
+- ~2x memory bandwidth improvement on contiguous loads/stores (saves ~8 cycles per iteration)
+- Potential `EE.MULA.F32.LD` fusion saving ~2-4 cycles per iteration on twiddle application
+- Better pipeline scheduling with fewer instructions
+
+For context, the fft2r aes3 vs ae32 showed ~13% improvement on ESP32-S3 (8,999 vs ~10,342
+cycles for N=128). The fft4r aes3 showed 14% improvement (13,213 vs ~15,348 for N=256).
+The cplx2real function has a simpler loop structure with more contiguous memory access,
+so it may benefit slightly more from 64-bit loads.
+
+**Impact on ArduPilot's FFT pipeline:**
+
+ArduPilot uses window sizes of 32-256 (default 32-64 on ESP32). The cplx2real step processes
+N/2 complex points, so for N=256 that is 128 complex points = 32 loop iterations. At an
+estimated 48 cycles/iteration (ae32), the total is ~1,536 cycles = ~6.4us at 240MHz.
+
+A 25% improvement saves ~384 cycles = ~1.6us per FFT call. With FFT running at ~10-20Hz
+per axis and 3 axes, that is ~48-96us/sec saved -- negligible in absolute terms but it
+eliminates the last scalar bottleneck in the pipeline.
+
+The real value is that it makes cplx2real consistent with the rest of the FFT pipeline
+(all aes3-optimized), and any upstream contribution benefits the broader ESP32 ecosystem.
+
+### Upstream Status
+
+- **esp-dsp issue #98** ([link](https://github.com/espressif/esp-dsp/issues/98)): Added
+  `dsps_fft4r_fc32_aes3_.S` (radix-4 butterfly) but did NOT add `dsps_cplx2real_fc32_aes3`.
+  Status: Done/Merged.
+- **No open issues or PRs** exist for S3 vectorization of cplx2real as of Feb 2026.
+- **`dsps_fft4r_platform.h` (upstream master)**: Defines `dsps_fft4r_fc32_aes3_enabled` for
+  S3 but has NO `dsps_cplx2real_fc32_aes3_enabled` define.
+- **`dsps_fft4r.h` (upstream master)**: The dispatch for `dsps_cplx2real_fc32` only checks
+  `dsps_cplx2real_fc32_ae32_enabled`, falling back to ANSI. No aes3 path exists.
+- The ESP32-P4 (RISC-V) has its own `_arp4` variants for fft4r but also lacks a cplx2real
+  optimized variant, suggesting Espressif considers cplx2real low priority.
+
+### Effort: Medium (as an upstream contribution)
+
+Writing `dsps_cplx2real_fc32_aes3_.S` would require:
+1. Translating the ae32 inline assembly to standalone `.S` format using `EE.LDF.64.IP` /
+   `EE.STF.64.IP` for paired loads/stores
+2. Investigating `EE.MULA.F32.LD` fusion for the twiddle multiply section
+3. Adding the `dsps_cplx2real_fc32_aes3_enabled` define to `dsps_fft4r_platform.h`
+4. Declaring `dsps_cplx2real_fc32_aes3_()` in `dsps_fft4r.h` and updating the dispatch chain
+5. Testing against ANSI reference for correctness (existing test suite covers this)
+
+The fft4r_aes3 assembly file (`dsps_fft4r_fc32_aes3_.S`) on upstream master serves as a
+direct template -- it uses the same instruction patterns needed for cplx2real.
+
+This would be best contributed upstream to esp-dsp rather than maintained as a local patch.

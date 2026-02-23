@@ -134,22 +134,18 @@ void DSP::step_fft(FFTWindowStateESP32* fft)
     fft->_rfft_data[N] = fft->_freq_bins[1];  // Nyquist real
     fft->_rfft_data[N + 1] = 0;               // Nyquist imag = 0
 
-    // compute magnitude squared into _freq_bins, overwriting the complex data
-    // save bins whose complex data would be overwritten before being read
-    const float dc = fft->_freq_bins[0];
-    const float nyquist = fft->_freq_bins[1];
-    const float bin1_re = fft->_freq_bins[2];
-    const float bin1_im = fft->_freq_bins[3];
-
-    // bins N/2-1 down to 2 (output index i < input index i*2, so safe)
-    for (uint16_t i = fft->_bin_count - 1; i >= 2; i--) {
-        const float re = fft->_freq_bins[i * 2];
-        const float im = fft->_freq_bins[i * 2 + 1];
+    // compute magnitude squared: read from _rfft_data, write to _freq_bins
+    // (matches ChibiOS which reads from _rfft_data and writes to _freq_bins)
+    // Must NOT compute in-place in _freq_bins because output[i] overwrites
+    // input[2*i] that later iterations need (e.g. i=63 writes [63], corrupting
+    // the input for i=31 which reads [62,63]).
+    fft->_freq_bins[0] = sq(fft->_rfft_data[0]);               // DC
+    fft->_freq_bins[fft->_bin_count] = sq(fft->_rfft_data[1]); // Nyquist
+    for (uint16_t i = 1; i < fft->_bin_count; i++) {
+        const float re = fft->_rfft_data[i * 2];
+        const float im = fft->_rfft_data[i * 2 + 1];
         fft->_freq_bins[i] = re * re + im * im;
     }
-    fft->_freq_bins[1] = bin1_re * bin1_re + bin1_im * bin1_im;
-    fft->_freq_bins[0] = sq(dc);
-    fft->_freq_bins[fft->_bin_count] = sq(nyquist);
 }
 
 // step 3: process magnitudes and find peaks (delegates to base class)
