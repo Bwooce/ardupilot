@@ -5600,8 +5600,7 @@ class TestSuite(abc.ABC):
         # "DroneCAN Node" STATUSTEXT is emitted. Instead, detect the
         # reconnection via the GPS driver re-detecting the periph node
         # (GPS1_TYPE=9 is set for this test).
-        import re
-        text = self.wait_text("GPS.*detected.*DroneCAN\\d+-(%d)" % node_id,
+        self.wait_text("GPS.*detected.*DroneCAN\\d+-(%d)" % node_id,
                               regex=True, check_context=True, timeout=60)
         self.context_stop_collecting('STATUSTEXT')
         self.progress("Periph node %d reconnected after firmware update reboot" % node_id)
