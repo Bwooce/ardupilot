@@ -91,10 +91,6 @@ void AP_RangeFinder_DroneCAN::update()
         return;
     }
 
-    state.distance_m = _distance_m;
-    state.last_reading_ms = _last_reading_ms;
-    new_data = false;
-
     if (_status == RangeFinder::Status::Good) {
         // copy over states
         update_status();
@@ -103,6 +99,9 @@ void AP_RangeFinder_DroneCAN::update()
         set_status(_status);
     }
 
+    state.distance_m = _distance_m;
+    state.last_reading_ms = _last_reading_ms;
+    new_data = false;
 }
 
 //RangeFinder message handler

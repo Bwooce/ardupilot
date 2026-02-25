@@ -1017,8 +1017,8 @@ bool Compass::register_compass(int32_t dev_id, uint8_t& instance)
 
 #if COMPASS_MAX_UNREG_DEV
     // Set extra dev id
-    if (_unreg_compass_count >= ARRAY_SIZE(extra_dev_id)) {
-        return false;
+    if (_unreg_compass_count >= COMPASS_MAX_UNREG_DEV) {
+        AP_HAL::panic("Too many compass instances");
     }
 
     for (uint8_t i=0; i<COMPASS_MAX_UNREG_DEV; i++) {
@@ -1034,7 +1034,9 @@ bool Compass::register_compass(int32_t dev_id, uint8_t& instance)
             return false;
         }
     }
-#endif  // COMPASS_MAX_UNREG_DEV
+#else
+    AP_HAL::panic("Too many compass instances");
+#endif
 
     return false;
 }
