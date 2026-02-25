@@ -561,9 +561,6 @@ protected:
     void update_dynamic_notch_at_specified_rate();
 #endif // AP_INERTIALSENSOR_HARMONICNOTCH_ENABLED
 
-    // Bitmask of modes to disable from gcs
-    AP_Int32 flight_mode_GCS_block;
-
 private:
 
 #if AP_SCHEDULER_ENABLED
@@ -610,6 +607,8 @@ private:
     AP_Filters filters;
 #endif
 
+    // Bitmask of modes to disable from gcs
+    AP_Int32 flight_mode_GCS_block;
 };
 
 namespace AP {

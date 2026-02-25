@@ -3730,7 +3730,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
 
         self.set_analog_rangefinder_parameters()
         self.set_parameters({
-            "WP_RFND_USE": 1,
+            "WPNAV_RFND_USE": 1,
             "TERRAIN_ENABLE": 1,
         })
         self.reboot_sitl()
@@ -3742,7 +3742,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.progress("# Vehicle armed with terrain db disabled")
 
         # make sure we can't arm with terrain db enabled and no rangefinder in us
-        self.set_parameter("WP_RFND_USE", 0)
+        self.set_parameter("WPNAV_RFND_USE", 0)
         self.assert_prearm_failure("terrain disabled")
 
         self.context_pop()
@@ -3764,17 +3764,6 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
 
     def set_origin(self, loc, timeout=60):
         '''set the GPS global origin to loc'''
-        self.progress("Setting origin")
-        if isinstance(loc, mavutil.mavlink.MAVLink_global_position_int_message):
-            lat_1e7 = loc.lat
-            lng_1e7 = loc.lon
-            alt_mm = loc.alt
-        else:
-            # assume a mavutil.Location
-            lat_1e7 = int(loc.lat * 1e7)
-            lng_1e7 = int(loc.lng * 1e7)
-            alt_mm = int(loc.alt * 1e3)
-
         tstart = self.get_sim_time()
         while True:
             if self.get_sim_time_cached() - tstart > timeout:
@@ -3782,9 +3771,9 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             target_system = 1
             self.mav.mav.set_gps_global_origin_send(
                 target_system,
-                lat_1e7,
-                lng_1e7,
-                alt_mm
+                int(loc.lat * 1e7),
+                int(loc.lng * 1e7),
+                int(loc.alt * 1e3)
             )
             self.delay_sim_time(2)
             gpi = self.assert_receive_message('GLOBAL_POSITION_INT')
@@ -4387,7 +4376,20 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         # without a GPS or some sort of external prompting, AP
         # doesn't send system_time messages.  So prompt it:
         self.mav.mav.system_time_send(int(time.time() * 1000000), 0)
-        self.set_origin(old_pos)
+        self.progress("Waiting for non-zero-lat")
+        tstart = self.get_sim_time()
+        while True:
+            if self.get_sim_time_cached() - tstart > 60:
+                raise AutoTestTimeoutException("Did not get non-zero lat")
+            self.mav.mav.set_gps_global_origin_send(1,
+                                                    old_pos.lat,
+                                                    old_pos.lon,
+                                                    old_pos.alt)
+            self.delay_sim_time(2)
+            gpi = self.assert_receive_message('GLOBAL_POSITION_INT')
+            self.progress("gpi=%s" % str(gpi))
+            if gpi.lat != 0:
+                break
 
         self.takeoff()
         self.set_rc(1, 1600)
@@ -4447,7 +4449,21 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         # without a GPS or some sort of external prompting, AP
         # doesn't send system_time messages.  So prompt it:
         self.mav.mav.system_time_send(int(time.time() * 1000000), 0)
-        self.set_origin(old_pos)
+        self.progress("Waiting for non-zero-lat")
+        tstart = self.get_sim_time()
+        while True:
+            self.mav.mav.set_gps_global_origin_send(1,
+                                                    old_pos.lat,
+                                                    old_pos.lon,
+                                                    old_pos.alt)
+            self.delay_sim_time(2)
+            gpi = self.assert_receive_message('GLOBAL_POSITION_INT')
+            self.progress("gpi=%s" % str(gpi))
+            if gpi.lat != 0:
+                break
+
+            if self.get_sim_time_cached() - tstart > 60:
+                raise AutoTestTimeoutException("Did not get non-zero lat")
 
         self.takeoff(alt_min=5, mode='ALT_HOLD', require_absolute=False, takeoff_throttle=1800)
         self.change_mode('LAND')
@@ -4616,9 +4632,9 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         tolerance = 0.5
         self.load_mission("copter_rtl_speed.txt")
         self.set_parameters({
-            'WP_ACC': wpnav_accel_mss,
+            'WPNAV_ACCEL': wpnav_accel_mss * 100,
             'RTL_SPEED_MS': rtl_speed_ms,
-            'WP_SPD': wpnav_speed_ms,
+            'WPNAV_SPEED': wpnav_speed_ms * 100,
         })
         self.change_mode('LOITER')
         self.wait_ready_to_arm()
@@ -4757,8 +4773,8 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.set_parameter("TERRAIN_ENABLE", 0)
         self.fly_mission("wp.txt")
 
-    def WP_SPEED(self):
-        '''ensure resetting WP_SPD during a mission works'''
+    def WPNAV_SPEED(self):
+        '''ensure resetting WPNAV_SPEED during a mission works'''
 
         loc = self.poll_home_position()
         alt = 20
@@ -4776,18 +4792,18 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
 
         self.upload_simple_relhome_mission(items)
 
-        start_speed_ms = self.get_parameter('WP_SPD')
+        start_speed_ms = self.get_parameter('WPNAV_SPEED') / 100.0
 
         self.takeoff(20)
         self.change_mode('AUTO')
         self.wait_groundspeed(start_speed_ms-1, start_speed_ms+1, minimum_duration=10)
 
         for speed_ms in 7, 8, 7, 8, 9, 10, 11, 7:
-            self.set_parameter('WP_SPD', speed_ms)
+            self.set_parameter('WPNAV_SPEED', speed_ms*100)
             self.wait_groundspeed(speed_ms-1, speed_ms+1, minimum_duration=10)
         self.do_RTL()
 
-    def WP_SPEED_UP(self):
+    def WPNAV_SPEED_UP(self):
         '''Change speed (up) during mission'''
 
         items = []
@@ -4799,7 +4815,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
 
         self.upload_simple_relhome_mission(items)
 
-        start_speed_ms = self.get_parameter('WP_SPD_UP')
+        start_speed_ms = self.get_parameter('WPNAV_SPEED_UP') / 100.0
 
         minimum_duration = 5
 
@@ -4808,11 +4824,11 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.wait_climbrate(start_speed_ms-1, start_speed_ms+1, minimum_duration=minimum_duration)
 
         for speed_ms in 7, 8, 7, 8, 6, 2:
-            self.set_parameter('WP_SPD_UP', speed_ms)
+            self.set_parameter('WPNAV_SPEED_UP', speed_ms*100)
             self.wait_climbrate(speed_ms-1, speed_ms+1, minimum_duration=minimum_duration)
         self.do_RTL(timeout=240)
 
-    def WP_SPEED_DN(self):
+    def WPNAV_SPEED_DN(self):
         '''Change speed (down) during mission'''
 
         items = []
@@ -4829,11 +4845,11 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.takeoff(500, timeout=70)
         self.change_mode('AUTO')
 
-        start_speed_ms = self.get_parameter('WP_SPD_DN')
+        start_speed_ms = self.get_parameter('WPNAV_SPEED_DN') / 100.0
         self.wait_climbrate(-start_speed_ms-1, -start_speed_ms+1, minimum_duration=minimum_duration)
 
         for speed_ms in 7, 8, 7, 8, 6, 2:
-            self.set_parameter('WP_SPD_DN', speed_ms)
+            self.set_parameter('WPNAV_SPEED_DN', speed_ms*100)
             self.wait_climbrate(-speed_ms-1, -speed_ms+1, minimum_duration=minimum_duration)
         self.do_RTL()
 
@@ -4880,7 +4896,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             bearing = self.get_bearing(here, lower_surface_pos)
 
             self.change_mode("GUIDED")
-            self.guided_achieve_heading(bearing, direction=1, accuracy=1)
+            self.guided_achieve_heading(bearing)
             self.change_mode("LOITER")
             self.delay_sim_time(2)
             m = self.assert_receive_message('GLOBAL_POSITION_INT')
@@ -5179,9 +5195,9 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.wait_disarmed()
 
         # test the defaults.  By default LAND_SPD_HIGH_MS is 0 so
-        # WP_SPD_DN is used
+        # WPNAV_SPEED_DN is used
         check_landing_speeds(
-            self.get_parameter("WP_SPD_DN"),
+            self.get_parameter("WPNAV_SPEED_DN") / 100,  # cm/s -> m/s
             self.get_parameter("LAND_SPD_MS"),
             self.get_parameter("LAND_ALT_LOW_M")
         )
@@ -6060,8 +6076,8 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.user_takeoff(alt_min=10)
 
         self.start_subtest("yaw through absolute angles using MAV_CMD_CONDITION_YAW")
-        self.guided_achieve_heading(45, timeout=60)
-        self.guided_achieve_heading(135, timeout=60)
+        self.guided_achieve_heading(45)
+        self.guided_achieve_heading(135)
 
         self.start_subtest("move the vehicle using set_position_target_global_int")
         # the following numbers are 5-degree-latitude and 5-degrees
@@ -6598,7 +6614,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.set_mount_mode(mavutil.mavlink.MAV_MOUNT_MODE_NEUTRAL)
 
         for heading in 30, 45, 150:
-            self.guided_achieve_heading(heading, direction=1, accuracy=1)
+            self.guided_achieve_heading(heading)
 
             r, p , y, yaw_is_absolute = self.get_mount_roll_pitch_yaw_deg()
 
@@ -6711,7 +6727,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         takeoff_loc = self.mav.location()
 
         self.takeoff(20, mode='GUIDED')
-        self.guided_achieve_heading(315, direction=1, accuracy=1)
+        self.guided_achieve_heading(315)
 
         self.run_cmd(
             mavutil.mavlink.MAV_CMD_DO_MOUNT_CONTROL,
@@ -6824,7 +6840,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
 
         for mount_yaw in [-45, 0, 45]:
             heading = 330
-            self.guided_achieve_heading(heading, minimum_duration=1, direction=1)
+            self.guided_achieve_heading(heading)
             self.assert_heading(heading)
 
             self.neutralise_gimbal()
@@ -6930,7 +6946,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.progress("Waiting for check_servo_map to do its job")
         self.delay_sim_time(5)
         self.progress("Pointing North")
-        self.guided_achieve_heading(0, direction=1, accuracy=1)
+        self.guided_achieve_heading(0)
         self.delay_sim_time(5)
         start = self.mav.location()
         (roi_lat, roi_lon) = mavextra.gps_offset(start.lat,
@@ -10662,7 +10678,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.set_parameters({
             "SERIAL4_PROTOCOL": 9,
             "RNGFND1_TYPE": rngfnd_type,
-            "WP_SPD_UP": 10,  # m/s
+            "WPNAV_SPEED_UP": 1000,  # cm/s
         })
         self.customise_SITL_commandline([
             f"--serial4=sim:{simname}",
@@ -10750,7 +10766,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.set_parameters({
             "SERIAL4_PROTOCOL": 9,
             "RNGFND1_TYPE": 19,  # BenewakeTF02
-            "WP_SPD_UP": 10,  # m/s
+            "WPNAV_SPEED_UP": 1000,  # cm/s
         })
         self.customise_SITL_commandline([
             "--serial4=sim:benewake_tf02",
@@ -10835,7 +10851,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         # >327m range change this to use that driver
         self.set_parameters({
             "RNGFND1_TYPE": 100,  # SITL
-            "WP_SPD_UP": 10,    # m/s
+            "WPNAV_SPEED_UP": 1000,  # cm/s
             "RNGFND1_MAX": 7000,  # metres
         })
         self.reboot_sitl()
@@ -14267,7 +14283,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             'WVANE_ENABLE': 1,
         })
         self.takeoff(20, mode='GUIDED')
-        self.guided_achieve_heading(0, direction=1, accuracy=1)
+        self.guided_achieve_heading(0)
 
         self.set_parameter("GUID_OPTIONS", 128)
         self.wait_heading(90, timeout=60, minimum_duration=10)
@@ -14783,7 +14799,7 @@ RTL_ALT_M 111
             if original_heading - target_heading < 90:
                 raise NotAchievedException("Bad initial heading")
             self.takeoff(10, mode='GUIDED')
-            self.guided_achieve_heading(target_heading, direction=1, accuracy=1)
+            self.guided_achieve_heading(target_heading)
             self.change_mode('RTL')
             self.wait_heading(original_heading)
             self.wait_disarmed()
@@ -14922,7 +14938,7 @@ RTL_ALT_M 111
         '''calibrate AHRS trim using RC input'''
         self.progress("Making earth frame same as body frame")  # because I'm lazy
         self.takeoff(5, mode='GUIDED')
-        self.guided_achieve_heading(0, direction=1, accuracy=1)
+        self.guided_achieve_heading(0)
         self.do_land()
 
         self.set_parameters({
@@ -15020,8 +15036,8 @@ RTL_ALT_M 111
         self.wait_current_waypoint(2)
 
         self.progress("Waiting for vehicle to get up to speed")
-        wp_speed = self.get_parameter('WP_SPD')
-        self.wait_groundspeed(wp_speed-0.1, wp_speed+0.1)
+        wpnav_speed = self.get_parameter('WPNAV_SPEED')
+        self.wait_groundspeed(wpnav_speed/100-0.1, wpnav_speed/100+0.1)
 
         rtl_start_pos = self.get_local_position_NED()
 
@@ -15802,10 +15818,10 @@ return update, 1000
             self.DO_CHANGE_SPEED,
             self.MISSION_START,
             self.AUTO_LAND_TO_BRAKE,
-            self.WP_SPEED,
+            self.WPNAV_SPEED,
             self.RTLStoppingDistanceSpeed,
-            self.WP_SPEED_UP,
-            self.WP_SPEED_DN,
+            self.WPNAV_SPEED_UP,
+            self.WPNAV_SPEED_DN,
             self.DO_WINCH,
             self.SensorErrorFlags,
             self.GPSForYaw,
