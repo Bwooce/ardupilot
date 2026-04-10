@@ -50,15 +50,6 @@ const AP_Param::Info Copter::var_info[] = {
     // @Increment: 0.5
     GSCALAR(throttle_filt,  "PILOT_THR_FILT",     0),
 
-    // @Param: PILOT_TKOFF_ALT
-    // @DisplayName: Pilot takeoff altitude
-    // @Description: Altitude that altitude control modes will climb to when a takeoff is triggered with the throttle stick.
-    // @User: Standard
-    // @Units: cm
-    // @Range: 0.0 1000.0
-    // @Increment: 10
-    GSCALAR(pilot_takeoff_alt_cm,  "PILOT_TKOFF_ALT",  PILOT_TKOFF_ALT_DEFAULT),
-
     // @Param: PILOT_THR_BHV
     // @DisplayName: Throttle stick behavior
     // @Description: Bitmask containing various throttle stick options. TX with sprung throttle can set PILOT_THR_BHV to "1" so motor feedback when landed starts from mid-stick instead of bottom of stick.
@@ -96,7 +87,7 @@ const AP_Param::Info Copter::var_info[] = {
 
     // @Param: RTL_ALT_TYPE
     // @DisplayName: RTL mode altitude type
-    // @Description: RTL altitude type.  Set to 1 for Terrain following during RTL and then set WPNAV_RFND_USE=1 to use rangefinder or WPNAV_RFND_USE=0 to use Terrain database
+    // @Description: RTL altitude type.  Set to 1 for Terrain following during RTL and then set WP_RFND_USE=1 to use rangefinder or WP_RFND_USE=0 to use Terrain database
     // @Values: 0:Relative to Home, 1:Terrain
     // @User: Standard
     GSCALAR(rtl_alt_type, "RTL_ALT_TYPE", 0),
@@ -129,24 +120,6 @@ const AP_Param::Info Copter::var_info[] = {
     // @Values: 0:Never change yaw, 1:Face next waypoint, 2:Face next waypoint except RTL, 3:Face along GPS course
     // @User: Standard
     GSCALAR(wp_yaw_behavior,  "WP_YAW_BEHAVIOR",    WP_YAW_BEHAVIOR_DEFAULT),
-    
-    // @Param: PILOT_SPEED_UP
-    // @DisplayName: Pilot maximum vertical speed ascending
-    // @Description: The maximum vertical ascending velocity the pilot may request in cm/s
-    // @Units: cm/s
-    // @Range: 50 500
-    // @Increment: 10
-    // @User: Standard
-    GSCALAR(pilot_speed_up_cms,     "PILOT_SPEED_UP",   PILOT_SPEED_UP_DEFAULT),
-
-    // @Param: PILOT_ACCEL_Z
-    // @DisplayName: Pilot vertical acceleration
-    // @Description: The vertical acceleration used when pilot is controlling the altitude
-    // @Units: cm/s/s
-    // @Range: 50 500
-    // @Increment: 10
-    // @User: Standard
-    GSCALAR(pilot_accel_d_cmss,  "PILOT_ACCEL_Z",    PILOT_ACCEL_Z_DEFAULT),
 
     // @Param: FS_THR_ENABLE
     // @DisplayName: Throttle Failsafe Enable
@@ -250,7 +223,7 @@ const AP_Param::Info Copter::var_info[] = {
     // @DisplayName: Tuning Parameter
     // @Description: Selects parameter (normally a PID gain) that is being tuned with an RC transmitter's knob. The RC input channel used is assigned by setting RCx_OPTION to 219.
     // @User: Standard
-    // @Values: 0:None,1:Stab Roll/Pitch kP,4:Rate Roll/Pitch kP,5:Rate Roll/Pitch kI,21:Rate Roll/Pitch kD,3:Stab Yaw kP,6:Rate Yaw kP,26:Rate Yaw kD,56:Rate Yaw Filter,55:Motor Yaw Headroom,14:AltHold kP,7:Throttle Rate kP,34:Throttle Accel kP,35:Throttle Accel kI,36:Throttle Accel kD,12:Loiter Pos kP,22:Velocity XY kP,28:Velocity XY kI,10:WP Speed,25:Acro Roll/Pitch deg/s,40:Acro Yaw deg/s,45:RC Feel,13:Heli Ext Gyro,38:Declination,39:Circle Rate,46:Rate Pitch kP,47:Rate Pitch kI,48:Rate Pitch kD,49:Rate Roll kP,50:Rate Roll kI,51:Rate Roll kD,52:Rate Pitch FF,53:Rate Roll FF,54:Rate Yaw FF,58:SysID Magnitude,59:PSC Angle Max,60:Loiter Speed
+    // @Values: 0:None,1:Stab Roll/Pitch kP,4:Rate Roll/Pitch kP,5:Rate Roll/Pitch kI,21:Rate Roll/Pitch kD,3:Stab Yaw kP,6:Rate Yaw kP,26:Rate Yaw kD,56:Rate Yaw Filter,55:Motor Yaw Headroom,14:AltHold kP,7:Throttle Rate kP,34:Throttle Accel kP,35:Throttle Accel kI,36:Throttle Accel kD,12:Loiter Pos kP,22:Velocity XY kP,28:Velocity XY kI,10:WP Speed (4.6 and earlier),25:Acro Roll/Pitch deg/s,40:Acro Yaw deg/s,45:RC Feel,38:Declination,39:Circle Rate,46:Rate Pitch kP,47:Rate Pitch kI,48:Rate Pitch kD,49:Rate Roll kP,50:Rate Roll kI,51:Rate Roll kD,52:Rate Pitch FF,53:Rate Roll FF,54:Rate Yaw FF,58:SysID Magnitude,59:PSC Angle Max,60:Loiter Speed,61:WP Speed (m/s)
     GSCALAR(rc_tuning_param, "TUNE",                   0),
 #endif  // AP_RC_TRANSMITTER_TUNING_ENABLED
 
@@ -391,9 +364,9 @@ const AP_Param::Info Copter::var_info[] = {
     // @Path: ../libraries/AP_InertialSensor/AP_InertialSensor.cpp
     GOBJECT(ins,            "INS", AP_InertialSensor),
 
-    // @Group: WPNAV_
+    // @Group: WP_
     // @Path: ../libraries/AC_WPNav/AC_WPNav.cpp
-    GOBJECTPTR(wp_nav, "WPNAV_",       AC_WPNav),
+    GOBJECTPTR(wp_nav, "WP_", AC_WPNav),
 
     // @Group: LOIT_
     // @Path: ../libraries/AC_WPNav/AC_Loiter.cpp
@@ -748,14 +721,7 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     AP_SUBGROUPINFO(winch, "WINCH", 23, ParametersG2, AP_Winch),
 #endif
 
-    // @Param: PILOT_SPEED_DN
-    // @DisplayName: Pilot maximum vertical speed descending
-    // @Description: The maximum vertical descending velocity the pilot may request in cm/s.  If 0 PILOT_SPEED_UP value is used.
-    // @Units: cm/s
-    // @Range: 0 500
-    // @Increment: 10
-    // @User: Standard
-    AP_GROUPINFO("PILOT_SPEED_DN", 24, ParametersG2, pilot_speed_dn_cms, 0),
+    // 24 was PILOT_SPD_DN
 
     // 25 was LAND_ALT_LOW
 
@@ -1167,6 +1133,42 @@ const AP_Param::GroupInfo ParametersG2::var_info2[] = {
     AP_SUBGROUPPTR(mode_poshold_ptr, "PHLD_", 16, ParametersG2, ModePosHold),
 #endif
 
+    // @Param: PILOT_ACC_Z
+    // @DisplayName: Pilot vertical acceleration
+    // @Description: The vertical acceleration used when pilot is controlling the altitude
+    // @Units: m/s/s
+    // @Range: 0.5 5
+    // @Increment: 0.1
+    // @User: Standard
+    AP_GROUPINFO("PILOT_ACC_Z", 17, ParametersG2, pilot_accel_d_mss, PILOT_ACC_Z_DEFAULT),
+
+    // @Param: PILOT_SPD_UP
+    // @DisplayName: Pilot maximum vertical speed ascending
+    // @Description: The maximum vertical ascending velocity the pilot may request in m/s
+    // @Units: m/s
+    // @Range: 0.5 5
+    // @Increment: 0.1
+    // @User: Standard
+    AP_GROUPINFO("PILOT_SPD_UP", 18, ParametersG2, pilot_speed_up_ms, PILOT_SPD_UP_DEFAULT),
+
+    // @Param: PILOT_SPD_DN
+    // @DisplayName: Pilot maximum vertical speed descending
+    // @Description: The maximum vertical descending velocity the pilot may request in m/s.  If 0 PILOT_SPD_UP value is used.
+    // @Units: m/s
+    // @Range: 0 5
+    // @Increment: 0.1
+    // @User: Standard
+    AP_GROUPINFO("PILOT_SPD_DN", 19, ParametersG2, pilot_speed_dn_ms, 0),
+
+    // @Param: PILOT_TKO_ALT_M
+    // @DisplayName: Pilot takeoff altitude
+    // @Description: Altitude that altitude control modes will climb to when a takeoff is triggered with the throttle stick.
+    // @User: Standard
+    // @Units: m
+    // @Range: 0.0 10.0
+    // @Increment: 0.1
+    AP_GROUPINFO("PILOT_TKO_ALT_M", 20, ParametersG2, pilot_takeoff_alt_m, PILOT_TKO_ALT_M_DEFAULT),
+
     // ID 62 is reserved for the AP_SUBGROUPEXTENSION
 
     AP_GROUPEND
@@ -1312,6 +1314,23 @@ void Copter::load_parameters(void)
     // convert PosHold parameters
     copter.mode_poshold.convert_params();
 #endif
+
+#if AP_AVOIDANCE_ENABLED
+    // convert AC_Avoid parameters
+    copter.avoid.convert_params();
+#endif
+
+    // convert PILOT vertical speed and acceleration parameters
+    // PARAMETER_CONVERSION - Added: Feb 2026 for ardupilot-4.7
+    {
+        static const AP_Param::ConversionInfo pilot_conversion_info[] = {
+            { Parameters::k_param_pilot_speed_up_cms, 0, AP_PARAM_INT16, "PILOT_SPD_UP" },      // PILOT_SPEED_UP moved to PILOT_SPD_UP
+            { Parameters::k_param_pilot_accel_d_cmss, 0, AP_PARAM_INT16, "PILOT_ACC_Z" },       // PILOT_ACCEL_Z moved to PILOT_ACC_Z
+            { Parameters::k_param_pilot_takeoff_alt_cm, 0, AP_PARAM_FLOAT, "PILOT_TKO_ALT_M" }, // PILOT_TKOFF_ALT moved to PILOT_TKO_ALT_M
+            { Parameters::k_param_g2, 24, AP_PARAM_INT16, "PILOT_SPD_DN" },                     // PILOT_SPEED_DN moved to PILOT_SPD_DN
+        };
+        AP_Param::convert_old_parameters_scaled(pilot_conversion_info, ARRAY_SIZE(pilot_conversion_info), 0.01, 0);
+    }
 
     // setup AP_Param frame type flags
     AP_Param::set_frame_type_flags(AP_PARAM_FRAME_COPTER);

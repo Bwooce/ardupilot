@@ -64,6 +64,7 @@
 #include "AP_RangeFinder_Ainstein_LR_D1.h"
 #include "AP_RangeFinder_RDS02UF.h"
 #include "AP_RangeFinder_LightWare_GRF.h"
+#include "AP_RangeFinder_DTS6012M.h"
 
 #include <AP_BoardConfig/AP_BoardConfig.h>
 #include <AP_Logger/AP_Logger.h>
@@ -601,11 +602,16 @@ __INITFUNC__ void RangeFinder::detect_instance(uint8_t instance, uint8_t& serial
             addr = params[instance].address;
         }
         FOREACH_I2C(i) {
+            auto *device_ptr = hal.i2c_mgr->get_device_ptr(i, addr);
+            if (device_ptr == nullptr) {
+                continue;
+            }
             if (_add_backend(AP_RangeFinder_TOFSenseF_I2C::detect(state[instance], params[instance],
-                                                                  hal.i2c_mgr->get_device(i, addr)),
+                                                                  *device_ptr),
                              instance)) {
                 break;
             }
+            delete device_ptr;
         }
         break;
     }
@@ -627,6 +633,12 @@ __INITFUNC__ void RangeFinder::detect_instance(uint8_t instance, uint8_t& serial
         serial_create_fn = AP_RangeFinder_LightWareGRF::create;
         break;
 #endif // AP_RANGEFINDER_LIGHTWARE_GRF_ENABLED
+
+#if AP_RANGEFINDER_DTS6012M_ENABLED
+    case Type::DTS6012M:
+        serial_create_fn = AP_RangeFinder_DTS6012M::create;
+        break;
+#endif // AP_RANGEFINDER_DTS6012M_ENABLED
 
     case Type::NONE:
         break;

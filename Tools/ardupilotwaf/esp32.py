@@ -23,7 +23,7 @@ import subprocess
 import hal_common
 
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../libraries/AP_HAL_ESP32/hwdef/scripts'))
-import esp32_hwdef  # noqa:501
+import esp32_hwdef
 
 @feature('esp32_ap_library', 'esp32_ap_program')
 @before_method('process_source')

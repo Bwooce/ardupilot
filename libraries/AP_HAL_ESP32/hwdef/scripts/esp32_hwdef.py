@@ -4,9 +4,11 @@ setup board.h for ESP32
 AP_FLAKE8_CLEAN
 '''
 
+import argparse
 import os
-import sys
 import re
+import shlex
+import sys
 
 # Module level import not at top of file fix: move sys.path adjustment
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)),

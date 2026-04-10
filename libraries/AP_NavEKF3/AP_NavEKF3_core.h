@@ -260,6 +260,13 @@ public:
    // return the innovation consistency test ratios for the velocity, position, magnetometer and true airspeed measurements
     bool getVariances(float &velVar, float &posVar, float &hgtVar, Vector3f &magVar, float &tasVar, Vector2f &offset) const;
 
+    // return 1-sigma position and velocity uncertainty derived from the EKF state error covariance matrix P
+    // pos_horiz_m: 2D RMS horizontal position uncertainty (m)
+    // pos_vert_m:  1-sigma vertical position uncertainty (m)
+    // vel_m_s:     1-sigma worst-case NED velocity uncertainty (m/s)
+    // returns false if EKF is not yet initialised
+    bool getPosVelUncertainty(float &pos_horiz_m, float &pos_vert_m, float &vel_m_s) const;
+
     // get a particular source's velocity innovations
     // returns true on success and results are placed in innovations and variances arguments
     bool getVelInnovationsAndVariancesForSource(AP_NavEKF_Source::SourceXY source, Vector3f &innovations, Vector3f &variances) const WARN_IF_UNUSED;
@@ -430,9 +437,10 @@ public:
         WHEN_MANOEUVRING = 1,
         NEVER = 2,
         AFTER_FIRST_CLIMB = 3,
-        ALWAYS = 4
+        ALWAYS = 4,
         // 5 was EXTERNAL_YAW (do not use)
         // 6 was EXTERNAL_YAW_FALLBACK (do not use)
+        GROUND_AND_INFLIGHT = 7,
     };
 
     // magnetometer fusion selections
@@ -471,6 +479,12 @@ public:
 
     // returns true when the state estimates are significantly degraded by vibration
     bool isVibrationAffected() const { return badIMUdata; }
+
+    // return true if we are using vertical velocity measurements (GPS or external nav)
+    // This indicates the VD estimate is reliable enough for bias learning
+    bool usingVertVel(void) const {
+        return useGpsVertVel || useExtNavVel;
+    }
 
     // get a yaw estimator instance
     const EKFGSF_yaw *get_yawEstimator(void) const { return yawEstimator; }
@@ -1108,6 +1122,7 @@ private:
     bool inFlight;                  // true when the vehicle is definitely flying
     bool prevInFlight;              // value inFlight from previous frame - used to detect transition
     bool manoeuvring;               // boolean true when the flight vehicle is performing horizontal changes in velocity
+    bool fusingStationaryZeroVel;   // true when fusing synthetic zero velocity while stationary on ground
     Vector6 innovVelPos;            // innovation output for a group of measurements
     Vector6 varInnovVelPos;         // innovation variance output for a group of measurements
     Vector6 velPosObs;              // observations for combined velocity and positon group of measurements (3x1 m , 3x1 m/s)

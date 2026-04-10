@@ -144,7 +144,7 @@ private:
 
     // flight modes convenience array
     AP_Int8 *modes;
-    const uint8_t num_modes = 6;
+    static constexpr uint8_t num_modes = 6;
 
     // Arming/Disarming management class
     AP_Arming_Rover arming;
@@ -395,6 +395,9 @@ private:
     bool current_mode_requires_mission() const override {
         return control_mode == &mode_auto;
     }
+
+    // Return mask of enabled modes, order does not matter, its just for tracking changes
+    uint32_t get_available_mode_enabled_mask() const override;
 
     void startup_INS(void);
     void notify_mode(const Mode *new_mode);

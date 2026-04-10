@@ -269,6 +269,7 @@ void NavEKF3_core::InitialiseVariables()
     inFlight = false;
     prevInFlight = false;
     manoeuvring = false;
+    fusingStationaryZeroVel = false;
     inhibitWindStates = true;
     windStateIsObservable = false;
     treatWindStatesAsTruth = false;
@@ -471,7 +472,7 @@ bool NavEKF3_core::InitialiseFilterBootstrap(void)
     update_sensor_selection();
 
     // If we are a plane and don't have GPS lock then don't initialise
-    if (assume_zero_sideslip() && dal.gps().status(preferred_gps) < AP_DAL_GPS::GPS_OK_FIX_3D) {
+    if (assume_zero_sideslip() && dal.gps().status(preferred_gps) < AP_GPS_FixType::FIX_3D) {
         dal.snprintf(prearm_fail_string,
                      sizeof(prearm_fail_string),
                      "EKF3 init failure: No GPS lock");
@@ -1165,8 +1166,14 @@ void NavEKF3_core::CovariancePrediction(Vector3F *rotVarVecPtr)
         for (uint8_t stateIndex = 13; stateIndex <= 15; stateIndex++) {
             const uint8_t index = stateIndex - 13;
 
-            // Don't attempt learning of IMU delta velocty bias if on ground and not aligned with the gravity vector
-            const bool is_bias_observable = (fabsF(prevTnb[index][2]) > 0.8f) || !onGround;
+            // Don't attempt learning of IMU delta velocity bias if on ground.
+            // In flight: all axes are observable from velocity/position aiding.
+            // On ground and stationary: only the gravity-aligned axis (Z for a level
+            // vehicle) is observable. XY biases remain unobservable until the vehicle
+            // accelerates horizontally in flight.
+            // On ground and moving (e.g. carried or on a boat): inhibit all axes
+            // to prevent learning biases from external motion accelerations.
+            const bool is_bias_observable = (fabsF(prevTnb[index][2]) > 0.8f && onGroundNotMoving) || !onGround;
 
             if (!is_bias_observable && !dvelBiasAxisInhibit[index]) {
                 // store variances to be reinstated wben learning can commence later

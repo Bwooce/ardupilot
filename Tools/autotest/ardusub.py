@@ -9,11 +9,14 @@ AP_FLAKE8_CLEAN
 
 import os
 
-from pymavlink import mavutil, mavextra
+from math import degrees
+
+from pymavlink import mavextra
+from pymavlink import mavutil
 
 import vehicle_test_suite
+
 from vehicle_test_suite import NotAchievedException
-from math import degrees
 
 # get location of scripts
 testdir = os.path.dirname(os.path.realpath(__file__))
@@ -778,9 +781,8 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
         self.disarm_vehicle()
 
     def GPSForYaw(self):
-        '''Consume heading of NMEA GPS and propagate to ATTITUDE'''
+        '''Test consumption of heading from NMEA GPS and its propagation to ATTITUDE'''
 
-        # load parameters with gps for yaw and 10 degrees offset
         self.load_default_params_file("sub-gps-for-yaw-nmea.parm")
         self.reboot_sitl()
         # wait for the vehicle to be ready
@@ -802,6 +804,44 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
             raise NotAchievedException(
                 "Expected to get yaw consumed and at ATTITUDE (want %f got %f)" % (expected_yaw_deg, achieved_yaw_deg)
             ) from e
+
+    def VisoForYaw(self):
+        ''' Test propagation of yaw from VisualOdom to EKF'''
+        yaw_offset_deg = 50
+        # Configure SITL to use Vicon
+        self.customise_SITL_commandline(["--serial5=sim:vicon:"])
+
+        # Configure EKF to use Vicon for yaw
+        self.set_parameters({
+            "VISO_TYPE": 1, # Vicon
+            "SERIAL5_PROTOCOL": 1,
+            "SIM_VICON_TMASK": 1,  # Send POSITION_ESTIMATE
+            "EK3_SRC1_YAW": 6, # Tell EKF to use Vicon for yaw
+        })
+        self.reboot_sitl()
+
+        self.wait_ready_to_arm()
+        self.arm_vehicle()
+        self.change_mode('STABILIZE')
+        # Look east
+        self.set_rc(Joystick.Yaw, 1600)
+        self.wait_heading(90)
+        self.set_rc(Joystick.Yaw, 1500)
+        self.wait_yaw_speed(0, minimum_duration=1)
+
+        prev_yaw_deg = self.get_heading()
+        # Change to manual to prevent the vehicle from trying to correct yaw
+        self.change_mode('MANUAL')
+        self.set_parameters({
+            'EK3_GYRO_P_NSE': 1.0, # Increased gyro noise makes EKF more sensitive to Vicon yaw
+        })
+        self.set_parameter('SIM_VICON_YAWERR', yaw_offset_deg)
+        self.wait_heading(prev_yaw_deg + yaw_offset_deg, timeout=120)
+        self.set_parameter('SIM_VICON_YAWERR', 0)
+        self.wait_heading(prev_yaw_deg, timeout=120)
+
+        self.disarm_vehicle()
+        self.progress("VisualOdom for Yaw OK")
 
     def _MAV_CMD_CONDITION_YAW(self, run_cmd):
         self.arm_vehicle()
@@ -1276,6 +1316,41 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
         self.disarm_vehicle()
         self.context_pop()
 
+    def UTMGlobalPositionWaypoint(self):
+        '''test UTM_GLOBAL_POSITION waypoint fields in AUTO'''
+        self.upload_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 50, 0, -10),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        # seq 0 = home, seq 1 = WAYPOINT (50m north, 10m depth)
+        wp = self.assert_fetch_mission_item_int(1, 1, 1, mavutil.mavlink.MAV_MISSION_TYPE_MISSION)
+
+        self.wait_ready_to_arm()
+        self.arm_vehicle()
+        self.change_mode('AUTO')
+        self.send_cmd(mavutil.mavlink.MAV_CMD_MISSION_START)
+        self.wait_current_waypoint(1, timeout=30)
+
+        # epsilon=1 allows for 1-unit (0.11m) rounding from AP's internal coordinate conversion
+        m = self.assert_received_message_field_values("UTM_GLOBAL_POSITION", {
+            "next_lat": wp.x,
+            "next_lon": wp.y,
+        }, poll=True, epsilon=1)
+        if not (m.flags & mavutil.mavlink.UTM_DATA_AVAIL_FLAGS_NEXT_WAYPOINT_AVAILABLE):
+            raise NotAchievedException(f"AUTO: NEXT_WAYPOINT_AVAILABLE not set (flags=0x{m.flags:x})")
+        self.disarm_vehicle(force=True)
+
+    def UTMGlobalPosition(self):
+        '''test UTM_GLOBAL_POSITION message sending'''
+        self.wait_ready_to_arm()
+        m = self.assert_received_message_field_values("UTM_GLOBAL_POSITION", {
+            "flight_state": mavutil.mavlink.UTM_FLIGHT_STATE_UNKNOWN,
+        }, poll=True)
+        if all(b == 0 for b in m.uas_id):
+            raise NotAchievedException("UAS ID is all zeros")
+        if m.flags & mavutil.mavlink.UTM_DATA_AVAIL_FLAGS_UAS_ID_AVAILABLE == 0:
+            raise NotAchievedException("UAS_ID_AVAILABLE flag not set")
+
     def tests(self):
         '''return list of all tests'''
         ret = super(AutoTestSub, self).tests()
@@ -1316,6 +1391,9 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
             self.SurfaceSensorless,
             self.GPSForYaw,
             self.WaterDepth,
+            self.VisoForYaw,
+            self.UTMGlobalPosition,
+            self.UTMGlobalPositionWaypoint,
         ])
 
         return ret
